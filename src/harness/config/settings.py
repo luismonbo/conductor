@@ -1,7 +1,7 @@
 """Settings + backend selection.
 
-Backend choice (azure | fake | ollama) and memory choice (in_memory | qdrant)
-are config, not code. Profiles in config/profiles/ override these for
+Backend choice (fake | openai_compatible | azure) and memory choice
+(in_memory | pgvector) are config, not code. Profiles in config/profiles/ override these for
 dev-azure vs edge-pi. This is where the 'swap is a config change, not a
 rewrite' promise is actually cashed in.
 """
@@ -29,8 +29,9 @@ class Settings(BaseSettings):
     azure_api_version: str = "2024-10-21"
     azure_api_key: str = ""            # empty -> managed identity
 
-    # Qdrant
-    qdrant_url: str = "http://localhost:6333"
+    # pgvector long-term memory (Postgres DSN; may equal the checkpointer DSN).
+    # Empty until the pgvector backend is wired in Phase 5.
+    memory_url: str = ""
 
     # Agent
     max_iterations: int = 8

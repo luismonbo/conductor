@@ -49,8 +49,10 @@ def build_llm(settings: Settings, parser: ToolCallParser) -> LLMClient:
 
 
 def build_long_term(settings: Settings) -> LongTermMemory:
-    if settings.memory_backend == "qdrant":
-        raise NotImplementedError("Wire QdrantLongTerm with an embedder here.")
+    if settings.memory_backend == "pgvector":
+        raise NotImplementedError(
+            "Wire PgVectorLongTerm with an embedder here (Phase 5)."
+        )
     return InMemoryLongTerm()
 
 

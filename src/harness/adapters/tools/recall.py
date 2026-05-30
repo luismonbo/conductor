@@ -3,7 +3,7 @@
 This is the bridge between the two memory concepts: short-term history is fed
 to the model automatically every turn, but long-term recall is something the
 agent *chooses* to do via this tool. Wrapping LongTermMemory as a Tool keeps
-the agent loop unaware of Qdrant vs markdown — it just calls 'recall'.
+the agent loop unaware of pgvector vs markdown — it just calls 'recall'.
 """
 from __future__ import annotations
 

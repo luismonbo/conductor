@@ -2,10 +2,11 @@
 
 ShortTermMemory  = per-conversation transcript (backed by the LangGraph
                    checkpointer in the orchestration layer, or a fake in tests).
-LongTermMemory   = cross-conversation recall. First impl is a Qdrant vector
-                   store; a MarkdownStore impl can follow behind the SAME
-                   interface, so 'vector vs markdown' is a config choice, not
-                   a rewrite. Both must pass tests/contract/test_long_term_memory.py.
+LongTermMemory   = cross-conversation recall. First impl is a pgvector store
+                   (Postgres), sharing the prod database with the checkpointer;
+                   a MarkdownStore impl can follow behind the SAME interface, so
+                   'vector vs markdown' is a config choice, not a rewrite. Both
+                   must pass tests/contract/test_long_term_memory.py.
 """
 from __future__ import annotations
 

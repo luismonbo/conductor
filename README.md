@@ -20,7 +20,7 @@ api / orchestration ──► adapters ──► core  (core depends on nothing)
 | Path | Role |
 |------|------|
 | `core/` | Pure domain: agent loop, tool/memory/LLM **protocols**, types. No IO. |
-| `adapters/` | Concrete impls of core protocols: Azure/Ollama/fake LLMs, Qdrant/in-memory stores, tools. |
+| `adapters/` | Concrete impls of core protocols: Azure/Ollama/fake LLMs, pgvector/in-memory stores, tools. |
 | `orchestration/` | Composition root (`build.py`); LangGraph graph lands here at the multi-agent step. |
 | `observability/` | Per-step tracer + cost tracking. |
 | `security/` | Input/content/output guards (skeleton). |
@@ -34,12 +34,12 @@ api / orchestration ──► adapters ──► core  (core depends on nothing)
 |---------|-------------|-----------|-------------|
 | LLM | `AzureOpenAIClient` | `OllamaClient` (Gemma-4 E2B) | `HARNESS_LLM_BACKEND` |
 | Tool calls | `NativeToolCallParser` | `PromptedToolCallParser` | `HARNESS_TOOL_PARSER` |
-| Long-term memory | `QdrantLongTerm` | `MarkdownStore`/`QdrantLongTerm` | `HARNESS_MEMORY_BACKEND` |
+| Long-term memory | `PgVectorLongTerm` | `InMemoryLongTerm` / `PgVectorLongTerm` | `HARNESS_MEMORY_BACKEND` |
 
 ## Run
 
 ```bash
-pip install -e ".[dev]"          # add ,azure / ,qdrant / ,ollama as needed
+pip install -e ".[dev]"          # add ,azure / ,pgvector / ,local as needed
 pytest -q                        # 10 tests, no network required
 uvicorn harness.api.main:app --reload --app-dir src
 curl localhost:8000/health
@@ -59,7 +59,7 @@ export HARNESS_AZURE_DEPLOYMENT=gpt-4o
 ## Roadmap
 
 1. **(done)** Single ReAct agent, tools, short-term memory, tracing, FastAPI.
-2. Azure embeddings + `QdrantLongTerm` wired into `build_long_term`.
+2. Azure embeddings + `PgVectorLongTerm` wired into `build_long_term`.
 3. Ollama adapter + `PromptedToolCallParser`; A/B the parsers on Gemma-4 via `tests/contract`.
 4. React + TypeScript frontend against a frozen `/chat` contract (SSE streaming).
 5. Multi-agent: LangGraph supervisor + agent nodes in `orchestration/`, Postgres checkpointer.

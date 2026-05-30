@@ -4,7 +4,7 @@ InMemoryShortTerm  - dev/test stand-in for the LangGraph-checkpointer-backed
                      history. Swap to the checkpointer impl in orchestration/.
 InMemoryLongTerm   - a trivial substring-scored LongTermMemory so the whole
                      app runs with zero external services. Replace with
-                     QdrantLongTerm for real semantic recall; both satisfy the
+                     PgVectorLongTerm for real semantic recall; both satisfy the
                      same contract test.
 """
 from __future__ import annotations
@@ -32,7 +32,7 @@ class InMemoryShortTerm:
 
 class InMemoryLongTerm:
     """Naive lexical scoring. Good enough to exercise the interface; NOT
-    semantic. Use QdrantLongTerm in real runs."""
+    semantic. Use PgVectorLongTerm in real runs."""
 
     def __init__(self) -> None:
         self._items: dict[str, tuple[str, dict[str, str]]] = {}

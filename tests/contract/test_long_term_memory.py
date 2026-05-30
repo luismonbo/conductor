@@ -1,6 +1,6 @@
 """Contract suite for LongTermMemory. Any adapter implementing the protocol
-must pass this. When you add QdrantLongTerm, parametrize this against it (with
-a test container) and you inherit the behavioral guarantees for free."""
+must pass this. When you add PgVectorLongTerm, parametrize this against it (with
+a docker Postgres) and you inherit the behavioral guarantees for free."""
 from __future__ import annotations
 
 import pytest
