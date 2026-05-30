@@ -1,0 +1,54 @@
+# Local working context — intentionally NOT committed (see CLAUDE.md)
+.claude/
+docs/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+*.so
+
+# Virtual environments
+.venv/
+venv/
+env/
+# Note: uv.lock IS tracked on purpose (reproducible installs); only the venv is ignored.
+
+# Test / type / lint caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Environment / secrets (.env.example stays tracked)
+.env
+.env.local
+.env.*.local
+*.pem
+
+# Local databases (SQLite checkpointer)
+*.sqlite
+*.sqlite3
+*.db
+harness.sqlite*
+
+# Logs
+*.log
+
+# Frontend (Node / Vite) — lands in Phase 4
+node_modules/
+frontend/dist/
+frontend/.vite/
+.vite/
+*.tsbuildinfo
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
