@@ -13,7 +13,7 @@ dependencies = [
 [project.optional-dependencies]
 azure = ["openai>=1.54", "azure-identity>=1.19"]
 qdrant = ["qdrant-client>=1.12"]
-ollama = ["openai>=1.54"]  # Ollama exposes an OpenAI-compatible endpoint
+local = ["openai>=1.54"]  # llama-server / vLLM / any OpenAI-compatible server
 dev = ["pytest>=8.3", "pytest-asyncio>=0.24", "ruff>=0.7", "mypy>=1.13"]
 
 [tool.pytest.ini_options]

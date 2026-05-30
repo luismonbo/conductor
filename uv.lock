@@ -30,7 +30,7 @@ dev = [
     { name = "pytest-asyncio" },
     { name = "ruff" },
 ]
-ollama = [
+local = [
     { name = "openai" },
 ]
 qdrant = [
@@ -43,7 +43,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.115" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.13" },
     { name = "openai", marker = "extra == 'azure'", specifier = ">=1.54" },
-    { name = "openai", marker = "extra == 'ollama'", specifier = ">=1.54" },
+    { name = "openai", marker = "extra == 'local'", specifier = ">=1.54" },
     { name = "pydantic", specifier = ">=2.9" },
     { name = "pydantic-settings", specifier = ">=2.6" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.3" },
