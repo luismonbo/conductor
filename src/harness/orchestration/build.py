@@ -36,6 +36,15 @@ def build_llm(settings: Settings, parser: ToolCallParser) -> LLMClient:
             parser=parser,
             api_key=settings.azure_api_key or None,
         )
+    if settings.llm_backend == "openai_compatible":
+        from harness.adapters.llm.openai_compatible import OpenAICompatibleClient
+
+        return OpenAICompatibleClient(
+            base_url=settings.llm_base_url,
+            model=settings.llm_model,
+            parser=parser,
+            api_key=settings.llm_api_key,
+        )
     if settings.llm_backend == "fake":
         # Scripted in tests; here we return a trivial echo so the app boots.
         from harness.adapters.llm.fake import FakeLLMClient
@@ -44,7 +53,6 @@ def build_llm(settings: Settings, parser: ToolCallParser) -> LLMClient:
         return FakeLLMClient(
             [LLMResponse(text="Fake backend is active. Set HARNESS_LLM_BACKEND=azure.")]
         )
-    # ollama path lands here once adapters/llm/ollama.py is added.
     raise ValueError(f"Unknown llm_backend: {settings.llm_backend}")
 
 
