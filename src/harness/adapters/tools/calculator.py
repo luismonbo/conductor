@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import ast
 import operator
+from collections.abc import Callable
 from typing import Any
 
 from harness.core.types import ToolSpec
 
-_OPS = {
+# Maps an AST operator node type to the function that evaluates it. The values
+# are unary or binary numeric callables; the broad Callable signature keeps the
+# table heterogeneous while letting mypy see the lookups as callable.
+_OPS: dict[type[ast.operator | ast.unaryop], Callable[..., float]] = {
     ast.Add: operator.add,
     ast.Sub: operator.sub,
     ast.Mult: operator.mul,
