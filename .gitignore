@@ -1,6 +1,7 @@
 # Local working context — intentionally NOT committed (see CLAUDE.md)
 .claude/
 docs/
+CLAUDE.md
 
 # Python
 __pycache__/
