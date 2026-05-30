@@ -10,53 +10,14 @@ PromptedToolCallParser into the Ollama adapter for small local models.
 """
 from __future__ import annotations
 
-import json
-import uuid
-
+from harness.adapters.llm.openai_wire import (
+    build_request_messages,
+    parse_completion,
+    spec_to_wire,
+)
 from harness.core.llm.client import LLMClient
 from harness.core.llm.tool_parsing import ToolCallParser
-from harness.core.types import (
-    LLMResponse,
-    Message,
-    Role,
-    ToolCall,
-    ToolSpec,
-)
-
-
-def _message_to_wire(msg: Message) -> dict:
-    """Translate a core Message into the OpenAI chat wire format."""
-    if msg.role is Role.TOOL:
-        return {
-            "role": "tool",
-            "tool_call_id": msg.tool_call_id,
-            "content": msg.content,
-        }
-    out: dict = {"role": msg.role.value, "content": msg.content}
-    if msg.tool_calls:
-        out["tool_calls"] = [
-            {
-                "id": c.id,
-                "type": "function",
-                "function": {
-                    "name": c.name,
-                    "arguments": json.dumps(c.arguments),
-                },
-            }
-            for c in msg.tool_calls
-        ]
-    return out
-
-
-def _spec_to_wire(spec: ToolSpec) -> dict:
-    return {
-        "type": "function",
-        "function": {
-            "name": spec.name,
-            "description": spec.description,
-            "parameters": spec.parameters,
-        },
-    }
+from harness.core.types import LLMResponse, Message, ToolSpec
 
 
 class AzureOpenAIClient(LLMClient):
@@ -107,14 +68,7 @@ class AzureOpenAIClient(LLMClient):
         messages: list[Message],
         tools: list[ToolSpec] | None = None,
     ) -> LLMResponse:
-        wire_messages = [_message_to_wire(m) for m in messages]
-
-        # The native parser returns "" here; a prompted parser would inject a
-        # format spec. Harmless either way — keeps the adapter parser-agnostic.
-        if tools:
-            addendum = self._parser.system_prompt_addendum(tools)
-            if addendum and wire_messages and wire_messages[0]["role"] == "system":
-                wire_messages[0]["content"] += "\n\n" + addendum
+        wire_messages = build_request_messages(messages, self._parser, tools)
 
         kwargs: dict = {
             "model": self._deployment,
@@ -122,41 +76,8 @@ class AzureOpenAIClient(LLMClient):
             "temperature": self._temperature,
         }
         if tools:
-            kwargs["tools"] = [_spec_to_wire(s) for s in tools]
+            kwargs["tools"] = [spec_to_wire(s) for s in tools]
             kwargs["tool_choice"] = "auto"
 
         completion = await self._client.chat.completions.create(**kwargs)
-        choice = completion.choices[0]
-        msg = choice.message
-
-        tool_calls: tuple[ToolCall, ...] = ()
-        if msg.tool_calls:
-            parsed = []
-            for tc in msg.tool_calls:
-                try:
-                    args = json.loads(tc.function.arguments or "{}")
-                except json.JSONDecodeError:
-                    args = {}
-                parsed.append(
-                    ToolCall(
-                        id=tc.id or str(uuid.uuid4()),
-                        name=tc.function.name,
-                        arguments=args,
-                    )
-                )
-            tool_calls = tuple(parsed)
-
-        usage = {}
-        if completion.usage:
-            usage = {
-                "prompt_tokens": completion.usage.prompt_tokens,
-                "completion_tokens": completion.usage.completion_tokens,
-                "total_tokens": completion.usage.total_tokens,
-            }
-
-        return LLMResponse(
-            text=msg.content or "",
-            tool_calls=tool_calls,
-            usage=usage,
-            finish_reason=choice.finish_reason,
-        )
+        return parse_completion(completion)
