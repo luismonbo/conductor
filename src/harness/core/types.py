@@ -83,3 +83,15 @@ class AgentResult:
     output: str
     state: AgentState
     stopped_reason: str  # "final_answer" | "max_iterations" | "error"
+
+
+@dataclass(frozen=True)
+class AgentEvent:
+    """A single streaming event emitted during an agent run, serialized to SSE."""
+    type: str  # "thinking" | "tool_call" | "tool_result" | "done" | "error"
+    text: str = ""
+    name: str = ""
+    args: dict = field(default_factory=dict)
+    call_id: str = ""
+    is_error: bool = False
+    stopped_reason: str = ""

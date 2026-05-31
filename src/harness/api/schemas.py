@@ -15,3 +15,13 @@ class ChatResponse(BaseModel):
     conversation_id: str
     stopped_reason: str
     trace_summary: dict
+
+
+class AgentEventDTO(BaseModel):
+    type: str
+    text: str = ""
+    name: str = ""
+    args: dict = {}
+    call_id: str = ""
+    is_error: bool = False
+    stopped_reason: str = ""
