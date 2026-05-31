@@ -1,0 +1,136 @@
+import { useRef, useEffect } from 'react';
+
+interface ChatInputProps {
+  value: string;
+  onChange: (v: string) => void;
+  onSend: () => void;
+  onCancel: () => void;
+  isStreaming: boolean;
+  disabled: boolean;
+}
+
+export function ChatInput({
+  value,
+  onChange,
+  onSend,
+  onCancel,
+  isStreaming,
+  disabled,
+}: ChatInputProps) {
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Auto-resize textarea
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    const lineHeight = 20;
+    const maxHeight = lineHeight * 6;
+    el.style.height = `${Math.min(el.scrollHeight, maxHeight)}px`;
+  }, [value]);
+
+  // Restore focus after streaming ends
+  useEffect(() => {
+    if (!isStreaming) {
+      textareaRef.current?.focus();
+    }
+  }, [isStreaming]);
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      if (!disabled && value.trim()) onSend();
+    }
+  };
+
+  return (
+    <div
+      style={{
+        borderTop: '1px solid var(--border)',
+        padding: '12px 16px',
+        display: 'flex',
+        gap: '8px',
+        alignItems: 'flex-end',
+        background: 'var(--bg)',
+      }}
+    >
+      <textarea
+        ref={textareaRef}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={handleKeyDown}
+        disabled={disabled}
+        placeholder="Send a message…"
+        rows={1}
+        style={{
+          flex: 1,
+          background: 'var(--surface)',
+          border: '1px solid var(--border)',
+          borderRadius: '8px',
+          padding: '10px 12px',
+          color: 'var(--text)',
+          fontFamily: 'var(--sans)',
+          fontSize: 'var(--text-base)',
+          resize: 'none',
+          outline: 'none',
+          lineHeight: '20px',
+          minHeight: '40px',
+          transition: 'border-color 0.15s',
+        }}
+        onFocus={(e) => (e.target.style.borderColor = 'var(--accent)')}
+        onBlur={(e) => (e.target.style.borderColor = 'var(--border)')}
+      />
+      {isStreaming ? (
+        <button
+          onClick={onCancel}
+          style={{
+            padding: '10px 16px',
+            background: 'transparent',
+            border: '1px solid #f87171',
+            borderRadius: '8px',
+            color: '#f87171',
+            fontFamily: 'var(--mono)',
+            fontSize: 'var(--text-sm)',
+            cursor: 'pointer',
+            whiteSpace: 'nowrap',
+            transition: 'background 0.15s',
+          }}
+          onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(248,113,113,0.1)')}
+          onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+        >
+          Cancel
+        </button>
+      ) : (
+        <button
+          onClick={onSend}
+          disabled={disabled || !value.trim()}
+          style={{
+            padding: '10px 16px',
+            background: 'transparent',
+            border: '1px solid var(--border)',
+            borderRadius: '8px',
+            color: 'var(--text-muted)',
+            fontFamily: 'var(--mono)',
+            fontSize: 'var(--text-sm)',
+            cursor: disabled || !value.trim() ? 'not-allowed' : 'pointer',
+            whiteSpace: 'nowrap',
+            transition: 'border-color 0.15s, color 0.15s',
+            opacity: disabled || !value.trim() ? 0.4 : 1,
+          }}
+          onMouseEnter={(e) => {
+            if (!disabled && value.trim()) {
+              e.currentTarget.style.borderColor = 'var(--accent)';
+              e.currentTarget.style.color = 'var(--accent)';
+            }
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.borderColor = 'var(--border)';
+            e.currentTarget.style.color = 'var(--text-muted)';
+          }}
+        >
+          Send
+        </button>
+      )}
+    </div>
+  );
+}

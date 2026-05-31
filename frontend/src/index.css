@@ -50,3 +50,48 @@ html, body, #root {
 
 /* selection */
 ::selection { background: var(--accent-alpha); color: var(--text); }
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+.thinking-prose {
+  font-family: var(--sans);
+  font-size: var(--text-sm);
+  color: var(--text);
+  line-height: 1.7;
+}
+.thinking-prose p { margin-bottom: 0.75em; }
+.thinking-prose p:last-child { margin-bottom: 0; }
+.thinking-prose code {
+  font-family: var(--mono);
+  font-size: 0.9em;
+  color: var(--text-code);
+  background: var(--surface-raised);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+.thinking-prose pre {
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px;
+  overflow-x: auto;
+  margin: 0.75em 0;
+}
+.thinking-prose pre code {
+  background: none;
+  padding: 0;
+  color: var(--text-code);
+}
+.thinking-prose ul, .thinking-prose ol {
+  padding-left: 1.5em;
+  margin-bottom: 0.75em;
+}
+.thinking-prose li { margin-bottom: 0.25em; }
+.thinking-prose h1, .thinking-prose h2, .thinking-prose h3 {
+  color: var(--text);
+  margin: 1em 0 0.5em;
+  font-weight: 600;
+}
