@@ -18,16 +18,29 @@ export async function* parseSSEStream(
       buffer = messages.pop() ?? '';
 
       for (const message of messages) {
-        const line = message.trim();
-        if (!line) continue;
+        if (!message.trim()) continue;
 
-        const dataLine = line.startsWith('data: ') ? line.slice(6) : line;
-        if (!dataLine || dataLine === '[DONE]') continue;
+        const lines = message.split('\n');
+        const dataLines: string[] = [];
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            dataLines.push(line.slice(6));
+          } else if (line.startsWith('event:') || line.startsWith('id:') || line.startsWith('retry:')) {
+            // SSE metadata fields — ignore
+          }
+          // Empty lines within a block are separators — ignore
+        }
+
+        if (dataLines.length === 0) continue;
+
+        const dataStr = dataLines.join('\n');
+        if (dataStr === '[DONE]') continue;
 
         try {
-          yield JSON.parse(dataLine);
+          yield JSON.parse(dataStr);
         } catch {
-          // Malformed JSON — skip silently
+          // Malformed JSON — skip (dev: check network tab if events are missing)
         }
       }
     }

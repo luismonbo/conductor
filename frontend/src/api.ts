@@ -1,10 +1,12 @@
 import { parseSSEStream } from '@/lib/sseParser';
-import type {
-  AgentEvent,
-  CancelResponse,
-  ChatRequest,
-  ConversationIdPayload,
-  HealthResponse,
+import {
+  isAgentEvent,
+  isConversationIdPayload,
+  type AgentEvent,
+  type CancelResponse,
+  type ChatRequest,
+  type ConversationIdPayload,
+  type HealthResponse,
 } from '@/types';
 
 const BASE = import.meta.env.VITE_API_URL ?? '/api';
@@ -30,19 +32,26 @@ export async function* streamChat(
     throw new Error('Response body is null');
   }
 
-  for await (const event of parseSSEStream(response.body)) {
-    yield event as ConversationIdPayload | AgentEvent;
+  for await (const raw of parseSSEStream(response.body)) {
+    if (isConversationIdPayload(raw) || isAgentEvent(raw)) {
+      yield raw;
+    }
+    // Unknown payloads are silently skipped
   }
 }
 
 export async function cancelChat(conversationId: string): Promise<CancelResponse> {
-  const response = await fetch(`${BASE}/cancel/${conversationId}`, {
-    method: 'POST',
-  });
+  const response = await fetch(`${BASE}/cancel/${conversationId}`, { method: 'POST' });
+  if (!response.ok) {
+    throw new Error(`Cancel request failed: ${response.status} ${response.statusText}`);
+  }
   return response.json() as Promise<CancelResponse>;
 }
 
 export async function healthCheck(): Promise<HealthResponse> {
   const response = await fetch(`${BASE}/health`);
+  if (!response.ok) {
+    throw new Error(`Health check failed: ${response.status} ${response.statusText}`);
+  }
   return response.json() as Promise<HealthResponse>;
 }

@@ -18,7 +18,22 @@ export interface ConversationIdPayload {
 
 // Type guard to distinguish first payload from agent events
 export function isConversationIdPayload(v: unknown): v is ConversationIdPayload {
-  return typeof v === 'object' && v !== null && 'conversation_id' in v && !('type' in v);
+  return (
+    typeof v === 'object' &&
+    v !== null &&
+    'conversation_id' in v &&
+    typeof (v as ConversationIdPayload).conversation_id === 'string' &&
+    !('type' in v)
+  );
+}
+
+export function isAgentEvent(v: unknown): v is AgentEvent {
+  return (
+    typeof v === 'object' &&
+    v !== null &&
+    'type' in v &&
+    typeof (v as AgentEvent).type === 'string'
+  );
 }
 
 // Message blocks rendered in the UI
