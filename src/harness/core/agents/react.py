@@ -66,7 +66,10 @@ class ReActAgent:
                 "llm_response",
                 {
                     "text": response.text,
-                    "tool_calls": [c.name for c in response.tool_calls],
+                    "tool_calls": [
+                        {"name": c.name, "arguments": c.arguments, "id": c.id}
+                        for c in response.tool_calls
+                    ],
                     "usage": response.usage,
                 },
             )
@@ -93,7 +96,7 @@ class ReActAgent:
                 result = await self._tools.dispatch(call)
                 await self._trace(
                     "tool_result",
-                    {"name": result.name, "is_error": result.is_error},
+                    {"name": result.name, "is_error": result.is_error, "content": result.content},
                 )
                 state.messages.append(
                     Message(
