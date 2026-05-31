@@ -163,7 +163,7 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
         .at(-1);
 
       const shouldSetFinalText =
-        action.text !== '' && action.text !== lastThinkingBlock?.text;
+        action.text !== lastThinkingBlock?.text;
 
       const messages = updateLastStreamingMessage(state.messages, (msg) => ({
         ...msg,
