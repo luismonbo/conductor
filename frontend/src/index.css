@@ -18,8 +18,9 @@
   --text-sm:   0.8125rem;
   --text-base: 0.9375rem;
   --text-lg:   1.0625rem;
+}
 
-  /* subtle noise texture */
+body {
   background-color: var(--bg);
   color: var(--text);
   font-family: var(--sans);
@@ -43,6 +44,9 @@ html, body, #root {
 ::-webkit-scrollbar-track { background: var(--bg); }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: #333; }
+
+/* Standard scrollbar (Firefox) */
+* { scrollbar-width: thin; scrollbar-color: var(--border) var(--bg); }
 
 /* selection */
 ::selection { background: var(--accent-alpha); color: var(--text); }
