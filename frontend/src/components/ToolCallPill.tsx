@@ -26,7 +26,6 @@ export function ToolCallPill({ name, args }: ToolCallPillProps) {
           userSelect: 'none',
         }}
       >
-        <span style={{ color: 'var(--accent)', fontSize: '8px' }}>▶</span>
         <span>tool_call</span>
         <span style={{ color: 'var(--text)', fontWeight: 500 }}>{name}</span>
       </summary>

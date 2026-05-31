@@ -21,8 +21,6 @@ export function StatusBar({ streamStatus, currentTool }: StatusBarProps) {
     }
   }, [streamStatus]);
 
-  if (!visible) return null;
-
   const label =
     streamStatus === 'streaming'
       ? currentTool
@@ -34,6 +32,9 @@ export function StatusBar({ streamStatus, currentTool }: StatusBarProps) {
 
   return (
     <div
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
       style={{
         display: 'flex',
         alignItems: 'center',
@@ -42,19 +43,24 @@ export function StatusBar({ streamStatus, currentTool }: StatusBarProps) {
         fontFamily: 'var(--mono)',
         fontSize: 'var(--text-xs)',
         color: 'var(--text-muted)',
+        minHeight: '28px',
       }}
     >
-      <span
-        style={{
-          width: 6,
-          height: 6,
-          borderRadius: '50%',
-          background: 'var(--accent)',
-          display: 'inline-block',
-          animation: isPulsing ? 'pulse 1.5s ease-in-out infinite' : 'none',
-        }}
-      />
-      {label}
+      {visible && (
+        <>
+          <span
+            style={{
+              width: 6,
+              height: 6,
+              borderRadius: '50%',
+              background: 'var(--accent)',
+              display: 'inline-block',
+              animation: isPulsing ? 'pulse 1.5s ease-in-out infinite' : 'none',
+            }}
+          />
+          {label}
+        </>
+      )}
     </div>
   );
 }

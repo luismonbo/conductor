@@ -16,7 +16,8 @@ export function MessageList({ messages }: MessageListProps) {
     if (!el) return;
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
     if (distanceFromBottom < 100) {
-      bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+      const prefersReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      bottomRef.current?.scrollIntoView({ behavior: prefersReduced ? 'auto' : 'smooth' });
     }
   }, [messages]);
 

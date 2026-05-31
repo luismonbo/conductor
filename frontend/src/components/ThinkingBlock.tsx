@@ -1,4 +1,5 @@
 import { marked } from 'marked';
+import DOMPurify from 'dompurify';
 import { useMemo } from 'react';
 
 interface ThinkingBlockProps {
@@ -6,7 +7,12 @@ interface ThinkingBlockProps {
 }
 
 export function ThinkingBlock({ text }: ThinkingBlockProps) {
-  const html = useMemo(() => marked.parse(text, { async: false }) as string, [text]);
+  if (!text) return null;
+
+  const html = useMemo(
+    () => DOMPurify.sanitize(marked.parse(text, { async: false }) as string),
+    [text]
+  );
 
   return (
     <div

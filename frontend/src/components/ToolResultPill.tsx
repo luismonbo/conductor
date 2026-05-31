@@ -7,8 +7,9 @@ interface ToolResultPillProps {
 export function ToolResultPill({ text, name, is_error }: ToolResultPillProps) {
   return (
     <details
+      className={is_error ? 'error-result' : undefined}
       style={{
-        borderLeft: `2px solid ${is_error ? '#f87171' : 'var(--border)'}`,
+        borderLeft: `2px solid ${is_error ? 'var(--color-error)' : 'var(--border)'}`,
         paddingLeft: '10px',
         margin: '4px 0',
       }}
@@ -27,11 +28,10 @@ export function ToolResultPill({ text, name, is_error }: ToolResultPillProps) {
           userSelect: 'none',
         }}
       >
-        <span style={{ color: is_error ? '#f87171' : 'var(--text-muted)', fontSize: '8px' }}>▶</span>
         <span>tool_result</span>
-        <span style={{ color: is_error ? '#f87171' : 'var(--text)' }}>{name}</span>
+        <span style={{ color: is_error ? 'var(--color-error)' : 'var(--text)' }}>{name}</span>
         {is_error && (
-          <span style={{ color: '#f87171', fontSize: 'var(--text-xs)' }}>error</span>
+          <span style={{ color: 'var(--color-error)', fontSize: 'var(--text-xs)' }}>error</span>
         )}
       </summary>
       <pre
@@ -43,7 +43,7 @@ export function ToolResultPill({ text, name, is_error }: ToolResultPillProps) {
           borderRadius: '4px',
           fontFamily: 'var(--mono)',
           fontSize: 'var(--text-xs)',
-          color: is_error ? '#f87171' : 'var(--text)',
+          color: is_error ? 'var(--color-error)' : 'var(--text)',
           overflowX: 'auto',
           whiteSpace: 'pre-wrap',
           wordBreak: 'break-all',

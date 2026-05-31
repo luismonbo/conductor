@@ -33,6 +33,11 @@ export function AssistantMessage({ blocks, finalText, isStreaming }: AssistantMe
                 is_error={block.is_error}
               />
             );
+          default: {
+            const _exhaustive: never = block;
+            void _exhaustive;
+            return null;
+          }
         }
       })}
       {finalText && (

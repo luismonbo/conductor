@@ -61,6 +61,7 @@ export function ChatInput({
         onKeyDown={handleKeyDown}
         disabled={disabled}
         placeholder="Send a message…"
+        aria-label="Message"
         rows={1}
         style={{
           flex: 1,
@@ -86,9 +87,9 @@ export function ChatInput({
           style={{
             padding: '10px 16px',
             background: 'transparent',
-            border: '1px solid #f87171',
+            border: '1px solid var(--color-error)',
             borderRadius: '8px',
-            color: '#f87171',
+            color: 'var(--color-error)',
             fontFamily: 'var(--mono)',
             fontSize: 'var(--text-sm)',
             cursor: 'pointer',
