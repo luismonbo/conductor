@@ -1,4 +1,4 @@
-import { useCallback, useReducer, useRef } from 'react';
+import { useCallback, useEffect, useReducer, useRef } from 'react';
 import { streamChat, cancelChat } from '@/api';
 import {
   isConversationIdPayload,
@@ -162,6 +162,8 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
         .filter((b): b is ThinkingBlock => b.kind === 'thinking')
         .at(-1);
 
+      // Avoid echoing thinking text as the final answer — the done event often repeats
+      // the last thinking block text verbatim; only set finalText if it adds new content.
       const shouldSetFinalText =
         action.text !== lastThinkingBlock?.text;
 
@@ -174,6 +176,8 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
     }
 
     case 'STREAM_ERROR': {
+      // Don't overwrite 'done' — stream may have sent a done event right before the connection dropped
+      if (state.streamStatus === 'done') return state;
       const messages = updateLastStreamingMessage(state.messages, (msg) => ({
         ...msg,
         isStreaming: false,
@@ -276,6 +280,12 @@ export function useChatStream() {
 
   const setInputValue = useCallback((value: string) => {
     dispatch({ type: 'SET_INPUT', value });
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+    };
   }, []);
 
   return {
