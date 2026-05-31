@@ -9,6 +9,7 @@ export function ChatPage() {
     streamStatus,
     currentTool,
     inputValue,
+    errorMessage,
     sendMessage,
     cancelStream,
     setInputValue,
@@ -43,6 +44,21 @@ export function ChatPage() {
         </span>
         <StatusBar streamStatus={streamStatus} currentTool={currentTool} />
       </header>
+
+      {/* Error banner */}
+      {errorMessage && (
+        <div style={{
+          padding: '8px 16px',
+          background: 'rgba(248, 113, 113, 0.08)',
+          borderBottom: '1px solid rgba(248, 113, 113, 0.2)',
+          fontFamily: 'var(--mono)',
+          fontSize: 'var(--text-xs)',
+          color: 'var(--color-error)',
+          flexShrink: 0,
+        }}>
+          {errorMessage}
+        </div>
+      )}
 
       {/* Message list — takes all remaining space */}
       <MessageList messages={messages} />

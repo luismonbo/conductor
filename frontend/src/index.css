@@ -121,6 +121,10 @@ textarea::placeholder {
   opacity: 0.5;
 }
 
+textarea:focus {
+  border-color: var(--accent);
+}
+
 /* Focus-visible ring using CSS (for better browser support) */
 :focus-visible {
   outline: 2px solid var(--accent);

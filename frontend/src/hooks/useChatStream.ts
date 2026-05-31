@@ -19,6 +19,7 @@ interface ChatState {
   streamStatus: StreamStatus;
   currentTool: string | null;
   inputValue: string;
+  errorMessage: string | null;
 }
 
 const initialState: ChatState = {
@@ -27,6 +28,7 @@ const initialState: ChatState = {
   streamStatus: 'idle',
   currentTool: null,
   inputValue: '',
+  errorMessage: null,
 };
 
 // ---------------------------------------------------------------------------
@@ -104,6 +106,7 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
         streamStatus: 'streaming',
         inputValue: '',
         currentTool: null,
+        errorMessage: null,
       };
     }
 
@@ -172,7 +175,7 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
         isStreaming: false,
         ...(shouldSetFinalText ? { finalText: action.text } : {}),
       }));
-      return { ...state, messages, streamStatus: 'done', currentTool: null };
+      return { ...state, messages, streamStatus: 'done', currentTool: null, errorMessage: null };
     }
 
     case 'STREAM_ERROR': {
@@ -182,7 +185,7 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
         ...msg,
         isStreaming: false,
       }));
-      return { ...state, messages, streamStatus: 'error', currentTool: null };
+      return { ...state, messages, streamStatus: 'error', currentTool: null, errorMessage: action.text };
     }
 
     case 'STREAM_CANCELLED': {
@@ -190,7 +193,7 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
         ...msg,
         isStreaming: false,
       }));
-      return { ...state, messages, streamStatus: 'idle', currentTool: null };
+      return { ...state, messages, streamStatus: 'idle', currentTool: null, errorMessage: null };
     }
 
     default:
@@ -294,6 +297,7 @@ export function useChatStream() {
     currentTool: state.currentTool,
     conversationId: state.conversationId,
     inputValue: state.inputValue,
+    errorMessage: state.errorMessage,
     sendMessage,
     cancelStream,
     setInputValue,

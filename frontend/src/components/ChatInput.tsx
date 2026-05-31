@@ -78,8 +78,6 @@ export function ChatInput({
           minHeight: '40px',
           transition: 'border-color 0.15s',
         }}
-        onFocus={(e) => (e.target.style.borderColor = 'var(--accent)')}
-        onBlur={(e) => (e.target.style.borderColor = 'var(--border)')}
       />
       {isStreaming ? (
         <button
