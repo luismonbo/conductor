@@ -109,9 +109,13 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
     _running[conversation_id] = task
 
     async def _sse():
-        yield f"data: {json.dumps({'conversation_id': conversation_id})}\n\n"
-        async for event in tracer.drain():
-            yield f"data: {json.dumps(dataclasses.asdict(event))}\n\n"
+        try:
+            yield f"data: {json.dumps({'conversation_id': conversation_id})}\n\n"
+            async for event in tracer.drain():
+                yield f"data: {json.dumps(dataclasses.asdict(event))}\n\n"
+        finally:
+            if not task.done():
+                task.cancel()
 
     return StreamingResponse(
         _sse(),
