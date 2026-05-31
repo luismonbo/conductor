@@ -41,10 +41,7 @@ class PgVectorLongTerm:
         table: str = "long_term_memory",
         vector_size: int = 1536,
     ) -> None:
-        self._embed = embedder
-        self._dsn = dsn
-        self._table = table
-        self._vector_size = vector_size
+        raise NotImplementedError(_NOT_IMPLEMENTED)
 
     async def ensure_schema(self) -> None:
         """Phase 5: CREATE EXTENSION IF NOT EXISTS vector; create the memory

@@ -6,9 +6,7 @@ injecting an OpenAI-shaped fake transport:
   - a plain completion yields text with wants_tools == False
   - a completion carrying tool_calls is normalized to core ToolCall(s)
 
-Add new adapters to ADAPTER_FACTORIES and they inherit the whole contract. Azure
-joins once it grows a client-injection seam like OpenAICompatibleClient's (today
-it builds its SDK client eagerly in __init__).
+Add new adapters to ADAPTER_FACTORIES and they inherit the whole contract.
 """
 from __future__ import annotations
 
@@ -17,6 +15,7 @@ from typing import Callable
 
 import pytest
 
+from harness.adapters.llm.azure_openai import AzureOpenAIClient
 from harness.adapters.llm.openai_compatible import OpenAICompatibleClient
 from harness.adapters.llm.parsers import NativeToolCallParser
 from harness.core.llm.client import LLMClient
@@ -51,9 +50,20 @@ def _openai_compatible_factory(completion) -> LLMClient:
     )
 
 
+def _azure_factory(completion) -> LLMClient:
+    return AzureOpenAIClient(
+        deployment="contract-model",
+        endpoint="http://x",
+        api_version="2024-02-01",
+        parser=NativeToolCallParser(),
+        client=_fake_openai(completion),
+    )
+
+
 # Extension point: add (id, factory) tuples for each new LLM adapter.
 ADAPTER_FACTORIES: list[tuple[str, Callable[[object], LLMClient]]] = [
     ("openai_compatible", _openai_compatible_factory),
+    ("azure", _azure_factory),
 ]
 
 
