@@ -91,7 +91,7 @@ class AgentEvent:
     type: str  # "thinking" | "tool_call" | "tool_result" | "done" | "error"
     text: str = ""
     name: str = ""
-    args: dict = field(default_factory=dict)
+    args: dict[str, Any] = field(default_factory=dict)
     call_id: str = ""
     is_error: bool = False
     stopped_reason: str = ""

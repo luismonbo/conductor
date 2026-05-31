@@ -2,7 +2,9 @@
 evolve independently of the domain model."""
 from __future__ import annotations
 
-from pydantic import BaseModel
+from typing import Any
+
+from pydantic import BaseModel, Field
 
 
 class ChatRequest(BaseModel):
@@ -21,7 +23,7 @@ class AgentEventDTO(BaseModel):
     type: str
     text: str = ""
     name: str = ""
-    args: dict = {}
+    args: dict[str, Any] = Field(default_factory=dict)
     call_id: str = ""
     is_error: bool = False
     stopped_reason: str = ""
