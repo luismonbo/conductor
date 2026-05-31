@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, field
 from time import perf_counter
-from typing import AsyncGenerator
+from typing import Any, AsyncGenerator
 
 from harness.core.types import AgentEvent
 
@@ -21,7 +21,7 @@ class TraceCollector:
     events: list[tuple[float, str, dict]] = field(default_factory=list)
     _t0: float = field(default_factory=perf_counter)
 
-    async def __call__(self, event: str, data: dict) -> None:
+    async def __call__(self, event: str, data: dict[str, Any]) -> None:
         self.events.append((perf_counter() - self._t0, event, data))
 
     @property
@@ -62,7 +62,7 @@ class StreamingTracer:
     def __init__(self) -> None:
         self._queue: asyncio.Queue[AgentEvent | None] = asyncio.Queue()
 
-    async def __call__(self, event: str, data: dict) -> None:
+    async def __call__(self, event: str, data: dict[str, Any]) -> None:
         """Called by the ReAct loop at each step; enqueues AgentEvent objects."""
         if event == "llm_response":
             if data.get("text"):
