@@ -1,3 +1,5 @@
+import { ChatPage } from '@/pages/ChatPage';
+
 export default function App() {
-  return <div style={{ height: '100%', background: 'var(--bg)' }}>Agent Harness</div>
+  return <ChatPage />;
 }
