@@ -12,9 +12,11 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import json
+import os
 import uuid
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
 from harness.adapters.memory.in_memory import InMemoryShortTerm
@@ -25,6 +27,20 @@ from harness.observability.tracer import StreamingTracer, TraceCollector
 from harness.orchestration.build import build_agent
 
 app = FastAPI(title="Agent Harness")
+
+_cors_origins = [
+    o.strip()
+    for o in os.environ.get("CORS_ORIGINS", "http://localhost:5173").split(",")
+    if o.strip()
+]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    allow_credentials=False,
+)
+
 _short_term = InMemoryShortTerm()
 
 # Map of conversation_id -> running asyncio.Task for streaming runs.
