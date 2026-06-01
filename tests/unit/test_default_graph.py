@@ -177,6 +177,7 @@ async def test_approval_gate_interrupt_then_resume_approved():
 
 @pytest.mark.asyncio
 async def test_approval_gate_interrupt_then_resume_rejected():
+    """Rejection feeds back to the agent as an observation; agent recovers with a final answer."""
     registry = _registry_with_approvable()
     graph = build_graph(
         llm=FakeLLMClient([
@@ -184,18 +185,19 @@ async def test_approval_gate_interrupt_then_resume_rejected():
                 text="",
                 tool_calls=(ToolCall(id="c1", name="calculator", arguments={"expression": "1+1"}),),
             ),
+            LLMResponse(text="The tool was rejected. I cannot complete this calculation."),
         ]),
         checkpointer=MemorySaver(),
         registry=registry,
     )
 
-    # First invocation
+    # First invocation — expect interrupt
     queue1: asyncio.Queue = asyncio.Queue()
     config1 = {"configurable": {"thread_id": "t-reject", "event_queue": queue1}}
     first_pass = await _invoke_with_sentinel(graph, _base_state(), config1)
     assert any(e.type == "interrupt" for e in first_pass)
 
-    # Resume with approved=False
+    # Resume with approved=False → agent should recover, NOT emit error
     queue2: asyncio.Queue = asyncio.Queue()
     config2 = {"configurable": {"thread_id": "t-reject", "event_queue": queue2}}
     second_pass = await _invoke_with_sentinel(
@@ -203,8 +205,8 @@ async def test_approval_gate_interrupt_then_resume_rejected():
     )
 
     types2 = [e.type for e in second_pass]
-    assert "error" in types2, f"Expected error after rejection, got: {types2}"
-    assert "final" not in types2
+    assert "final" in types2, f"Expected final after rejection (agent recovers), got: {types2}"
+    assert "error" not in types2
 
 
 @pytest.mark.asyncio

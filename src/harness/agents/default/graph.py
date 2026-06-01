@@ -1,11 +1,11 @@
-"""Default LangGraph agent — five-node StateGraph.
+"""Default LangGraph agent — six-node StateGraph.
 
 Topology:
   START → call_model
             ├─ wants_tools + iteration_ok → approval_gate
             │     ├─ needs_approval=True  → interrupt() [state saved to checkpointer]
-            │     │                         on resume: approved → execute_tools
-            │     │                                   rejected → error
+            │     │                         on resume: approved  → execute_tools
+            │     │                                   rejected → handle_rejection → call_model (loop)
             │     └─ needs_approval=False → execute_tools → call_model (loop)
             ├─ no_tools               → final
             └─ iteration_limit        → error
@@ -118,10 +118,30 @@ def build_graph(
         decision = interrupt({"mode": "approval", "tool_calls": tc_list})
         return {"decision": decision}
 
+    async def _handle_rejection(state: GraphState, config: RunnableConfig) -> dict:
+        queue: asyncio.Queue = config["configurable"]["event_queue"]
+        last = state["messages"][-1]
+
+        # Inject a fake tool-result message for each rejected call so the
+        # transcript stays valid (OpenAI format requires tool results for every
+        # tool_calls entry in the preceding assistant turn).
+        rejection_msgs = [
+            Message(
+                role=Role.TOOL,
+                content="Rejected by user.",
+                tool_call_id=tc.id,
+                name=tc.name,
+            )
+            for tc in last.tool_calls
+        ]
+
+        await queue.put(AgentEvent(type="thinking", text="[Tool call rejected. Continuing…]"))
+        return {"messages": rejection_msgs}
+
     def _route_after_approval(state: GraphState) -> str:
         decision = state.get("decision")
         if decision is not None:
-            return "execute_tools" if decision.get("approved") else "error"
+            return "execute_tools" if decision.get("approved") else "handle_rejection"
         return "execute_tools"
 
     async def _execute_tools(state: GraphState, config: RunnableConfig) -> dict:
@@ -171,6 +191,7 @@ def build_graph(
     builder.add_node("execute_tools", _execute_tools)
     builder.add_node("final", _final)
     builder.add_node("error", _error)
+    builder.add_node("handle_rejection", _handle_rejection)
 
     builder.add_edge(START, "call_model")
     builder.add_conditional_edges(
@@ -181,8 +202,9 @@ def build_graph(
     builder.add_conditional_edges(
         "approval_gate",
         _route_after_approval,
-        {"execute_tools": "execute_tools", "error": "error"},
+        {"execute_tools": "execute_tools", "handle_rejection": "handle_rejection"},
     )
+    builder.add_edge("handle_rejection", "call_model")
     builder.add_edge("execute_tools", "call_model")
     builder.add_edge("final", END)
     builder.add_edge("error", END)
