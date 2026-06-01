@@ -1,22 +1,21 @@
 import { parseSSEStream } from '@/lib/sseParser';
 import {
   isAgentEvent,
-  isConversationIdPayload,
+  isThreadIdPayload,
   type AgentEvent,
   type CancelResponse,
   type ChatRequest,
-  type ConversationIdPayload,
   type HealthResponse,
+  type ResumeRequest,
+  type ThreadIdPayload,
 } from '@/types';
 
 const BASE = import.meta.env.VITE_API_URL ?? '/api';
 
-// Streams chat events from POST /chat/stream
-// Yields: ConversationIdPayload first, then AgentEvent objects
 export async function* streamChat(
   payload: ChatRequest,
   signal: AbortSignal,
-): AsyncGenerator<ConversationIdPayload | AgentEvent> {
+): AsyncGenerator<ThreadIdPayload | AgentEvent> {
   const response = await fetch(`${BASE}/chat/stream`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -33,15 +32,42 @@ export async function* streamChat(
   }
 
   for await (const raw of parseSSEStream(response.body)) {
-    if (isConversationIdPayload(raw) || isAgentEvent(raw)) {
+    if (isThreadIdPayload(raw) || isAgentEvent(raw)) {
       yield raw;
     }
-    // Unknown payloads are silently skipped
   }
 }
 
-export async function cancelChat(conversationId: string): Promise<CancelResponse> {
-  const response = await fetch(`${BASE}/cancel/${conversationId}`, { method: 'POST' });
+export async function* resumeChat(
+  threadId: string,
+  decision: Record<string, unknown>,
+  signal: AbortSignal,
+): AsyncGenerator<ThreadIdPayload | AgentEvent> {
+  const payload: ResumeRequest = { decision };
+  const response = await fetch(`${BASE}/resume/${threadId}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+    signal,
+  });
+
+  if (!response.ok) {
+    throw new Error(`Resume request failed: ${response.status} ${response.statusText}`);
+  }
+
+  if (!response.body) {
+    throw new Error('Response body is null');
+  }
+
+  for await (const raw of parseSSEStream(response.body)) {
+    if (isThreadIdPayload(raw) || isAgentEvent(raw)) {
+      yield raw;
+    }
+  }
+}
+
+export async function cancelChat(threadId: string): Promise<CancelResponse> {
+  const response = await fetch(`${BASE}/cancel/${threadId}`, { method: 'POST' });
   if (!response.ok) {
     throw new Error(`Cancel request failed: ${response.status} ${response.statusText}`);
   }

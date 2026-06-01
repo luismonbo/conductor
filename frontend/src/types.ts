@@ -1,5 +1,11 @@
 // Raw event from the backend stream
-export type AgentEventType = 'thinking' | 'tool_call' | 'tool_result' | 'done' | 'error';
+export type AgentEventType =
+  | 'thinking'
+  | 'tool_call'
+  | 'tool_result'
+  | 'interrupt'
+  | 'final'
+  | 'error';
 
 export interface AgentEvent {
   readonly type: AgentEventType;
@@ -11,18 +17,28 @@ export interface AgentEvent {
   readonly stopped_reason: string;
 }
 
-// First SSE payload (not an AgentEvent)
-export interface ConversationIdPayload {
-  readonly conversation_id: string;
+// Interrupt payload carried inside AgentEvent.args when type === 'interrupt'
+export interface InterruptPayload {
+  readonly mode: 'approval';
+  readonly tool_calls: ReadonlyArray<{
+    name: string;
+    args: Record<string, unknown>;
+    call_id: string;
+  }>;
 }
 
-// Type guard to distinguish first payload from agent events
-export function isConversationIdPayload(v: unknown): v is ConversationIdPayload {
+// First SSE payload (not an AgentEvent)
+export interface ThreadIdPayload {
+  readonly thread_id: string;
+}
+
+// Type guards
+export function isThreadIdPayload(v: unknown): v is ThreadIdPayload {
   return (
     typeof v === 'object' &&
     v !== null &&
-    'conversation_id' in v &&
-    typeof (v as ConversationIdPayload).conversation_id === 'string' &&
+    'thread_id' in v &&
+    typeof (v as ThreadIdPayload).thread_id === 'string' &&
     !('type' in v)
   );
 }
@@ -39,7 +55,7 @@ export function isAgentEvent(v: unknown): v is AgentEvent {
 // Message blocks rendered in the UI
 export interface ThinkingBlock {
   readonly kind: 'thinking';
-  text: string; // mutable — streams in progressively
+  text: string;
 }
 
 export interface ToolCallBlock {
@@ -69,26 +85,31 @@ export interface UserMessage {
 export interface AssistantMessage {
   readonly id: string;
   readonly role: 'assistant';
-  blocks: MessageBlock[]; // grows as stream arrives
-  finalText?: string;     // from done event if different from last thinking
+  blocks: MessageBlock[];
+  finalText?: string;
   isStreaming: boolean;
+  interruptPayload?: InterruptPayload;
 }
 
 export type ConversationMessage = UserMessage | AssistantMessage;
 
 // Stream status
-export type StreamStatus = 'idle' | 'streaming' | 'done' | 'error';
+export type StreamStatus = 'idle' | 'streaming' | 'interrupted' | 'done' | 'error';
 
-// API request shape
+// API request shapes
 export interface ChatRequest {
   readonly message: string;
-  readonly conversation_id?: string;
+  readonly thread_id?: string;
+}
+
+export interface ResumeRequest {
+  readonly decision: Record<string, unknown>;
 }
 
 // Cancel response
 export interface CancelResponse {
   readonly status: 'cancelled' | 'not_found';
-  readonly conversation_id: string;
+  readonly thread_id: string;
 }
 
 // Health response
