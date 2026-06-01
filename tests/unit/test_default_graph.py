@@ -1,0 +1,207 @@
+"""Unit tests for the default agent LangGraph graph.
+
+All tests use MemorySaver (in-process, no disk) and FakeLLMClient
+(no network). Each test creates a fresh graph instance.
+"""
+from __future__ import annotations
+
+import asyncio
+
+import pytest
+from langgraph.checkpoint.memory import MemorySaver
+from langgraph.types import Command
+
+from harness.adapters.llm.fake import FakeLLMClient
+from harness.adapters.tools.calculator import CalculatorTool
+from harness.agents.default.graph import GraphState, build_graph
+from harness.core.tools.registry import ToolRegistry
+from harness.core.types import AgentEvent, LLMResponse, Message, Role, ToolCall
+
+
+def _make_graph(responses: list[LLMResponse], registry: ToolRegistry | None = None):
+    return build_graph(
+        llm=FakeLLMClient(responses),
+        checkpointer=MemorySaver(),
+        registry=registry,
+    )
+
+
+async def _invoke_with_sentinel(graph, state_or_command, config: dict) -> list[AgentEvent]:
+    """Run graph.ainvoke concurrently with draining the event queue. Always puts sentinel."""
+    queue: asyncio.Queue = config["configurable"]["event_queue"]
+
+    async def _go():
+        try:
+            await graph.ainvoke(state_or_command, config)
+        finally:
+            await queue.put(None)
+
+    task = asyncio.create_task(_go())
+    events: list[AgentEvent] = []
+    while True:
+        item = await queue.get()
+        if item is None:
+            break
+        events.append(item)
+    await task
+    return events
+
+
+def _base_state(max_iterations: int = 8) -> GraphState:
+    return {
+        "messages": [Message(role=Role.USER, content="test")],
+        "iteration": 0,
+        "max_iterations": max_iterations,
+    }
+
+
+def _registry_with_approvable() -> ToolRegistry:
+    """Registry where calculator requires approval."""
+    class ApprovableCalculator(CalculatorTool):
+        @property
+        def requires_approval(self) -> bool:
+            return True
+
+    r = ToolRegistry()
+    r.register(ApprovableCalculator())
+    return r
+
+
+@pytest.mark.asyncio
+async def test_happy_path_no_tools_emits_final():
+    graph = _make_graph([LLMResponse(text="The answer is 42.")])
+    queue: asyncio.Queue = asyncio.Queue()
+    config = {"configurable": {"thread_id": "t1", "event_queue": queue}}
+    events = await _invoke_with_sentinel(graph, _base_state(), config)
+
+    types = [e.type for e in events]
+    assert "final" in types
+    final = next(e for e in events if e.type == "final")
+    assert final.text == "The answer is 42."
+    assert final.stopped_reason == "final_answer"
+
+
+@pytest.mark.asyncio
+async def test_tool_use_loop_emits_tool_events_then_final():
+    graph = _make_graph([
+        LLMResponse(
+            text="",
+            tool_calls=(ToolCall(id="c1", name="calculator", arguments={"expression": "6*7"}),),
+        ),
+        LLMResponse(text="The result is 42."),
+    ])
+    queue: asyncio.Queue = asyncio.Queue()
+    config = {"configurable": {"thread_id": "t2", "event_queue": queue}}
+    events = await _invoke_with_sentinel(graph, _base_state(), config)
+
+    types = [e.type for e in events]
+    assert "tool_call" in types
+    assert "tool_result" in types
+    assert "final" in types
+
+    tool_result = next(e for e in events if e.type == "tool_result")
+    assert tool_result.text == "42"
+    assert tool_result.is_error is False
+
+
+@pytest.mark.asyncio
+async def test_iteration_limit_emits_error():
+    looping = [
+        LLMResponse(
+            text="",
+            tool_calls=(ToolCall(id=f"c{i}", name="calculator", arguments={"expression": "1+1"}),),
+        )
+        for i in range(10)
+    ]
+    graph = _make_graph(looping)
+    queue: asyncio.Queue = asyncio.Queue()
+    config = {"configurable": {"thread_id": "t3", "event_queue": queue}}
+    events = await _invoke_with_sentinel(graph, _base_state(max_iterations=3), config)
+
+    types = [e.type for e in events]
+    assert "error" in types
+    assert "final" not in types
+
+
+@pytest.mark.asyncio
+async def test_approval_gate_passthrough_when_no_approval_needed():
+    """CalculatorTool has requires_approval=False — gate is transparent."""
+    graph = _make_graph([
+        LLMResponse(
+            text="",
+            tool_calls=(ToolCall(id="c1", name="calculator", arguments={"expression": "2+2"}),),
+        ),
+        LLMResponse(text="4"),
+    ])
+    queue: asyncio.Queue = asyncio.Queue()
+    config = {"configurable": {"thread_id": "t4", "event_queue": queue}}
+    events = await _invoke_with_sentinel(graph, _base_state(), config)
+
+    types = [e.type for e in events]
+    assert "interrupt" not in types
+    assert "final" in types
+
+
+@pytest.mark.asyncio
+async def test_approval_gate_interrupt_then_resume_approved():
+    registry = _registry_with_approvable()
+    graph = build_graph(
+        llm=FakeLLMClient([
+            LLMResponse(
+                text="",
+                tool_calls=(ToolCall(id="c1", name="calculator", arguments={"expression": "3+3"}),),
+            ),
+            LLMResponse(text="6"),
+        ]),
+        checkpointer=MemorySaver(),
+        registry=registry,
+    )
+
+    # First invocation — expect interrupt event
+    queue1: asyncio.Queue = asyncio.Queue()
+    config1 = {"configurable": {"thread_id": "t-approve", "event_queue": queue1}}
+    first_pass = await _invoke_with_sentinel(graph, _base_state(), config1)
+
+    assert any(e.type == "interrupt" for e in first_pass), f"Expected interrupt, got: {[e.type for e in first_pass]}"
+
+    # Second invocation — resume with approved=True
+    queue2: asyncio.Queue = asyncio.Queue()
+    config2 = {"configurable": {"thread_id": "t-approve", "event_queue": queue2}}
+    second_pass = await _invoke_with_sentinel(
+        graph, Command(resume={"approved": True}), config2
+    )
+
+    types2 = [e.type for e in second_pass]
+    assert "final" in types2, f"Expected final after approval, got: {types2}"
+
+
+@pytest.mark.asyncio
+async def test_approval_gate_interrupt_then_resume_rejected():
+    registry = _registry_with_approvable()
+    graph = build_graph(
+        llm=FakeLLMClient([
+            LLMResponse(
+                text="",
+                tool_calls=(ToolCall(id="c1", name="calculator", arguments={"expression": "1+1"}),),
+            ),
+        ]),
+        checkpointer=MemorySaver(),
+        registry=registry,
+    )
+
+    # First invocation
+    queue1: asyncio.Queue = asyncio.Queue()
+    config1 = {"configurable": {"thread_id": "t-reject", "event_queue": queue1}}
+    first_pass = await _invoke_with_sentinel(graph, _base_state(), config1)
+    assert any(e.type == "interrupt" for e in first_pass)
+
+    # Resume with approved=False
+    queue2: asyncio.Queue = asyncio.Queue()
+    config2 = {"configurable": {"thread_id": "t-reject", "event_queue": queue2}}
+    second_pass = await _invoke_with_sentinel(
+        graph, Command(resume={"approved": False}), config2
+    )
+
+    types2 = [e.type for e in second_pass]
+    assert "error" in types2, f"Expected error after rejection, got: {types2}"
+    assert "final" not in types2

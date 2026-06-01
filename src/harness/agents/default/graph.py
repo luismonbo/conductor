@@ -24,6 +24,7 @@ import operator
 
 from typing_extensions import TypedDict
 
+from langchain_core.runnables import RunnableConfig
 from langgraph.graph import StateGraph, START, END
 from langgraph.types import interrupt
 
@@ -55,7 +56,7 @@ def build_graph(
     if registry is None:
         registry = build_registry()
 
-    async def _call_model(state: GraphState, config: dict) -> dict:
+    async def _call_model(state: GraphState, config: RunnableConfig) -> dict:
         queue: asyncio.Queue = config["configurable"]["event_queue"]
         msgs = list(state["messages"])
         if not msgs or msgs[0].role != Role.SYSTEM:
@@ -85,7 +86,7 @@ def build_graph(
             return "approval_gate"
         return "final"
 
-    async def _approval_gate(state: GraphState, config: dict) -> dict:
+    async def _approval_gate(state: GraphState, config: RunnableConfig) -> dict:
         queue: asyncio.Queue = config["configurable"]["event_queue"]
         last = state["messages"][-1]
 
@@ -116,7 +117,7 @@ def build_graph(
             return "execute_tools" if decision.get("approved") else "error"
         return "execute_tools"
 
-    async def _execute_tools(state: GraphState, config: dict) -> dict:
+    async def _execute_tools(state: GraphState, config: RunnableConfig) -> dict:
         queue: asyncio.Queue = config["configurable"]["event_queue"]
         last = state["messages"][-1]
         new_msgs: list[Message] = []
@@ -139,7 +140,7 @@ def build_graph(
 
         return {"messages": new_msgs}
 
-    async def _final(state: GraphState, config: dict) -> dict:
+    async def _final(state: GraphState, config: RunnableConfig) -> dict:
         queue: asyncio.Queue = config["configurable"]["event_queue"]
         last_assistant = next(
             (m for m in reversed(state["messages"]) if m.role == Role.ASSISTANT),
@@ -149,7 +150,7 @@ def build_graph(
         await queue.put(AgentEvent(type="final", text=text, stopped_reason="final_answer"))
         return {}
 
-    async def _error(state: GraphState, config: dict) -> dict:
+    async def _error(state: GraphState, config: RunnableConfig) -> dict:
         queue: asyncio.Queue = config["configurable"]["event_queue"]
         await queue.put(AgentEvent(
             type="error",
