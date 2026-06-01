@@ -5,9 +5,11 @@ import type { ConversationMessage } from '@/types';
 
 interface MessageListProps {
   messages: ConversationMessage[];
+  onApprove: () => void;
+  onReject: () => void;
 }
 
-export function MessageList({ messages }: MessageListProps) {
+export function MessageList({ messages, onApprove, onReject }: MessageListProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -42,6 +44,9 @@ export function MessageList({ messages }: MessageListProps) {
             blocks={msg.blocks}
             finalText={msg.finalText}
             isStreaming={msg.isStreaming}
+            interruptPayload={msg.interruptPayload}
+            onApprove={onApprove}
+            onReject={onReject}
           />
         )
       )}

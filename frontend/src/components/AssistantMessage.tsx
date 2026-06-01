@@ -1,15 +1,26 @@
 import { ThinkingBlock } from '@/components/ThinkingBlock';
 import { ToolCallPill } from '@/components/ToolCallPill';
 import { ToolResultPill } from '@/components/ToolResultPill';
-import type { MessageBlock } from '@/types';
+import { ApprovalCard } from '@/components/ApprovalCard';
+import type { InterruptPayload, MessageBlock } from '@/types';
 
 interface AssistantMessageProps {
   blocks: MessageBlock[];
   finalText?: string;
   isStreaming: boolean;
+  interruptPayload?: InterruptPayload;
+  onApprove?: () => void;
+  onReject?: () => void;
 }
 
-export function AssistantMessage({ blocks, finalText, isStreaming }: AssistantMessageProps) {
+export function AssistantMessage({
+  blocks,
+  finalText,
+  isStreaming,
+  interruptPayload,
+  onApprove,
+  onReject,
+}: AssistantMessageProps) {
   return (
     <div style={{ padding: '4px 16px', maxWidth: '80%' }}>
       {blocks.map((block, i) => {
@@ -53,7 +64,14 @@ export function AssistantMessage({ blocks, finalText, isStreaming }: AssistantMe
           {finalText}
         </div>
       )}
-      {isStreaming && blocks.length === 0 && (
+      {interruptPayload && onApprove && onReject && (
+        <ApprovalCard
+          payload={interruptPayload}
+          onApprove={onApprove}
+          onReject={onReject}
+        />
+      )}
+      {isStreaming && blocks.length === 0 && !interruptPayload && (
         <span
           style={{
             fontFamily: 'var(--mono)',

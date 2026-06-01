@@ -6,7 +6,6 @@ interface ChatInputProps {
   onChange: (v: string) => void;
   onSend: () => void;
   onCancel: () => void;
-  onReject: () => void;
   streamStatus: StreamStatus;
   disabled: boolean;
 }
@@ -16,7 +15,6 @@ export function ChatInput({
   onChange,
   onSend,
   onCancel,
-  onReject,
   streamStatus,
   disabled,
 }: ChatInputProps) {
@@ -46,7 +44,7 @@ export function ChatInput({
 
   const isStreaming = streamStatus === 'streaming';
   const isInterrupted = streamStatus === 'interrupted';
-  const showActionButton = isStreaming || isInterrupted;
+  const placeholder = isInterrupted ? 'Waiting for your approval…' : 'Send a message…';
 
   return (
     <div
@@ -65,7 +63,7 @@ export function ChatInput({
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={handleKeyDown}
         disabled={disabled}
-        placeholder="Send a message…"
+        placeholder={placeholder}
         aria-label="Message"
         rows={1}
         style={{
@@ -82,11 +80,13 @@ export function ChatInput({
           lineHeight: '20px',
           minHeight: '40px',
           transition: 'border-color 0.15s',
+          opacity: isInterrupted ? 0.5 : 1,
         }}
       />
-      {showActionButton ? (
+      {isStreaming ? (
         <button
-          onClick={isInterrupted ? onReject : onCancel}
+          type="button"
+          onClick={onCancel}
           style={{
             padding: '10px 16px',
             background: 'transparent',
@@ -102,38 +102,41 @@ export function ChatInput({
           onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(248,113,113,0.1)')}
           onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
         >
-          {isInterrupted ? 'Reject' : 'Cancel'}
+          Cancel
         </button>
       ) : (
-        <button
-          onClick={onSend}
-          disabled={disabled || !value.trim()}
-          style={{
-            padding: '10px 16px',
-            background: 'transparent',
-            border: '1px solid var(--border)',
-            borderRadius: '8px',
-            color: 'var(--text-muted)',
-            fontFamily: 'var(--mono)',
-            fontSize: 'var(--text-sm)',
-            cursor: disabled || !value.trim() ? 'not-allowed' : 'pointer',
-            whiteSpace: 'nowrap',
-            transition: 'border-color 0.15s, color 0.15s',
-            opacity: disabled || !value.trim() ? 0.4 : 1,
-          }}
-          onMouseEnter={(e) => {
-            if (!disabled && value.trim()) {
-              e.currentTarget.style.borderColor = 'var(--accent)';
-              e.currentTarget.style.color = 'var(--accent)';
-            }
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.borderColor = 'var(--border)';
-            e.currentTarget.style.color = 'var(--text-muted)';
-          }}
-        >
-          Send
-        </button>
+        !isInterrupted && (
+          <button
+            type="button"
+            onClick={onSend}
+            disabled={disabled || !value.trim()}
+            style={{
+              padding: '10px 16px',
+              background: 'transparent',
+              border: '1px solid var(--border)',
+              borderRadius: '8px',
+              color: 'var(--text-muted)',
+              fontFamily: 'var(--mono)',
+              fontSize: 'var(--text-sm)',
+              cursor: disabled || !value.trim() ? 'not-allowed' : 'pointer',
+              whiteSpace: 'nowrap',
+              transition: 'border-color 0.15s, color 0.15s',
+              opacity: disabled || !value.trim() ? 0.4 : 1,
+            }}
+            onMouseEnter={(e) => {
+              if (!disabled && value.trim()) {
+                e.currentTarget.style.borderColor = 'var(--accent)';
+                e.currentTarget.style.color = 'var(--accent)';
+              }
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.borderColor = 'var(--border)';
+              e.currentTarget.style.color = 'var(--text-muted)';
+            }}
+          >
+            Send
+          </button>
+        )
       )}
     </div>
   );

@@ -61,14 +61,17 @@ export function ChatPage() {
         </div>
       )}
 
-      <MessageList messages={messages} />
+      <MessageList
+        messages={messages}
+        onApprove={() => resumeStream({ approved: true })}
+        onReject={() => resumeStream({ approved: false })}
+      />
 
       <ChatInput
         value={inputValue}
         onChange={setInputValue}
         onSend={() => sendMessage(inputValue)}
         onCancel={cancelStream}
-        onReject={() => resumeStream({ approved: false })}
         streamStatus={streamStatus}
         disabled={inputDisabled}
       />
