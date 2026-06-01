@@ -33,7 +33,12 @@ class LLMClient(Protocol):
         self,
         messages: list[Message],
         tools: list[ToolSpec] | None = None,
-    ) -> AsyncGenerator[str | LLMResponse, None]: ...
+    ) -> AsyncGenerator[str | LLMResponse, None]:
+        """Implement as an async generator function (async def + yield).
+
+        Callers: async for item in client.stream(messages, tools):
+        """
+        ...
 
     @property
     def model_id(self) -> str: ...
