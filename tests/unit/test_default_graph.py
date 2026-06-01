@@ -210,6 +210,45 @@ async def test_approval_gate_interrupt_then_resume_rejected():
 
 
 @pytest.mark.asyncio
+async def test_rejection_loop_hits_iteration_limit():
+    """If the agent keeps requesting the same rejected tool, max_iterations stops it."""
+    registry = _registry_with_approvable()
+    # Enough tool-call responses to fill max_iterations; agent never gives a final answer.
+    looping_responses = [
+        LLMResponse(
+            text="",
+            tool_calls=(ToolCall(id=f"c{i}", name="calculator", arguments={"expression": "1+1"}),),
+        )
+        for i in range(10)
+    ]
+    graph = build_graph(
+        llm=FakeLLMClient(looping_responses),
+        checkpointer=MemorySaver(),
+        registry=registry,
+    )
+
+    # First invocation — hits interrupt
+    queue1: asyncio.Queue = asyncio.Queue()
+    config1 = {"configurable": {"thread_id": "t-reject-loop", "event_queue": queue1}}
+    await _invoke_with_sentinel(graph, _base_state(max_iterations=3), config1)
+
+    # Keep rejecting until iteration limit
+    thread_id = "t-reject-loop"
+    final_events: list[AgentEvent] = []
+    for _ in range(5):  # more rejections than max_iterations
+        q: asyncio.Queue = asyncio.Queue()
+        config = {"configurable": {"thread_id": thread_id, "event_queue": q}}
+        events = await _invoke_with_sentinel(graph, Command(resume={"approved": False}), config)
+        final_events = events
+        if any(e.type in ("error", "final") for e in events):
+            break
+
+    types = [e.type for e in final_events]
+    assert "error" in types, f"Expected error after hitting iteration limit, got: {types}"
+    assert "final" not in types
+
+
+@pytest.mark.asyncio
 async def test_call_model_emits_token_events():
     """Each word of the LLM response should arrive as a separate token event."""
     graph = _make_graph([LLMResponse(text="Hello world")])

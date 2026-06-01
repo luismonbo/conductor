@@ -120,6 +120,7 @@ def build_graph(
 
     async def _handle_rejection(state: GraphState, config: RunnableConfig) -> dict:
         queue: asyncio.Queue = config["configurable"]["event_queue"]
+        # Loop is bounded: _call_model increments iteration; _route_after_model enforces max_iterations.
         last = state["messages"][-1]
 
         # Inject a fake tool-result message for each rejected call so the
