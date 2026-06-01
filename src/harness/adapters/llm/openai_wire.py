@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from typing import Any
+from typing import Any, AsyncGenerator
 
 from harness.core.llm.client import LLMClient
 from harness.core.llm.tool_parsing import ToolCallParser
@@ -146,3 +146,65 @@ class _OpenAIBaseClient(LLMClient):
             kwargs["tool_choice"] = "auto"
         completion = await self._client.chat.completions.create(**kwargs)
         return parse_completion(completion)
+
+    async def stream(
+        self,
+        messages: list[Message],
+        tools: list[ToolSpec] | None = None,
+    ) -> AsyncGenerator[str | LLMResponse, None]:
+        wire_messages = build_request_messages(messages, self._parser, tools)
+        kwargs: dict = {
+            "model": self._model_id,
+            "messages": wire_messages,
+            "temperature": self._temperature,
+            "stream": True,
+        }
+        if tools:
+            kwargs["tools"] = [spec_to_wire(s) for s in tools]
+            kwargs["tool_choice"] = "auto"
+
+        text_acc: list[str] = []
+        tc_acc: dict[int, dict] = {}  # chunk index → accumulated data
+        finish_reason: str | None = None
+
+        stream_obj = await self._client.chat.completions.create(**kwargs)
+        async for chunk in stream_obj:
+            if not chunk.choices:
+                continue
+            choice = chunk.choices[0]
+            delta = choice.delta
+            if choice.finish_reason:
+                finish_reason = choice.finish_reason
+
+            if delta.content:
+                text_acc.append(delta.content)
+                yield delta.content
+
+            if getattr(delta, "tool_calls", None):
+                for tc_delta in delta.tool_calls:
+                    idx = tc_delta.index
+                    if idx not in tc_acc:
+                        tc_acc[idx] = {"id": "", "name": "", "args_parts": []}
+                    if tc_delta.id:
+                        tc_acc[idx]["id"] = tc_delta.id
+                    if tc_delta.function.name:
+                        tc_acc[idx]["name"] = tc_delta.function.name
+                    if tc_delta.function.arguments:
+                        tc_acc[idx]["args_parts"].append(tc_delta.function.arguments)
+
+        tool_calls: tuple[ToolCall, ...] = ()
+        if tc_acc:
+            tool_calls = tuple(
+                ToolCall(
+                    id=data["id"] or str(uuid.uuid4()),
+                    name=data["name"],
+                    arguments=json.loads("".join(data["args_parts"]) or "{}"),
+                )
+                for _, data in sorted(tc_acc.items())
+            )
+
+        yield LLMResponse(
+            text="".join(text_acc),
+            tool_calls=tool_calls,
+            finish_reason=finish_reason,
+        )
