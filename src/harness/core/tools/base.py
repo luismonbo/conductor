@@ -17,6 +17,11 @@ class Tool(Protocol):
     @property
     def spec(self) -> ToolSpec: ...
 
+    @property
+    def requires_approval(self) -> bool:
+        """True for mutating tools that require human approval before execution."""
+        return False
+
     async def run(self, arguments: dict[str, Any]) -> str:
         """Execute and return a string result. Raise on hard failure; the
         registry wraps exceptions into an error ToolResult so one bad tool

@@ -28,6 +28,9 @@ class ToolRegistry:
     def names(self) -> list[str]:
         return list(self._tools)
 
+    def get(self, name: str) -> Tool | None:
+        return self._tools.get(name)
+
     async def dispatch(self, call: ToolCall) -> ToolResult:
         tool = self._tools.get(call.name)
         if tool is None:
