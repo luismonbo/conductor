@@ -32,7 +32,7 @@ from harness.agents.default.prompt import SYSTEM_PROMPT
 from harness.agents.default.tools import build_registry
 from harness.core.llm.client import LLMClient
 from harness.core.tools.registry import ToolRegistry
-from harness.core.types import AgentEvent, Message, Role
+from harness.core.types import AgentEvent, LLMResponse, Message, Role
 
 
 class GraphState(TypedDict):
@@ -62,10 +62,17 @@ def build_graph(
         if not msgs or msgs[0].role != Role.SYSTEM:
             msgs = [Message(role=Role.SYSTEM, content=SYSTEM_PROMPT)] + msgs
 
-        response = await llm.generate(msgs, registry.specs())
+        response: LLMResponse | None = None
+        async for item in llm.stream(msgs, registry.specs()):
+            if isinstance(item, str):
+                if item:
+                    await queue.put(AgentEvent(type="token", text=item))
+            else:
+                response = item
 
-        if response.text:
-            await queue.put(AgentEvent(type="thinking", text=response.text))
+        if response is None:
+            response = LLMResponse(text="")
+
         for tc in response.tool_calls:
             await queue.put(AgentEvent(
                 type="tool_call", name=tc.name, args=tc.arguments, call_id=tc.id,

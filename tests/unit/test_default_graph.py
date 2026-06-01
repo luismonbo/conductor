@@ -205,3 +205,18 @@ async def test_approval_gate_interrupt_then_resume_rejected():
     types2 = [e.type for e in second_pass]
     assert "error" in types2, f"Expected error after rejection, got: {types2}"
     assert "final" not in types2
+
+
+@pytest.mark.asyncio
+async def test_call_model_emits_token_events():
+    """Each word of the LLM response should arrive as a separate token event."""
+    graph = _make_graph([LLMResponse(text="Hello world")])
+    queue: asyncio.Queue = asyncio.Queue()
+    config = {"configurable": {"thread_id": "t-tokens", "event_queue": queue}}
+    events = await _invoke_with_sentinel(graph, _base_state(), config)
+
+    token_events = [e for e in events if e.type == "token"]
+    assert len(token_events) >= 2  # "Hello" and "world" are separate yields
+    full_text = "".join(e.text for e in token_events)
+    assert "Hello" in full_text
+    assert "world" in full_text
