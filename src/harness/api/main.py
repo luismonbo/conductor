@@ -49,11 +49,11 @@ _running: dict[str, asyncio.Task] = {}
 _registry: dict[str, object] | None = None
 
 
-def _get_registry() -> dict[str, object]:
+async def _get_registry() -> dict[str, object]:
     global _registry
     if _registry is None:
         settings = get_settings()
-        cp = build_checkpointer(settings)
+        cp = await build_checkpointer(settings)
         _registry = build_agent_registry(settings, cp)
     return _registry
 
@@ -134,7 +134,7 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
     thread_id = req.thread_id or str(uuid.uuid4())
     agent_name = req.agent or settings.agent
 
-    registry = _get_registry()
+    registry = await _get_registry()
     graph = registry.get(agent_name) or registry[settings.agent]
 
     event_queue: asyncio.Queue[AgentEvent | None] = asyncio.Queue()
@@ -178,7 +178,7 @@ async def resume_run(thread_id: str, req: ResumeRequest) -> StreamingResponse:
     Response: same SSE stream as /chat/stream (starts with thread_id frame).
     """
     settings = get_settings()
-    registry = _get_registry()
+    registry = await _get_registry()
     graph = registry[settings.agent]
 
     event_queue: asyncio.Queue[AgentEvent | None] = asyncio.Queue()
