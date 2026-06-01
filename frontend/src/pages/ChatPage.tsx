@@ -11,11 +11,14 @@ export function ChatPage() {
     inputValue,
     errorMessage,
     sendMessage,
+    resumeStream,
     cancelStream,
     setInputValue,
   } = useChatStream();
 
   const isStreaming = streamStatus === 'streaming';
+  const isInterrupted = streamStatus === 'interrupted';
+  const inputDisabled = isStreaming || isInterrupted;
 
   return (
     <div style={{
@@ -24,7 +27,6 @@ export function ChatPage() {
       height: '100%',
       background: 'var(--bg)',
     }}>
-      {/* Header */}
       <header style={{
         borderBottom: '1px solid var(--border)',
         padding: '12px 16px',
@@ -45,7 +47,6 @@ export function ChatPage() {
         <StatusBar streamStatus={streamStatus} currentTool={currentTool} />
       </header>
 
-      {/* Error banner */}
       {errorMessage && (
         <div style={{
           padding: '8px 16px',
@@ -60,17 +61,16 @@ export function ChatPage() {
         </div>
       )}
 
-      {/* Message list — takes all remaining space */}
       <MessageList messages={messages} />
 
-      {/* Input */}
       <ChatInput
         value={inputValue}
         onChange={setInputValue}
         onSend={() => sendMessage(inputValue)}
         onCancel={cancelStream}
-        isStreaming={isStreaming}
-        disabled={isStreaming}
+        onReject={() => resumeStream({ approved: false })}
+        streamStatus={streamStatus}
+        disabled={inputDisabled}
       />
     </div>
   );

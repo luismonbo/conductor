@@ -16,19 +16,25 @@ export function StatusBar({ streamStatus, currentTool }: StatusBarProps) {
       setVisible(true);
       const t = setTimeout(() => setVisible(false), 2000);
       return () => clearTimeout(t);
+    } else if (streamStatus === 'interrupted') {
+      setVisible(true);
     } else {
       setVisible(false);
     }
   }, [streamStatus]);
 
   const label =
-    streamStatus === 'streaming'
+    streamStatus === 'interrupted'
+      ? 'Waiting for approval'
+      : streamStatus === 'streaming'
       ? currentTool
         ? `Using ${currentTool}`
         : 'Thinking'
       : 'Done';
 
   const isPulsing = streamStatus === 'streaming';
+  const dotColor =
+    streamStatus === 'interrupted' ? 'var(--color-warning, #f59e0b)' : 'var(--accent)';
 
   return (
     <div
@@ -53,7 +59,7 @@ export function StatusBar({ streamStatus, currentTool }: StatusBarProps) {
               width: 6,
               height: 6,
               borderRadius: '50%',
-              background: 'var(--accent)',
+              background: dotColor,
               display: 'inline-block',
               animation: isPulsing ? 'pulse 1.5s ease-in-out infinite' : 'none',
             }}

@@ -1,11 +1,13 @@
 import { useRef, useEffect } from 'react';
+import type { StreamStatus } from '@/types';
 
 interface ChatInputProps {
   value: string;
   onChange: (v: string) => void;
   onSend: () => void;
   onCancel: () => void;
-  isStreaming: boolean;
+  onReject: () => void;
+  streamStatus: StreamStatus;
   disabled: boolean;
 }
 
@@ -14,12 +16,12 @@ export function ChatInput({
   onChange,
   onSend,
   onCancel,
-  isStreaming,
+  onReject,
+  streamStatus,
   disabled,
 }: ChatInputProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Auto-resize textarea
   useEffect(() => {
     const el = textareaRef.current;
     if (!el) return;
@@ -29,12 +31,11 @@ export function ChatInput({
     el.style.height = `${Math.min(el.scrollHeight, maxHeight)}px`;
   }, [value]);
 
-  // Restore focus after streaming ends
   useEffect(() => {
-    if (!isStreaming) {
+    if (streamStatus === 'idle' || streamStatus === 'done' || streamStatus === 'error') {
       textareaRef.current?.focus();
     }
-  }, [isStreaming]);
+  }, [streamStatus]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -42,6 +43,10 @@ export function ChatInput({
       if (!disabled && value.trim()) onSend();
     }
   };
+
+  const isStreaming = streamStatus === 'streaming';
+  const isInterrupted = streamStatus === 'interrupted';
+  const showActionButton = isStreaming || isInterrupted;
 
   return (
     <div
@@ -79,9 +84,9 @@ export function ChatInput({
           transition: 'border-color 0.15s',
         }}
       />
-      {isStreaming ? (
+      {showActionButton ? (
         <button
-          onClick={onCancel}
+          onClick={isInterrupted ? onReject : onCancel}
           style={{
             padding: '10px 16px',
             background: 'transparent',
@@ -97,7 +102,7 @@ export function ChatInput({
           onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(248,113,113,0.1)')}
           onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
         >
-          Cancel
+          {isInterrupted ? 'Reject' : 'Cancel'}
         </button>
       ) : (
         <button

@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useReducer, useRef } from 'react';
-import { streamChat, cancelChat } from '@/api';
+import { streamChat, cancelChat, resumeChat } from '@/api';
 import {
-  isConversationIdPayload,
+  isThreadIdPayload,
+  type AgentEvent,
   type AssistantMessage,
   type ConversationMessage,
+  type InterruptPayload,
   type MessageBlock,
   type StreamStatus,
   type ThinkingBlock,
+  type ThreadIdPayload,
 } from '@/types';
 
 // ---------------------------------------------------------------------------
@@ -14,21 +17,23 @@ import {
 // ---------------------------------------------------------------------------
 
 interface ChatState {
-  conversationId: string | null;
+  threadId: string | null;
   messages: ConversationMessage[];
   streamStatus: StreamStatus;
   currentTool: string | null;
   inputValue: string;
   errorMessage: string | null;
+  interruptPayload: InterruptPayload | null;
 }
 
 const initialState: ChatState = {
-  conversationId: null,
+  threadId: null,
   messages: [],
   streamStatus: 'idle',
   currentTool: null,
   inputValue: '',
   errorMessage: null,
+  interruptPayload: null,
 };
 
 // ---------------------------------------------------------------------------
@@ -38,12 +43,13 @@ const initialState: ChatState = {
 type ChatAction =
   | { type: 'SET_INPUT'; value: string }
   | { type: 'SEND_USER_MESSAGE'; text: string; assistantId: string }
-  | { type: 'SET_CONVERSATION_ID'; id: string }
+  | { type: 'SET_THREAD_ID'; id: string }
   | { type: 'APPEND_THINKING'; text: string }
   | { type: 'ADD_TOOL_CALL'; name: string; args: Record<string, unknown>; call_id: string }
   | { type: 'ADD_TOOL_RESULT'; text: string; name: string; call_id: string; is_error: boolean }
-  | { type: 'STREAM_DONE'; text: string; stopped_reason: string }
+  | { type: 'STREAM_FINAL'; text: string; stopped_reason: string }
   | { type: 'STREAM_ERROR'; text: string }
+  | { type: 'STREAM_INTERRUPT'; payload: InterruptPayload }
   | { type: 'STREAM_CANCELLED' };
 
 // ---------------------------------------------------------------------------
@@ -53,18 +59,11 @@ type ChatAction =
 function getLastAssistantMessage(messages: ConversationMessage[]): AssistantMessage | null {
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i];
-    if (msg.role === 'assistant' && msg.isStreaming) {
-      return msg;
-    }
+    if (msg.role === 'assistant' && msg.isStreaming) return msg;
   }
   return null;
 }
 
-/**
- * Returns a new messages array where the last streaming AssistantMessage has
- * been replaced with the result of `updater`. If no such message exists the
- * original array is returned unchanged.
- */
 function updateLastStreamingMessage(
   messages: ConversationMessage[],
   updater: (msg: AssistantMessage) => AssistantMessage,
@@ -72,8 +71,7 @@ function updateLastStreamingMessage(
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i];
     if (msg.role === 'assistant' && msg.isStreaming) {
-      const updated = updater(msg);
-      return [...messages.slice(0, i), updated, ...messages.slice(i + 1)];
+      return [...messages.slice(0, i), updater(msg), ...messages.slice(i + 1)];
     }
   }
   return messages;
@@ -107,24 +105,22 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
         inputValue: '',
         currentTool: null,
         errorMessage: null,
+        interruptPayload: null,
       };
     }
 
-    case 'SET_CONVERSATION_ID':
-      return { ...state, conversationId: action.id };
+    case 'SET_THREAD_ID':
+      return { ...state, threadId: action.id };
 
     case 'APPEND_THINKING': {
       const messages = updateLastStreamingMessage(state.messages, (msg) => {
         const lastBlock = msg.blocks[msg.blocks.length - 1];
         let newBlocks: MessageBlock[];
         if (lastBlock && lastBlock.kind === 'thinking') {
-          // Append to existing ThinkingBlock — produce a new block object
           const updatedBlock: ThinkingBlock = { ...lastBlock, text: lastBlock.text + action.text };
           newBlocks = [...msg.blocks.slice(0, -1), updatedBlock];
         } else {
-          // Push a new ThinkingBlock
-          const newBlock: ThinkingBlock = { kind: 'thinking', text: action.text };
-          newBlocks = [...msg.blocks, newBlock];
+          newBlocks = [...msg.blocks, { kind: 'thinking' as const, text: action.text }];
         }
         return { ...msg, blocks: newBlocks };
       });
@@ -159,17 +155,12 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
       return { ...state, messages, currentTool: null };
     }
 
-    case 'STREAM_DONE': {
+    case 'STREAM_FINAL': {
       const lastMsg = getLastAssistantMessage(state.messages);
       const lastThinkingBlock = lastMsg?.blocks
         .filter((b): b is ThinkingBlock => b.kind === 'thinking')
         .at(-1);
-
-      // Avoid echoing thinking text as the final answer — the done event often repeats
-      // the last thinking block text verbatim; only set finalText if it adds new content.
-      const shouldSetFinalText =
-        action.text !== lastThinkingBlock?.text;
-
+      const shouldSetFinalText = action.text !== lastThinkingBlock?.text;
       const messages = updateLastStreamingMessage(state.messages, (msg) => ({
         ...msg,
         isStreaming: false,
@@ -179,13 +170,27 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
     }
 
     case 'STREAM_ERROR': {
-      // Don't overwrite 'done' — stream may have sent a done event right before the connection dropped
       if (state.streamStatus === 'done') return state;
       const messages = updateLastStreamingMessage(state.messages, (msg) => ({
         ...msg,
         isStreaming: false,
       }));
       return { ...state, messages, streamStatus: 'error', currentTool: null, errorMessage: action.text };
+    }
+
+    case 'STREAM_INTERRUPT': {
+      const messages = updateLastStreamingMessage(state.messages, (msg) => ({
+        ...msg,
+        isStreaming: false,
+        interruptPayload: action.payload,
+      }));
+      return {
+        ...state,
+        messages,
+        streamStatus: 'interrupted',
+        currentTool: null,
+        interruptPayload: action.payload,
+      };
     }
 
     case 'STREAM_CANCELLED': {
@@ -209,36 +214,27 @@ export function useChatStream() {
   const [state, dispatch] = useReducer(chatReducer, initialState);
   const abortRef = useRef<AbortController | null>(null);
 
-  const sendMessage = useCallback(
-    async (text: string) => {
-      if (state.streamStatus === 'streaming') return;
-      if (!text.trim()) return;
-
-      // Cancel any lingering previous request
-      abortRef.current?.abort();
-      const controller = new AbortController();
-      abortRef.current = controller;
-
-      const assistantId = crypto.randomUUID();
-      dispatch({ type: 'SEND_USER_MESSAGE', text, assistantId });
-
+  const _consumeStream = useCallback(
+    async (gen: AsyncGenerator<ThreadIdPayload | AgentEvent>) => {
       try {
-        for await (const event of streamChat(
-          { message: text, conversation_id: state.conversationId ?? undefined },
-          controller.signal,
-        )) {
-          if (isConversationIdPayload(event)) {
-            dispatch({ type: 'SET_CONVERSATION_ID', id: event.conversation_id });
+        for await (const event of gen) {
+          if (isThreadIdPayload(event)) {
+            dispatch({ type: 'SET_THREAD_ID', id: event.thread_id });
             continue;
           }
 
-          // Narrowed to AgentEvent by isAgentEvent in api.ts's streamChat generator
+          // event is AgentEvent from here
           switch (event.type) {
             case 'thinking':
               dispatch({ type: 'APPEND_THINKING', text: event.text });
               break;
             case 'tool_call':
-              dispatch({ type: 'ADD_TOOL_CALL', name: event.name, args: event.args, call_id: event.call_id });
+              dispatch({
+                type: 'ADD_TOOL_CALL',
+                name: event.name,
+                args: event.args,
+                call_id: event.call_id,
+              });
               break;
             case 'tool_result':
               dispatch({
@@ -249,9 +245,18 @@ export function useChatStream() {
                 is_error: event.is_error,
               });
               break;
-            case 'done':
-              dispatch({ type: 'STREAM_DONE', text: event.text, stopped_reason: event.stopped_reason });
+            case 'final':
+              dispatch({
+                type: 'STREAM_FINAL',
+                text: event.text,
+                stopped_reason: event.stopped_reason,
+              });
               break;
+            case 'interrupt': {
+              const payload = event.args as unknown as InterruptPayload;
+              dispatch({ type: 'STREAM_INTERRUPT', payload });
+              break;
+            }
             case 'error':
               dispatch({ type: 'STREAM_ERROR', text: event.text });
               break;
@@ -268,37 +273,74 @@ export function useChatStream() {
         }
       }
     },
-    [state.streamStatus, state.conversationId],
+    [],
+  );
+
+  const sendMessage = useCallback(
+    async (text: string) => {
+      if (state.streamStatus === 'streaming') return;
+      if (!text.trim()) return;
+
+      abortRef.current?.abort();
+      const controller = new AbortController();
+      abortRef.current = controller;
+
+      const assistantId = crypto.randomUUID();
+      dispatch({ type: 'SEND_USER_MESSAGE', text, assistantId });
+
+      await _consumeStream(
+        streamChat(
+          { message: text, thread_id: state.threadId ?? undefined },
+          controller.signal,
+        ),
+      );
+    },
+    [state.streamStatus, state.threadId, _consumeStream],
+  );
+
+  const resumeStream = useCallback(
+    async (decision: Record<string, unknown>) => {
+      if (!state.threadId) return;
+
+      abortRef.current?.abort();
+      const controller = new AbortController();
+      abortRef.current = controller;
+
+      const assistantId = crypto.randomUUID();
+      dispatch({ type: 'SEND_USER_MESSAGE', text: '', assistantId });
+
+      await _consumeStream(
+        resumeChat(state.threadId, decision, controller.signal),
+      );
+    },
+    [state.threadId, _consumeStream],
   );
 
   const cancelStream = useCallback(() => {
     abortRef.current?.abort();
-    // Fire-and-forget backend cancel
-    if (state.conversationId) {
-      cancelChat(state.conversationId).catch(() => {
-        /* ignore */
-      });
+    if (state.threadId) {
+      cancelChat(state.threadId).catch(() => { /* ignore */ });
     }
-  }, [state.conversationId]);
+  }, [state.threadId]);
 
   const setInputValue = useCallback((value: string) => {
     dispatch({ type: 'SET_INPUT', value });
   }, []);
 
   useEffect(() => {
-    return () => {
-      abortRef.current?.abort();
-    };
+    return () => { abortRef.current?.abort(); };
   }, []);
 
   return {
     messages: state.messages,
     streamStatus: state.streamStatus,
     currentTool: state.currentTool,
-    conversationId: state.conversationId,
+    threadId: state.threadId,
     inputValue: state.inputValue,
     errorMessage: state.errorMessage,
+    interruptPayload: state.interruptPayload,
     sendMessage,
+    resumeStream,
     cancelStream,
     setInputValue,
   };
