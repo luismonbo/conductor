@@ -220,3 +220,4 @@ async def test_call_model_emits_token_events():
     full_text = "".join(e.text for e in token_events)
     assert "Hello" in full_text
     assert "world" in full_text
+    assert "thinking" not in [e.type for e in events]
