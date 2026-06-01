@@ -87,6 +87,11 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
       return { ...state, inputValue: action.value };
 
     case 'SEND_USER_MESSAGE': {
+      const clearedMessages = state.messages.map((msg) =>
+        msg.role === 'assistant' && msg.interruptPayload
+          ? { ...msg, interruptPayload: undefined }
+          : msg
+      );
       const userMsg: ConversationMessage = {
         id: crypto.randomUUID(),
         role: 'user',
@@ -100,7 +105,7 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
       };
       return {
         ...state,
-        messages: [...state.messages, userMsg, assistantMsg],
+        messages: [...clearedMessages, userMsg, assistantMsg],
         streamStatus: 'streaming',
         inputValue: '',
         currentTool: null,

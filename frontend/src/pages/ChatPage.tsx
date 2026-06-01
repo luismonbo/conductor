@@ -1,3 +1,4 @@
+import { useCallback } from 'react';
 import { useChatStream } from '@/hooks/useChatStream';
 import { StatusBar } from '@/components/StatusBar';
 import { MessageList } from '@/components/MessageList';
@@ -15,6 +16,15 @@ export function ChatPage() {
     cancelStream,
     setInputValue,
   } = useChatStream();
+
+  const handleApprove = useCallback(
+    () => resumeStream({ approved: true }),
+    [resumeStream],
+  );
+  const handleReject = useCallback(
+    () => resumeStream({ approved: false }),
+    [resumeStream],
+  );
 
   const isStreaming = streamStatus === 'streaming';
   const isInterrupted = streamStatus === 'interrupted';
@@ -63,8 +73,8 @@ export function ChatPage() {
 
       <MessageList
         messages={messages}
-        onApprove={() => resumeStream({ approved: true })}
-        onReject={() => resumeStream({ approved: false })}
+        onApprove={handleApprove}
+        onReject={handleReject}
       />
 
       <ChatInput
