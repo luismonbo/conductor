@@ -79,3 +79,17 @@ def build_agent(settings: Settings, tracer=None) -> ReActAgent:
         system_prompt=settings.system_prompt,
         tracer=tracer,
     )
+
+
+def build_agent_registry(settings: Settings, checkpointer) -> dict[str, object]:
+    """Build and return all compiled agent graphs keyed by name.
+
+    The API routes to the agent named in ChatRequest.agent (default: settings.agent).
+    Adding a new agent means adding it here and in agents/<name>/.
+    """
+    from harness.agents.default.graph import build_graph as build_default_graph
+
+    llm = build_llm(settings, build_parser(settings))
+    return {
+        "default": build_default_graph(llm, checkpointer),
+    }
