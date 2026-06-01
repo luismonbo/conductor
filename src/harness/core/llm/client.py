@@ -6,18 +6,21 @@ these Protocols; concrete clients live in adapters/llm/.
 """
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
+from typing import AsyncGenerator, Protocol, runtime_checkable
 
 from harness.core.types import LLMResponse, Message, ToolSpec
 
 
 @runtime_checkable
 class LLMClient(Protocol):
-    """Generates one completion given a transcript and the available tools.
+    """Generates completions given a transcript and the available tools.
 
-    Implementations MUST return tool calls via LLMResponse.tool_calls regardless
-    of whether the underlying model emits them natively or in prose — that
-    normalization is the ToolCallParser's job, wired inside the adapter.
+    Two call styles:
+      generate() — blocking, returns one LLMResponse. Used by the legacy
+                   /chat endpoint and as a convenience in tests.
+      stream()   — async generator; yields str tokens as they arrive, then
+                   yields a single LLMResponse as the final item carrying
+                   tool_calls, usage, and finish_reason.
     """
 
     async def generate(
@@ -25,6 +28,12 @@ class LLMClient(Protocol):
         messages: list[Message],
         tools: list[ToolSpec] | None = None,
     ) -> LLMResponse: ...
+
+    def stream(
+        self,
+        messages: list[Message],
+        tools: list[ToolSpec] | None = None,
+    ) -> AsyncGenerator[str | LLMResponse, None]: ...
 
     @property
     def model_id(self) -> str: ...
