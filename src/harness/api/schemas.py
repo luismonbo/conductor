@@ -9,7 +9,12 @@ from pydantic import BaseModel, Field
 
 class ChatRequest(BaseModel):
     message: str
-    conversation_id: str | None = None
+    thread_id: str | None = None   # generated server-side if absent
+    agent: str = "default"
+
+
+class ResumeRequest(BaseModel):
+    decision: dict[str, Any]       # {"approved": True} | {"approved": False}
 
 
 class ChatResponse(BaseModel):

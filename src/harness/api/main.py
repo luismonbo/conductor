@@ -1,11 +1,10 @@
-"""FastAPI entry. POST /chat runs one agent turn with short-term history.
+"""FastAPI entry point.
 
-Translates DTOs <-> core types at the boundary, runs the agent, persists the
-turn to short-term memory, and returns the trace summary so observability is
-visible from the first request.
-
-POST /chat/stream streams agent events as SSE until the agent finishes.
-POST /cancel/{conversation_id} cancels a running streaming task.
+POST /chat         — legacy blocking endpoint (unchanged; uses ReActAgent).
+POST /chat/stream  — LangGraph streaming endpoint; emits SSE AgentEvents.
+POST /resume/{thread_id} — resume a paused (interrupted) graph run.
+POST /cancel/{thread_id} — cancel a running streaming task.
+GET  /health       — liveness check.
 """
 from __future__ import annotations
 
@@ -18,13 +17,15 @@ import uuid
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from langgraph.types import Command
 
 from harness.adapters.memory.in_memory import InMemoryShortTerm
-from harness.api.schemas import ChatRequest, ChatResponse
+from harness.api.schemas import ChatRequest, ChatResponse, ResumeRequest
 from harness.config.settings import get_settings
 from harness.core.types import AgentEvent, AgentState, Message, Role
 from harness.observability.tracer import StreamingTracer, TraceCollector
-from harness.orchestration.build import build_agent
+from harness.orchestration.build import build_agent, build_agent_registry
+from harness.orchestration.checkpointer import build_checkpointer
 
 app = FastAPI(title="Agent Harness")
 
@@ -42,24 +43,41 @@ app.add_middleware(
 )
 
 _short_term = InMemoryShortTerm()
-
-# Map of conversation_id -> running asyncio.Task for streaming runs.
 _running: dict[str, asyncio.Task] = {}
 
+# Lazy-initialized agent registry (shared checkpointer keeps state across requests)
+_registry: dict[str, object] | None = None
+
+
+def _get_registry() -> dict[str, object]:
+    global _registry
+    if _registry is None:
+        settings = get_settings()
+        cp = build_checkpointer(settings)
+        _registry = build_agent_registry(settings, cp)
+    return _registry
+
+
+# ---------------------------------------------------------------------------
+# Health
+# ---------------------------------------------------------------------------
 
 @app.get("/health")
 async def health() -> dict:
     return {"status": "ok", "backend": get_settings().llm_backend}
 
 
+# ---------------------------------------------------------------------------
+# Legacy blocking endpoint — untouched
+# ---------------------------------------------------------------------------
+
 @app.post("/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest) -> ChatResponse:
     settings = get_settings()
-    conversation_id = req.conversation_id or str(uuid.uuid4())
+    conversation_id = req.thread_id or str(uuid.uuid4())
 
     user_msg = Message(role=Role.USER, content=req.message)
     await _short_term.append(conversation_id, user_msg)
-
     history = await _short_term.history(conversation_id)
 
     tracer = TraceCollector()
@@ -80,71 +98,123 @@ async def chat(req: ChatRequest) -> ChatResponse:
     )
 
 
-@app.post("/chat/stream")
-async def chat_stream(req: ChatRequest) -> StreamingResponse:
-    """Stream agent events as Server-Sent Events.
+# ---------------------------------------------------------------------------
+# Shared SSE generator
+# ---------------------------------------------------------------------------
 
-    First SSE line: ``{"conversation_id": "<id>"}``
-    Subsequent lines: each AgentEvent serialized with dataclasses.asdict().
-    Stream ends after a ``done`` or ``error`` event.
-    """
-    settings = get_settings()
-    conversation_id = req.conversation_id or str(uuid.uuid4())
-
-    user_msg = Message(role=Role.USER, content=req.message)
-    await _short_term.append(conversation_id, user_msg)
-    history = await _short_term.history(conversation_id)
-
-    tracer = StreamingTracer()
-    agent = build_agent(settings, tracer=tracer)
-    state = AgentState(messages=list(history), max_iterations=settings.max_iterations)
-
-    async def _run() -> None:
-        try:
-            result = await agent.run(state)
-            await _short_term.append(
-                conversation_id,
-                Message(role=Role.ASSISTANT, content=result.output),
-            )
-            await tracer.finish(
-                AgentEvent(
-                    type="done",
-                    text=result.output,
-                    stopped_reason=result.stopped_reason,
-                )
-            )
-        except asyncio.CancelledError:
-            await tracer.finish(AgentEvent(type="error", text="cancelled"))
-            raise
-        except Exception as exc:
-            await tracer.finish(AgentEvent(type="error", text=str(exc)))
-        finally:
-            _running.pop(conversation_id, None)
-
-    task = asyncio.create_task(_run())
-    _running[conversation_id] = task
-
+def _make_sse_generator(thread_id: str, event_queue: asyncio.Queue, task: asyncio.Task):
     async def _sse():
         try:
-            yield f"data: {json.dumps({'conversation_id': conversation_id})}\n\n"
-            async for event in tracer.drain():
-                yield f"data: {json.dumps(dataclasses.asdict(event))}\n\n"
+            yield f"data: {json.dumps({'thread_id': thread_id})}\n\n"
+            while True:
+                item = await event_queue.get()
+                if item is None:
+                    break
+                yield f"data: {json.dumps(dataclasses.asdict(item))}\n\n"
         finally:
             if not task.done():
                 task.cancel()
 
+    return _sse()
+
+
+# ---------------------------------------------------------------------------
+# Streaming endpoint
+# ---------------------------------------------------------------------------
+
+@app.post("/chat/stream")
+async def chat_stream(req: ChatRequest) -> StreamingResponse:
+    """Stream agent events as Server-Sent Events.
+
+    First SSE frame: ``{"thread_id": "<uuid>"}``
+    Subsequent frames: each AgentEvent serialized with dataclasses.asdict().
+    Stream ends after a ``final``, ``interrupt``, or ``error`` event.
+    """
+    settings = get_settings()
+    thread_id = req.thread_id or str(uuid.uuid4())
+    agent_name = req.agent or settings.agent
+
+    registry = _get_registry()
+    graph = registry.get(agent_name) or registry[settings.agent]
+
+    event_queue: asyncio.Queue[AgentEvent | None] = asyncio.Queue()
+    config = {"configurable": {"thread_id": thread_id, "event_queue": event_queue}}
+    input_state = {
+        "messages": [Message(role=Role.USER, content=req.message)],
+        "iteration": 0,
+        "max_iterations": settings.max_iterations,
+    }
+
+    async def _run() -> None:
+        try:
+            await graph.ainvoke(input_state, config)
+        except asyncio.CancelledError:
+            await event_queue.put(AgentEvent(type="error", text="cancelled"))
+            raise
+        except Exception as exc:
+            await event_queue.put(AgentEvent(type="error", text=str(exc)))
+        finally:
+            await event_queue.put(None)
+            _running.pop(thread_id, None)
+
+    task = asyncio.create_task(_run())
+    _running[thread_id] = task
+
     return StreamingResponse(
-        _sse(),
+        _make_sse_generator(thread_id, event_queue, task),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 
-@app.post("/cancel/{conversation_id}")
-async def cancel_run(conversation_id: str) -> dict:
-    """Cancel a running streaming agent task by conversation_id."""
-    task = _running.get(conversation_id)
+# ---------------------------------------------------------------------------
+# Resume endpoint
+# ---------------------------------------------------------------------------
+
+@app.post("/resume/{thread_id}")
+async def resume_run(thread_id: str, req: ResumeRequest) -> StreamingResponse:
+    """Resume a paused graph run (after an interrupt).
+
+    Response: same SSE stream as /chat/stream (starts with thread_id frame).
+    """
+    settings = get_settings()
+    registry = _get_registry()
+    graph = registry[settings.agent]
+
+    event_queue: asyncio.Queue[AgentEvent | None] = asyncio.Queue()
+    config = {"configurable": {"thread_id": thread_id, "event_queue": event_queue}}
+
+    async def _run() -> None:
+        try:
+            await graph.ainvoke(Command(resume=req.decision), config)
+        except asyncio.CancelledError:
+            await event_queue.put(AgentEvent(type="error", text="cancelled"))
+            raise
+        except Exception as exc:
+            await event_queue.put(AgentEvent(type="error", text=str(exc)))
+        finally:
+            await event_queue.put(None)
+            _running.pop(thread_id, None)
+
+    task = asyncio.create_task(_run())
+    _running[thread_id] = task
+
+    return StreamingResponse(
+        _make_sse_generator(thread_id, event_queue, task),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+# ---------------------------------------------------------------------------
+# Cancel endpoint
+# ---------------------------------------------------------------------------
+
+@app.post("/cancel/{thread_id}")
+async def cancel_run(thread_id: str) -> dict:
+    """Cancel a running streaming agent task by thread_id."""
+    task = _running.get(thread_id)
     if task and not task.done():
         task.cancel()
-        return {"status": "cancelled", "conversation_id": conversation_id}
-    return {"status": "not_found", "conversation_id": conversation_id}
+        return {"status": "cancelled", "thread_id": thread_id}
+    return {"status": "not_found", "thread_id": thread_id}
