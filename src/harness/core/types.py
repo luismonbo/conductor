@@ -88,7 +88,7 @@ class AgentResult:
 @dataclass(frozen=True)
 class AgentEvent:
     """A single streaming event emitted during an agent run, serialized to SSE."""
-    type: str  # "thinking" | "tool_call" | "tool_result" | "done" | "error"
+    type: str  # "thinking" | "tool_call" | "tool_result" | "interrupt" | "final" | "error"
     text: str = ""
     name: str = ""
     args: dict[str, Any] = field(default_factory=dict)

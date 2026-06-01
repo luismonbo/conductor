@@ -51,3 +51,14 @@ def test_agent_event_dto_serialization():
     assert dumped["args"] == {}
     assert dumped["call_id"] == ""
     assert dumped["is_error"] is False
+
+
+@pytest.mark.unit
+def test_interrupt_event_has_args():
+    """interrupt event carries tool_calls in args dict."""
+    event = AgentEvent(
+        type="interrupt",
+        args={"mode": "approval", "tool_calls": [{"name": "calc", "args": {}, "call_id": "c1"}]},
+    )
+    assert event.type == "interrupt"
+    assert event.args["mode"] == "approval"
