@@ -78,6 +78,13 @@ def _decode_args(tc: Any) -> dict:
         return {}
 
 
+def _decode_args_str(raw: str) -> dict:
+    try:
+        return json.loads(raw or "{}")
+    except json.JSONDecodeError:
+        return {}
+
+
 def parse_completion(completion: Any) -> LLMResponse:
     """Turn an OpenAI ChatCompletion-shaped object into a core LLMResponse."""
     choice = completion.choices[0]
@@ -182,6 +189,8 @@ class _OpenAIBaseClient(LLMClient):
 
             if getattr(delta, "tool_calls", None):
                 for tc_delta in delta.tool_calls:
+                    if not tc_delta.function:
+                        continue
                     idx = tc_delta.index
                     if idx not in tc_acc:
                         tc_acc[idx] = {"id": "", "name": "", "args_parts": []}
@@ -198,7 +207,7 @@ class _OpenAIBaseClient(LLMClient):
                 ToolCall(
                     id=data["id"] or str(uuid.uuid4()),
                     name=data["name"],
-                    arguments=json.loads("".join(data["args_parts"]) or "{}"),
+                    arguments=_decode_args_str("".join(data["args_parts"])),
                 )
                 for _, data in sorted(tc_acc.items())
             )

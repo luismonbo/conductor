@@ -151,14 +151,38 @@ def _openai_streaming_factory(chunks) -> LLMClient:
     )
 
 
+def _azure_streaming_factory(chunks) -> LLMClient:
+    return AzureOpenAIClient(
+        deployment="contract-model",
+        endpoint="http://x",
+        api_version="2024-02-01",
+        parser=NativeToolCallParser(),
+        client=_fake_streaming_openai(chunks),
+    )
+
+
+STREAMING_FACTORIES: list[tuple[str, Callable]] = [
+    ("openai_compatible", _openai_streaming_factory),
+    ("azure", _azure_streaming_factory),
+]
+
+
+@pytest.fixture(
+    params=[f for _, f in STREAMING_FACTORIES],
+    ids=[i for i, _ in STREAMING_FACTORIES],
+)
+def make_streaming_client(request):
+    return request.param
+
+
 @pytest.mark.asyncio
-async def test_stream_yields_tokens_then_final_response():
+async def test_stream_yields_tokens_then_final_response(make_streaming_client):
     chunks = [
         _FakeStreamChunk(content="Hello"),
         _FakeStreamChunk(content=" world"),
         _FakeStreamChunk(finish_reason="stop"),
     ]
-    client = _openai_streaming_factory(chunks)
+    client = make_streaming_client(chunks)
     items = []
     async for item in client.stream([Message(Role.USER, "hi")]):
         items.append(item)
@@ -173,7 +197,7 @@ async def test_stream_yields_tokens_then_final_response():
 
 
 @pytest.mark.asyncio
-async def test_stream_assembles_tool_call_from_deltas():
+async def test_stream_assembles_tool_call_from_deltas(make_streaming_client):
     tc_delta_1 = SimpleNamespace(
         index=0,
         id="call_abc",
@@ -189,7 +213,7 @@ async def test_stream_assembles_tool_call_from_deltas():
         _FakeStreamChunk(tool_calls=[tc_delta_2]),
         _FakeStreamChunk(finish_reason="tool_calls"),
     ]
-    client = _openai_streaming_factory(chunks)
+    client = make_streaming_client(chunks)
     items = []
     async for item in client.stream([Message(Role.USER, "6*7?")], tools=[_CALC]):
         items.append(item)
@@ -198,3 +222,4 @@ async def test_stream_assembles_tool_call_from_deltas():
     assert final.wants_tools is True
     assert final.tool_calls[0].name == "calculator"
     assert final.tool_calls[0].arguments == {"expression": "6*7"}
+    assert final.tool_calls[0].id == "call_abc"
