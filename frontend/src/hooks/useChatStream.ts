@@ -225,6 +225,9 @@ export function useChatStream() {
 
           // event is AgentEvent from here
           switch (event.type) {
+            case 'token':
+              dispatch({ type: 'APPEND_THINKING', text: event.text });
+              break;
             case 'thinking':
               dispatch({ type: 'APPEND_THINKING', text: event.text });
               break;
