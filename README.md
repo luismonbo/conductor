@@ -1,4 +1,4 @@
-# Agent Harness
+# Conductor Agent Harness
 
 A production-grade AI agent platform with **swappable model backends**, a **LangGraph runtime**, and a **Human-in-the-Loop approval gate**. Swap Azure OpenAI for a local Gemma model by changing an env var — no code changes.
 
