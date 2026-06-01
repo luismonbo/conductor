@@ -33,7 +33,12 @@ class Settings(BaseSettings):
     # Empty until the pgvector backend is wired in Phase 5.
     memory_url: str = ""
 
+    # Checkpointer
+    checkpointer: str = "sqlite"       # memory | sqlite | postgres
+    checkpointer_url: str = "./harness.sqlite"
+
     # Agent
+    agent: str = "default"
     max_iterations: int = 8
     system_prompt: str = (
         "You are a helpful assistant. Use tools when they help. "

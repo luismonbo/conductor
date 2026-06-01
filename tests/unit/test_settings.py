@@ -32,3 +32,18 @@ def test_env_overrides_backend(monkeypatch):
 
     assert settings.llm_backend == "openai_compatible"
     assert settings.llm_base_url == "http://example.test/v1"
+
+
+def test_default_checkpointer_is_sqlite():
+    s = Settings(_env_file=None)
+    assert s.checkpointer == "sqlite"
+
+
+def test_default_checkpointer_url():
+    s = Settings(_env_file=None)
+    assert s.checkpointer_url == "./harness.sqlite"
+
+
+def test_default_agent_is_default():
+    s = Settings(_env_file=None)
+    assert s.agent == "default"
