@@ -84,6 +84,7 @@ export function ApprovalCard({ payload, onApprove, onReject }: ApprovalCardProps
         }}
       >
         <button
+          type="button"
           onClick={handleReject}
           disabled={decided}
           style={{
@@ -108,6 +109,7 @@ export function ApprovalCard({ payload, onApprove, onReject }: ApprovalCardProps
           Reject
         </button>
         <button
+          type="button"
           onClick={handleApprove}
           disabled={decided}
           style={{
