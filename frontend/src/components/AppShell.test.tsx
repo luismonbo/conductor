@@ -10,6 +10,6 @@ describe('AppShell', () => {
 
   it('renders the card container', () => {
     render(<AppShell><span /></AppShell>);
-    expect(screen.getByTestId('app-shell-card')).toBeTruthy();
+    expect(screen.getByTestId('app-shell-card')).toBeInTheDocument();
   });
 });

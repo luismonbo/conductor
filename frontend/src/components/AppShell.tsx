@@ -7,7 +7,7 @@ interface AppShellProps {
 export function AppShell({ children }: AppShellProps) {
   return (
     <div style={{
-      height: '100%',
+      minHeight: '100vh',
       background: 'var(--bg)',
       display: 'flex',
       alignItems: 'center',
