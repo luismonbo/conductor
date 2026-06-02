@@ -1,5 +1,7 @@
+import type { ReactNode } from 'react';
+
 interface AppShellProps {
-  children: React.ReactNode;
+  children: ReactNode;
 }
 
 export function AppShell({ children }: AppShellProps) {
