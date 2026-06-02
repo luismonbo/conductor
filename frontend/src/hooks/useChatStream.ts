@@ -16,7 +16,7 @@ import {
 // State
 // ---------------------------------------------------------------------------
 
-interface ChatState {
+export interface ChatState {
   threadId: string | null;
   messages: ConversationMessage[];
   streamStatus: StreamStatus;
@@ -26,7 +26,7 @@ interface ChatState {
   interruptPayload: InterruptPayload | null;
 }
 
-const initialState: ChatState = {
+export const initialState: ChatState = {
   threadId: null,
   messages: [],
   streamStatus: 'idle',
@@ -81,7 +81,7 @@ function updateLastStreamingMessage(
 // Reducer
 // ---------------------------------------------------------------------------
 
-function chatReducer(state: ChatState, action: ChatAction): ChatState {
+export function chatReducer(state: ChatState, action: ChatAction): ChatState {
   switch (action.type) {
     case 'SET_INPUT':
       return { ...state, inputValue: action.value };
