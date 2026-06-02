@@ -21,6 +21,9 @@
 
   /* semantic colors */
   --color-error: #f87171;
+
+  /* layout */
+  --shadow-card: 0 8px 40px rgba(0, 0, 0, 0.5), 0 2px 12px rgba(0, 0, 0, 0.35);
 }
 
 body {
