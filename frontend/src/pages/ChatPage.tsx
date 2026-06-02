@@ -35,7 +35,6 @@ export function ChatPage() {
       display: 'flex',
       flexDirection: 'column',
       height: '100%',
-      background: 'var(--bg)',
     }}>
       <header style={{
         borderBottom: '1px solid var(--border)',
