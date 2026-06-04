@@ -52,9 +52,12 @@ class RunStore:
         agent: str,
         backend: str,
     ) -> None:
-        started_at = datetime.now(timezone.utc).isoformat()
-        await self._conn.execute(_INSERT, (run_id, thread_id, agent, backend, started_at))
-        await self._conn.commit()
+        try:
+            started_at = datetime.now(timezone.utc).isoformat()
+            await self._conn.execute(_INSERT, (run_id, thread_id, agent, backend, started_at))
+            await self._conn.commit()
+        except Exception:
+            logger.exception("RunStore.start_run failed for run_id=%s", run_id)
 
     async def finish_run(
         self,
@@ -64,7 +67,7 @@ class RunStore:
     ) -> None:
         try:
             finished_at = datetime.now(timezone.utc).isoformat()
-            await self._conn.execute(
+            cur = await self._conn.execute(
                 _UPDATE,
                 (
                     finished_at,
@@ -76,5 +79,7 @@ class RunStore:
                 ),
             )
             await self._conn.commit()
+            if cur.rowcount == 0:
+                logger.warning("finish_run: no row updated for run_id=%s", run_id)
         except Exception:
             logger.exception("RunStore.finish_run failed for run_id=%s", run_id)

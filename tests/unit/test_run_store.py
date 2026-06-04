@@ -1,14 +1,16 @@
 from __future__ import annotations
 
-import pytest
+from collections.abc import AsyncGenerator
+
 import aiosqlite
+import pytest
 
 from harness.observability.run_store import RunStore
 from harness.observability.token_accumulator import TokenAccumulator
 
 
 @pytest.fixture
-async def store():
+async def store() -> AsyncGenerator[tuple[RunStore, aiosqlite.Connection], None]:
     conn = await aiosqlite.connect(":memory:")
     conn.row_factory = aiosqlite.Row
     s = RunStore(conn)
@@ -46,10 +48,13 @@ async def test_create_table_is_idempotent(store):
     await s.create_table()
 
 
-async def test_finish_run_unknown_id_does_not_raise(store):
+async def test_finish_run_unknown_id_logs_warning(store, caplog):
+    import logging
     s, _ = store
     acc = TokenAccumulator()
-    await s.finish_run("nonexistent-id", acc, "error")  # must not raise
+    with caplog.at_level(logging.WARNING, logger="harness.observability.run_store"):
+        await s.finish_run("nonexistent-id", acc, "error")
+    assert "no row updated" in caplog.text
 
 
 async def test_start_run_records_started_at(store):
