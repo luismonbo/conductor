@@ -74,10 +74,8 @@ def build_graph(
             response = LLMResponse(text="")
 
         if accumulator := config["configurable"].get("token_accumulator"):
-            accumulator.add(
-                input_tokens=response.usage.get("prompt_tokens", 0),
-                output_tokens=response.usage.get("completion_tokens", 0),
-            )
+            input_t, output_t = response.token_usage
+            accumulator.add(input_tokens=input_t, output_tokens=output_t)
 
         for tc in response.tool_calls:
             await queue.put(AgentEvent(

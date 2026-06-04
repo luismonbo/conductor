@@ -66,6 +66,13 @@ class LLMResponse:
     def wants_tools(self) -> bool:
         return len(self.tool_calls) > 0
 
+    @property
+    def token_usage(self) -> tuple[int, int]:
+        """Return (input_tokens, output_tokens) normalized across provider formats."""
+        input_t = self.usage.get("input_tokens", self.usage.get("prompt_tokens", 0))
+        output_t = self.usage.get("output_tokens", self.usage.get("completion_tokens", 0))
+        return input_t, output_t
+
 
 @dataclass
 class AgentState:
