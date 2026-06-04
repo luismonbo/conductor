@@ -262,3 +262,50 @@ async def test_call_model_emits_token_events():
     assert "Hello" in full_text
     assert "world" in full_text
     assert "thinking" not in [e.type for e in events]
+
+
+@pytest.mark.asyncio
+async def test_token_accumulator_populated_on_final():
+    from harness.observability.token_accumulator import TokenAccumulator
+
+    graph = _make_graph([
+        LLMResponse(text="The answer is 42.", usage={"prompt_tokens": 50, "completion_tokens": 25}),
+    ])
+    queue: asyncio.Queue = asyncio.Queue()
+    accumulator = TokenAccumulator()
+    stopped_reason_holder = ["unknown"]
+    config = {
+        "configurable": {
+            "thread_id": "t-acc",
+            "event_queue": queue,
+            "token_accumulator": accumulator,
+            "stopped_reason_holder": stopped_reason_holder,
+        }
+    }
+    await _invoke_with_sentinel(graph, _base_state(), config)
+
+    assert accumulator.input_tokens == 50
+    assert accumulator.output_tokens == 25
+    assert accumulator.iterations == 1
+    assert stopped_reason_holder[0] == "final_answer"
+
+
+@pytest.mark.asyncio
+async def test_token_accumulator_no_usage_stays_zero():
+    from harness.observability.token_accumulator import TokenAccumulator
+
+    graph = _make_graph([LLMResponse(text="Hello")])  # no usage field
+    queue: asyncio.Queue = asyncio.Queue()
+    accumulator = TokenAccumulator()
+    config = {
+        "configurable": {
+            "thread_id": "t-no-usage",
+            "event_queue": queue,
+            "token_accumulator": accumulator,
+        }
+    }
+    await _invoke_with_sentinel(graph, _base_state(), config)
+
+    assert accumulator.input_tokens == 0
+    assert accumulator.output_tokens == 0
+    assert accumulator.iterations == 1
