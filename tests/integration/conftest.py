@@ -14,6 +14,7 @@ async def clean_app_state(monkeypatch):
     _main._short_term._store.clear()
     _main._registry = None
     _main._run_store = None
+    _main._run_store_lock = None
     yield
     for task in list(_main._running.values()):
         if not task.done():
@@ -22,3 +23,4 @@ async def clean_app_state(monkeypatch):
     _main._short_term._store.clear()
     _main._registry = None
     _main._run_store = None
+    _main._run_store_lock = None
