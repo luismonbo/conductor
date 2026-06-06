@@ -179,10 +179,19 @@ async def _run_graph(
         stopped_reason_holder[0] = "error"
         await event_queue.put(AgentEvent(type="error", text=str(exc)))
     finally:
-        await event_queue.put(None)
         _running.pop(thread_id, None)
         if run_store:
-            await run_store.finish_run(run_id, accumulator, stopped_reason_holder[0])
+            # Shield finish_run so it completes even if the task is being cancelled
+            # (the SSE generator's finally block calls task.cancel() once it sees None).
+            # finish_run must land before we send the sentinel so the task is already
+            # done by the time the generator can cancel it.
+            try:
+                await asyncio.shield(
+                    run_store.finish_run(run_id, accumulator, stopped_reason_holder[0])
+                )
+            except asyncio.CancelledError:
+                pass
+        await event_queue.put(None)
 
 
 # ---------------------------------------------------------------------------
