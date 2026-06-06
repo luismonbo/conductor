@@ -12,7 +12,9 @@ async def clean_app_state(monkeypatch):
     monkeypatch.setenv("HARNESS_CHECKPOINTER", "memory")
     _main._running.clear()
     _main._short_term._store.clear()
-    _main._registry = None  # force rebuild with test env vars
+    _main._registry = None
+    _main._run_store = None
+    _main._run_store_lock = None
     yield
     for task in list(_main._running.values()):
         if not task.done():
@@ -20,3 +22,5 @@ async def clean_app_state(monkeypatch):
     _main._running.clear()
     _main._short_term._store.clear()
     _main._registry = None
+    _main._run_store = None
+    _main._run_store_lock = None

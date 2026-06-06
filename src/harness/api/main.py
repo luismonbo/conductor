@@ -13,21 +13,39 @@ import dataclasses
 import json
 import os
 import uuid
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from langgraph.types import Command
 
+import aiosqlite
+
 from harness.adapters.memory.in_memory import InMemoryShortTerm
 from harness.api.schemas import ChatRequest, ChatResponse, ResumeRequest
 from harness.config.settings import get_settings
 from harness.core.types import AgentEvent, AgentState, Message, Role
-from harness.observability.tracer import StreamingTracer, TraceCollector
+from harness.observability.run_store import RunStore
+from harness.observability.token_accumulator import TokenAccumulator
+from harness.observability.tracer import TraceCollector
 from harness.orchestration.build import build_agent, build_agent_registry
 from harness.orchestration.checkpointer import build_checkpointer
 
-app = FastAPI(title="Agent Harness")
+# Lazy-initialized module-level state
+_run_store: RunStore | None = None
+_run_store_lock: asyncio.Lock | None = None
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    yield
+    global _run_store
+    if _run_store is not None:
+        await _run_store._conn.close()
+
+
+app = FastAPI(title="Agent Harness", lifespan=lifespan)
 
 _cors_origins = [
     o.strip()
@@ -47,6 +65,28 @@ _running: dict[str, asyncio.Task] = {}
 
 # Lazy-initialized agent registry (shared checkpointer keeps state across requests)
 _registry: dict[str, object] | None = None
+
+
+def _get_run_store_lock() -> asyncio.Lock:
+    global _run_store_lock
+    if _run_store_lock is None:
+        _run_store_lock = asyncio.Lock()
+    return _run_store_lock
+
+
+async def _get_run_store() -> RunStore | None:
+    global _run_store
+    if _run_store is not None:
+        return _run_store
+    settings = get_settings()
+    if settings.checkpointer == "memory":
+        return None
+    async with _get_run_store_lock():
+        if _run_store is None:
+            conn = await aiosqlite.connect(settings.checkpointer_url)
+            _run_store = RunStore(conn)
+            await _run_store.create_table()
+    return _run_store
 
 
 async def _get_registry() -> dict[str, object]:
@@ -118,6 +158,42 @@ def _make_sse_generator(thread_id: str, event_queue: asyncio.Queue, task: asynci
     return _sse()
 
 
+async def _run_graph(
+    graph,
+    invoke_arg,
+    config: dict,
+    thread_id: str,
+    run_id: str,
+    event_queue: asyncio.Queue,
+    accumulator: TokenAccumulator,
+    stopped_reason_holder: list[str],
+    run_store: RunStore | None,
+) -> None:
+    try:
+        await graph.ainvoke(invoke_arg, config)
+    except asyncio.CancelledError:
+        stopped_reason_holder[0] = "cancelled"
+        await event_queue.put(AgentEvent(type="error", text="cancelled"))
+        raise
+    except Exception as exc:
+        stopped_reason_holder[0] = "error"
+        await event_queue.put(AgentEvent(type="error", text=str(exc)))
+    finally:
+        _running.pop(thread_id, None)
+        if run_store:
+            # Shield finish_run so it completes even if the task is being cancelled
+            # (the SSE generator's finally block calls task.cancel() once it sees None).
+            # finish_run must land before we send the sentinel so the task is already
+            # done by the time the generator can cancel it.
+            try:
+                await asyncio.shield(
+                    run_store.finish_run(run_id, accumulator, stopped_reason_holder[0])
+                )
+            except asyncio.CancelledError:
+                pass
+        await event_queue.put(None)
+
+
 # ---------------------------------------------------------------------------
 # Streaming endpoint
 # ---------------------------------------------------------------------------
@@ -132,32 +208,37 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
     """
     settings = get_settings()
     thread_id = req.thread_id or str(uuid.uuid4())
+    run_id = str(uuid.uuid4())
     agent_name = req.agent or settings.agent
 
     registry = await _get_registry()
     graph = registry.get(agent_name) or registry[settings.agent]
 
+    accumulator = TokenAccumulator()
+    stopped_reason_holder: list[str] = ["unknown"]
     event_queue: asyncio.Queue[AgentEvent | None] = asyncio.Queue()
-    config = {"configurable": {"thread_id": thread_id, "event_queue": event_queue}}
+    config = {
+        "configurable": {
+            "thread_id": thread_id,
+            "event_queue": event_queue,
+            "token_accumulator": accumulator,
+            "stopped_reason_holder": stopped_reason_holder,
+        }
+    }
     input_state = {
         "messages": [Message(role=Role.USER, content=req.message)],
         "iteration": 0,
         "max_iterations": settings.max_iterations,
     }
 
-    async def _run() -> None:
-        try:
-            await graph.ainvoke(input_state, config)
-        except asyncio.CancelledError:
-            await event_queue.put(AgentEvent(type="error", text="cancelled"))
-            raise
-        except Exception as exc:
-            await event_queue.put(AgentEvent(type="error", text=str(exc)))
-        finally:
-            await event_queue.put(None)
-            _running.pop(thread_id, None)
+    run_store = await _get_run_store()
+    if run_store:
+        await run_store.start_run(run_id, thread_id, agent_name, settings.llm_backend)
 
-    task = asyncio.create_task(_run())
+    task = asyncio.create_task(_run_graph(
+        graph, input_state, config, thread_id, run_id,
+        event_queue, accumulator, stopped_reason_holder, run_store,
+    ))
     _running[thread_id] = task
 
     return StreamingResponse(
@@ -180,23 +261,28 @@ async def resume_run(thread_id: str, req: ResumeRequest) -> StreamingResponse:
     settings = get_settings()
     registry = await _get_registry()
     graph = registry[settings.agent]
+    run_id = str(uuid.uuid4())
 
+    accumulator = TokenAccumulator()
+    stopped_reason_holder: list[str] = ["unknown"]
     event_queue: asyncio.Queue[AgentEvent | None] = asyncio.Queue()
-    config = {"configurable": {"thread_id": thread_id, "event_queue": event_queue}}
+    config = {
+        "configurable": {
+            "thread_id": thread_id,
+            "event_queue": event_queue,
+            "token_accumulator": accumulator,
+            "stopped_reason_holder": stopped_reason_holder,
+        }
+    }
 
-    async def _run() -> None:
-        try:
-            await graph.ainvoke(Command(resume=req.decision), config)
-        except asyncio.CancelledError:
-            await event_queue.put(AgentEvent(type="error", text="cancelled"))
-            raise
-        except Exception as exc:
-            await event_queue.put(AgentEvent(type="error", text=str(exc)))
-        finally:
-            await event_queue.put(None)
-            _running.pop(thread_id, None)
+    run_store = await _get_run_store()
+    if run_store:
+        await run_store.start_run(run_id, thread_id, settings.agent, settings.llm_backend)
 
-    task = asyncio.create_task(_run())
+    task = asyncio.create_task(_run_graph(
+        graph, Command(resume=req.decision), config, thread_id, run_id,
+        event_queue, accumulator, stopped_reason_holder, run_store,
+    ))
     _running[thread_id] = task
 
     return StreamingResponse(

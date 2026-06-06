@@ -2,15 +2,17 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 from harness.adapters.llm.openai_wire import (
+    _OpenAIBaseClient,
     build_request_messages,
     message_to_wire,
     parse_completion,
     spec_to_wire,
 )
 from harness.adapters.llm.parsers import NativeToolCallParser, PromptedToolCallParser
-from harness.core.types import Message, Role, ToolCall, ToolSpec
+from harness.core.types import LLMResponse, Message, Role, ToolCall, ToolSpec
 
 TOOLS = [
     ToolSpec(
@@ -115,4 +117,49 @@ def test_parse_completion_usage():
         "prompt_tokens": 3,
         "completion_tokens": 5,
         "total_tokens": 8,
+    }
+
+
+async def test_stream_populates_usage_from_terminal_chunk():
+    """stream() must collect usage from the terminal chunk and include it in LLMResponse."""
+
+    async def _fake_stream():
+        # text chunk
+        yield SimpleNamespace(
+            choices=[SimpleNamespace(
+                delta=SimpleNamespace(content="hello", tool_calls=None),
+                finish_reason=None,
+            )],
+            usage=None,
+        )
+        # finish chunk
+        yield SimpleNamespace(
+            choices=[SimpleNamespace(
+                delta=SimpleNamespace(content=None, tool_calls=None),
+                finish_reason="stop",
+            )],
+            usage=None,
+        )
+        # terminal usage chunk (empty choices, carries usage)
+        yield SimpleNamespace(
+            choices=[],
+            usage=SimpleNamespace(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+        )
+
+    mock_client = SimpleNamespace(
+        chat=SimpleNamespace(
+            completions=SimpleNamespace(create=AsyncMock(return_value=_fake_stream()))
+        )
+    )
+    adapter = _OpenAIBaseClient(mock_client, "test-model", NativeToolCallParser(), 0.0)
+
+    results = []
+    async for item in adapter.stream([Message(Role.USER, "hi")]):
+        results.append(item)
+
+    final = next(r for r in results if isinstance(r, LLMResponse))
+    assert final.usage == {
+        "prompt_tokens": 10,
+        "completion_tokens": 5,
+        "total_tokens": 15,
     }

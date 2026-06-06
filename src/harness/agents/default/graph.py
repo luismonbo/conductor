@@ -73,6 +73,10 @@ def build_graph(
         if response is None:
             response = LLMResponse(text="")
 
+        if accumulator := config["configurable"].get("token_accumulator"):
+            input_t, output_t = response.token_usage
+            accumulator.add(input_tokens=input_t, output_tokens=output_t)
+
         for tc in response.tool_calls:
             await queue.put(AgentEvent(
                 type="tool_call", name=tc.name, args=tc.arguments, call_id=tc.id,
@@ -176,6 +180,8 @@ def build_graph(
         )
         text = last_assistant.content if last_assistant else ""
         await queue.put(AgentEvent(type="final", text=text, stopped_reason="final_answer"))
+        if holder := config["configurable"].get("stopped_reason_holder"):
+            holder[0] = "final_answer"
         return {}
 
     async def _error(state: GraphState, config: RunnableConfig) -> dict:
@@ -184,6 +190,8 @@ def build_graph(
             type="error",
             text="I couldn't complete this within the allowed reasoning steps.",
         ))
+        if holder := config["configurable"].get("stopped_reason_holder"):
+            holder[0] = "max_iterations"
         return {}
 
     builder: StateGraph = StateGraph(GraphState)

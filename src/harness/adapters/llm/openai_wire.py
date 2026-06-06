@@ -170,12 +170,21 @@ class _OpenAIBaseClient(LLMClient):
             kwargs["tools"] = [spec_to_wire(s) for s in tools]
             kwargs["tool_choice"] = "auto"
 
+        kwargs["stream_options"] = {"include_usage": True}
+
         text_acc: list[str] = []
         tc_acc: dict[int, dict] = {}  # chunk index → accumulated data
         finish_reason: str | None = None
+        usage: dict[str, int] = {}
 
         stream_obj = await self._client.chat.completions.create(**kwargs)
         async for chunk in stream_obj:
+            if getattr(chunk, "usage", None) and chunk.usage:
+                usage = {
+                    "prompt_tokens": chunk.usage.prompt_tokens,
+                    "completion_tokens": chunk.usage.completion_tokens,
+                    "total_tokens": chunk.usage.total_tokens,
+                }
             if not chunk.choices:
                 continue
             choice = chunk.choices[0]
@@ -216,4 +225,5 @@ class _OpenAIBaseClient(LLMClient):
             text="".join(text_acc),
             tool_calls=tool_calls,
             finish_reason=finish_reason,
+            usage=usage,
         )
