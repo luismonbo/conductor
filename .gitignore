@@ -34,6 +34,9 @@ htmlcov/
 .env.*.local
 *.pem
 
+# Eval reports (on-demand run outputs; commit selectively as benchmark snapshots)
+evaluation/reports/
+
 # Local databases (SQLite checkpointer)
 *.sqlite
 *.sqlite3

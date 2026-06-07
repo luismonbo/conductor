@@ -1,8 +1,0 @@
-{
-  "description": "Golden cases for offline eval. Expand before trusting any small model on the Pi.",
-  "cases": [
-    {"id": "calc-1", "input": "what is 12 * 9?", "expect_tool": "calculator", "expect_substring": "108"},
-    {"id": "direct-1", "input": "say hello", "expect_tool": null, "expect_substring": "hello"},
-    {"id": "recall-1", "input": "where am I based?", "expect_tool": "recall", "expect_substring": null}
-  ]
-}

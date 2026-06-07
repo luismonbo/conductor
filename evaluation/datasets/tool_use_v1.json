@@ -1,0 +1,35 @@
+{
+  "version": "1.0",
+  "description": "Tool-use golden cases. Manually reviewed. Expand before trusting any model on new tools.",
+  "cases": [
+    {
+      "id": "calc_mul_001",
+      "description": "Agent should use calculator for simple multiplication",
+      "tags": ["calculator", "arithmetic"],
+      "input": "what is 12 * 9?",
+      "expected": {
+        "tool_call": { "name": "calculator" },
+        "tool_args": { "expression": null },
+        "output_contains": ["108"]
+      }
+    },
+    {
+      "id": "direct_001",
+      "description": "Agent should answer directly without a tool",
+      "tags": ["direct"],
+      "input": "say hello",
+      "expected": {
+        "output_contains": ["hello"]
+      }
+    },
+    {
+      "id": "recall_001",
+      "description": "Agent should use recall to look up stored user facts",
+      "tags": ["recall", "memory"],
+      "input": "where am I based?",
+      "expected": {
+        "tool_call": { "name": "recall" }
+      }
+    }
+  ]
+}
