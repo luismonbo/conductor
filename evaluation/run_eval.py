@@ -12,20 +12,23 @@ import argparse
 import sys
 from pathlib import Path
 
-# Make project root importable (evaluation/ is not a pip-installed package).
+# Python adds the script directory (evaluation/) to sys.path[0] automatically,
+# which makes evaluation/harness/ shadow src/harness/. Force src to front, and
+# ensure the project root is present so evaluation.* imports resolve.
 _root = Path(__file__).parent.parent
+sys.path.insert(0, str(_root / "src"))
 if str(_root) not in sys.path:
-    sys.path.insert(0, str(_root))
-if str(_root / "src") not in sys.path:
-    sys.path.insert(0, str(_root / "src"))
+    sys.path.append(str(_root))
 
 from harness.config.settings import get_settings
-from harness.orchestration.build import build_agent
+from harness.orchestration.build import build_agent, build_long_term
 
 from evaluation.harness.dataset import Dataset
 from evaluation.harness.runner import EvalRunner
 from evaluation.metrics.arg_schema import ArgSchemaMetric
+from evaluation.metrics.no_tool_call import NoToolCallMetric
 from evaluation.metrics.output_contains import OutputContainsMetric
+from evaluation.metrics.output_contains_any import OutputContainsAnyMetric
 from evaluation.metrics.tool_call import ToolCallMetric
 
 _EVAL_DIR = Path(__file__).parent
@@ -70,8 +73,11 @@ def main() -> int:
     if args.backend:
         settings = settings.model_copy(update={"llm_backend": args.backend})
 
-    def agent_factory(tracer):
-        return build_agent(settings, tracer=tracer)
+    async def agent_factory(tracer, memory_seed=None):
+        memory = build_long_term(settings)
+        for fact in (memory_seed or []):
+            await memory.write(fact)
+        return build_agent(settings, tracer=tracer, long_term=memory)
 
     dataset = Dataset.load(dataset_path).filter_by_tags(args.tags)
     if not dataset.cases:
@@ -80,7 +86,7 @@ def main() -> int:
 
     print(f"Running {len(dataset.cases)} case(s) from {dataset_path.name} …")
 
-    metrics = [ToolCallMetric(), ArgSchemaMetric(), OutputContainsMetric()]
+    metrics = [ToolCallMetric(), ArgSchemaMetric(), OutputContainsMetric(), OutputContainsAnyMetric(), NoToolCallMetric()]
     runner = EvalRunner(agent_factory)
     report = runner.run(dataset, metrics, dataset_name=dataset_path.name)
 

@@ -9,7 +9,9 @@ from harness.observability.tracer import TraceCollector
 from evaluation.harness.dataset import EvalCase, Expected, ExpectedToolCall
 from evaluation.harness.runner import AgentRunResult
 from evaluation.metrics.arg_schema import ArgSchemaMetric
+from evaluation.metrics.no_tool_call import NoToolCallMetric
 from evaluation.metrics.output_contains import OutputContainsMetric
+from evaluation.metrics.output_contains_any import OutputContainsAnyMetric
 from evaluation.metrics.tool_call import ToolCallMetric
 
 
@@ -23,6 +25,8 @@ def _case(
     tool_call: str | None = None,
     tool_args: dict | None = None,
     output_contains: list[str] | None = None,
+    output_contains_any: list[str] | None = None,
+    no_tool_call: bool = False,
 ) -> EvalCase:
     return EvalCase(
         id=id,
@@ -33,6 +37,8 @@ def _case(
             tool_call=ExpectedToolCall(name=tool_call) if tool_call else None,
             tool_args=tool_args,
             output_contains=output_contains or [],
+            output_contains_any=output_contains_any or [],
+            no_tool_call=no_tool_call,
         ),
     )
 
@@ -187,3 +193,81 @@ class TestOutputContainsMetric:
             case, _result(output="multiplication gives 108"), _tracer
         )
         assert result.passed
+
+
+# ---------------------------------------------------------------------------
+# NoToolCallMetric
+# ---------------------------------------------------------------------------
+
+class TestNoToolCallMetric:
+    metric = NoToolCallMetric()
+
+    def test_skips_when_no_expectation(self):
+        result = self.metric.score(_case(), _result(), _tracer)
+        assert result.passed
+        assert "skipped" in result.reason
+
+    def test_passes_when_no_tools_called(self):
+        case = _case(no_tool_call=True)
+        result = self.metric.score(case, _result(tool_names=[]), _tracer)
+        assert result.passed
+        assert result.score == 1.0
+
+    def test_fails_when_a_tool_was_called(self):
+        case = _case(no_tool_call=True)
+        result = self.metric.score(case, _result(tool_names=["calculator"]), _tracer)
+        assert not result.passed
+        assert result.score == 0.0
+        assert "calculator" in result.reason
+
+    def test_fails_listing_all_called_tools(self):
+        case = _case(no_tool_call=True)
+        result = self.metric.score(
+            case, _result(tool_names=["recall", "calculator"]), _tracer
+        )
+        assert not result.passed
+        assert "recall" in result.reason
+        assert "calculator" in result.reason
+
+    def test_skips_when_assertion_is_false(self):
+        case = _case(no_tool_call=False)
+        result = self.metric.score(case, _result(tool_names=["calculator"]), _tracer)
+        assert result.passed
+        assert "skipped" in result.reason
+
+
+# ---------------------------------------------------------------------------
+# OutputContainsAnyMetric
+# ---------------------------------------------------------------------------
+
+class TestOutputContainsAnyMetric:
+    metric = OutputContainsAnyMetric()
+
+    def test_skips_when_no_expectation(self):
+        result = self.metric.score(_case(), _result(), _tracer)
+        assert result.passed
+        assert "skipped" in result.reason
+
+    def test_passes_when_first_alternative_matches(self):
+        case = _case(output_contains_any=["7", "seven"])
+        result = self.metric.score(case, _result(output="There are 7 continents."), _tracer)
+        assert result.passed
+        assert result.score == 1.0
+
+    def test_passes_when_second_alternative_matches(self):
+        case = _case(output_contains_any=["7", "seven"])
+        result = self.metric.score(case, _result(output="There are seven continents."), _tracer)
+        assert result.passed
+        assert result.score == 1.0
+
+    def test_passes_case_insensitive(self):
+        case = _case(output_contains_any=["Au"])
+        result = self.metric.score(case, _result(output="The symbol is au."), _tracer)
+        assert result.passed
+
+    def test_fails_when_no_alternative_matches(self):
+        case = _case(output_contains_any=["7", "seven"])
+        result = self.metric.score(case, _result(output="There are many continents."), _tracer)
+        assert not result.passed
+        assert result.score == 0.0
+        assert "7" in result.reason and "seven" in result.reason

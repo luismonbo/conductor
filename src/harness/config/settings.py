@@ -41,8 +41,13 @@ class Settings(BaseSettings):
     agent: str = "default"
     max_iterations: int = 8
     system_prompt: str = (
-        "You are a helpful assistant. Use tools when they help. "
-        "When you have the answer, reply directly without calling a tool."
+        "You are a helpful assistant. "
+        "Use the calculator tool for any arithmetic operation or numeric "
+        "computation — even when the answer seems obvious. "
+        "For questions about the user's personal information (name, location, "
+        "job title, preferences, ongoing projects), always call the recall "
+        "tool; never guess. "
+        "For world knowledge questions (facts, history, science), answer directly."
     )
 
 

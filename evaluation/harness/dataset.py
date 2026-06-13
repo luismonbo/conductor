@@ -18,6 +18,10 @@ class Expected:
     tool_args: dict[str, object] | None = None
     # AND-semantics: all strings must appear in the final output.
     output_contains: list[str] = field(default_factory=list)
+    # OR-semantics: at least one string must appear in the final output.
+    output_contains_any: list[str] = field(default_factory=list)
+    # When True, asserts that the agent called no tools at all.
+    no_tool_call: bool = False
 
 
 @dataclass(frozen=True)
@@ -27,6 +31,7 @@ class EvalCase:
     input: str
     tags: list[str]
     expected: Expected
+    memory_seed: list[str] = field(default_factory=list)
 
 
 class Dataset:
@@ -52,6 +57,8 @@ class Dataset:
                 tool_call=ExpectedToolCall(name=tc_raw["name"]) if tc_raw else None,
                 tool_args=ta_raw,
                 output_contains=exp_raw.get("output_contains", []),
+                output_contains_any=exp_raw.get("output_contains_any", []),
+                no_tool_call=bool(exp_raw.get("no_tool_call", False)),
             )
             cases.append(
                 EvalCase(
@@ -60,6 +67,7 @@ class Dataset:
                     input=item["input"],
                     tags=item.get("tags", []),
                     expected=expected,
+                    memory_seed=item.get("memory_seed", []),
                 )
             )
         return cls(cases, version=raw.get("version", "1.0"))

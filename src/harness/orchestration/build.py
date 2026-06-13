@@ -64,10 +64,14 @@ def build_long_term(settings: Settings) -> LongTermMemory:
     return InMemoryLongTerm()
 
 
-def build_agent(settings: Settings, tracer=None) -> ReActAgent:
+def build_agent(
+    settings: Settings,
+    tracer=None,
+    long_term: LongTermMemory | None = None,
+) -> ReActAgent:
     parser = build_parser(settings)
     llm = build_llm(settings, parser)
-    memory = build_long_term(settings)
+    memory = long_term if long_term is not None else build_long_term(settings)
 
     registry = ToolRegistry()
     registry.register(CalculatorTool())

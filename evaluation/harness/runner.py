@@ -68,7 +68,8 @@ class EvalRunner:
     async def _run_case(self, case: EvalCase, metrics: list[Metric]) -> CaseReport:
         tracer = TraceCollector()
         try:
-            agent = self._factory(tracer)
+            result = self._factory(tracer, case.memory_seed)
+            agent = await result if asyncio.iscoroutine(result) else result
             state = AgentState(messages=[Message(Role.USER, case.input)])
             agent_result: AgentResult = await agent.run(state)
             run_result = _extract_run_result(agent_result, tracer)

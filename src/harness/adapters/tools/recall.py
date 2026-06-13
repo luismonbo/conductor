@@ -22,8 +22,10 @@ class RecallTool:
         return ToolSpec(
             name="recall",
             description=(
-                "Search long-term memory for relevant facts from earlier "
-                "conversations. Use when the user refers to something prior."
+                "Search long-term memory for personal facts about the user — "
+                "their name, location, job title, preferences, and ongoing "
+                "projects. Call this tool whenever the user asks about "
+                "themselves or their personal context. Never guess."
             ),
             parameters={
                 "type": "object",

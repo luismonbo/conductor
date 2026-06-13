@@ -14,9 +14,10 @@ from harness.core.agents.react import ReActAgent
 from harness.core.tools.registry import ToolRegistry
 from harness.core.types import LLMResponse, ToolCall
 
-from evaluation.harness.dataset import Dataset
+from evaluation.harness.dataset import Dataset, EvalCase, Expected
 from evaluation.harness.runner import EvalRunner
 from evaluation.metrics.arg_schema import ArgSchemaMetric
+from evaluation.metrics.no_tool_call import NoToolCallMetric
 from evaluation.metrics.output_contains import OutputContainsMetric
 from evaluation.metrics.tool_call import ToolCallMetric
 
@@ -25,7 +26,7 @@ _DATASETS_DIR = (
 )
 
 
-def _make_calc_agent(tracer):
+def _make_calc_agent(tracer, memory_seed=None):
     """Build a scripted agent that calls calculator then gives a final answer."""
     client = FakeLLMClient([
         LLMResponse(
@@ -48,10 +49,46 @@ def _make_calc_agent(tracer):
     )
 
 
+def _make_direct_agent(tracer, memory_seed=None):
+    """Build a scripted agent that answers without calling any tool."""
+    client = FakeLLMClient([LLMResponse(text="Hello there!")])
+    memory = InMemoryLongTerm()
+    registry = ToolRegistry()
+    registry.register(CalculatorTool())
+    registry.register(RecallTool(memory))
+    return ReActAgent(
+        llm=client,
+        tools=registry,
+        system_prompt="You are a helpful assistant.",
+        tracer=tracer,
+    )
+
+
+class TestNoToolCallMetricSmoke:
+    def test_direct_case_passes_no_tool_call_metric(self):
+        case = EvalCase(
+            id="direct_smoke",
+            description="smoke",
+            input="say hello",
+            tags=["smoke"],
+            expected=Expected(no_tool_call=True, output_contains=["Hello"]),
+        )
+        dataset = Dataset([case])
+        metrics = [NoToolCallMetric(), OutputContainsMetric()]
+        runner = EvalRunner(_make_direct_agent)
+        report = runner.run(dataset, metrics, dataset_name="inline")
+
+        assert report.total == 1
+        assert report.passed == 1
+        case_report = report.cases[0]
+        for mr in case_report.metric_results:
+            assert mr.passed, f"{mr.name} failed: {mr.reason}"
+
+
 class TestEvalRunnerSmoke:
     def test_calc_case_passes_all_metrics(self):
         dataset = Dataset.load(_DATASETS_DIR / "tool_use_v1.json").filter_by_tags(
-            ["calculator"]
+            ["smoke"]
         )
         assert len(dataset.cases) == 1
 
@@ -65,7 +102,7 @@ class TestEvalRunnerSmoke:
 
     def test_calc_case_metric_results(self):
         dataset = Dataset.load(_DATASETS_DIR / "tool_use_v1.json").filter_by_tags(
-            ["calculator"]
+            ["smoke"]
         )
         metrics = [ToolCallMetric(), ArgSchemaMetric(), OutputContainsMetric()]
         runner = EvalRunner(_make_calc_agent)
@@ -78,7 +115,7 @@ class TestEvalRunnerSmoke:
 
     def test_report_has_correct_by_metric_counts(self):
         dataset = Dataset.load(_DATASETS_DIR / "tool_use_v1.json").filter_by_tags(
-            ["calculator"]
+            ["smoke"]
         )
         metrics = [ToolCallMetric(), ArgSchemaMetric(), OutputContainsMetric()]
         runner = EvalRunner(_make_calc_agent)

@@ -5,7 +5,7 @@
     {
       "id": "calc_mul_001",
       "description": "Agent should use calculator for simple multiplication",
-      "tags": ["calculator", "arithmetic"],
+      "tags": ["calculator", "arithmetic", "op-variety", "smoke"],
       "input": "what is 12 * 9?",
       "expected": {
         "tool_call": { "name": "calculator" },
@@ -14,12 +14,113 @@
       }
     },
     {
-      "id": "direct_001",
-      "description": "Agent should answer directly without a tool",
-      "tags": ["direct"],
-      "input": "say hello",
+      "id": "calc_add_001",
+      "description": "Agent should use calculator for addition",
+      "tags": ["calculator", "arithmetic", "op-variety"],
+      "input": "what is 47 + 83?",
       "expected": {
-        "output_contains": ["hello"]
+        "tool_call": { "name": "calculator" },
+        "tool_args": { "expression": null },
+        "output_contains": ["130"]
+      }
+    },
+    {
+      "id": "calc_sub_001",
+      "description": "Agent should use calculator for subtraction",
+      "tags": ["calculator", "arithmetic", "op-variety"],
+      "input": "what is 200 minus 37?",
+      "expected": {
+        "tool_call": { "name": "calculator" },
+        "tool_args": { "expression": null },
+        "output_contains": ["163"]
+      }
+    },
+    {
+      "id": "calc_div_001",
+      "description": "Agent should use calculator for division",
+      "tags": ["calculator", "arithmetic", "op-variety"],
+      "input": "what is 144 divided by 12?",
+      "expected": {
+        "tool_call": { "name": "calculator" },
+        "tool_args": { "expression": null },
+        "output_contains": ["12"]
+      }
+    },
+    {
+      "id": "calc_pow_001",
+      "description": "Agent should use calculator for exponentiation",
+      "tags": ["calculator", "arithmetic", "op-variety"],
+      "input": "what is 2 to the power of 8?",
+      "expected": {
+        "tool_call": { "name": "calculator" },
+        "tool_args": { "expression": null },
+        "output_contains": ["256"]
+      }
+    },
+    {
+      "id": "calc_mod_001",
+      "description": "Agent should use calculator for modulo",
+      "tags": ["calculator", "arithmetic", "op-variety"],
+      "input": "what is 17 mod 5?",
+      "expected": {
+        "tool_call": { "name": "calculator" },
+        "tool_args": { "expression": null },
+        "output_contains": ["2"]
+      }
+    },
+    {
+      "id": "calc_order_001",
+      "description": "Agent should preserve order of operations",
+      "tags": ["calculator", "arithmetic", "op-variety"],
+      "input": "what is (3 + 4) times 6?",
+      "expected": {
+        "tool_call": { "name": "calculator" },
+        "tool_args": { "expression": null },
+        "output_contains": ["42"]
+      }
+    },
+    {
+      "id": "calc_neg_001",
+      "description": "Agent should handle negative numbers",
+      "tags": ["calculator", "arithmetic", "edge-case"],
+      "input": "what is negative 8 times 7?",
+      "expected": {
+        "tool_call": { "name": "calculator" },
+        "tool_args": { "expression": null },
+        "output_contains": ["-56"]
+      }
+    },
+    {
+      "id": "calc_decimal_001",
+      "description": "Agent should handle decimal inputs",
+      "tags": ["calculator", "arithmetic", "edge-case"],
+      "input": "what is 2.5 times 4?",
+      "expected": {
+        "tool_call": { "name": "calculator" },
+        "tool_args": { "expression": null },
+        "output_contains": ["10"]
+      }
+    },
+    {
+      "id": "calc_large_001",
+      "description": "Agent should handle large number results",
+      "tags": ["calculator", "arithmetic", "edge-case"],
+      "input": "what is 123 squared?",
+      "expected": {
+        "tool_call": { "name": "calculator" },
+        "tool_args": { "expression": null },
+        "output_contains": ["15,129"]
+      }
+    },
+    {
+      "id": "calc_chain_001",
+      "description": "Agent should handle chained division",
+      "tags": ["calculator", "arithmetic", "edge-case"],
+      "input": "what is 100 divided by 4 divided by 5?",
+      "expected": {
+        "tool_call": { "name": "calculator" },
+        "tool_args": { "expression": null },
+        "output_contains": ["5"]
       }
     },
     {
@@ -27,8 +128,149 @@
       "description": "Agent should use recall to look up stored user facts",
       "tags": ["recall", "memory"],
       "input": "where am I based?",
+      "memory_seed": ["The user is based in San Francisco"],
       "expected": {
-        "tool_call": { "name": "recall" }
+        "tool_call": { "name": "recall" },
+        "tool_args": { "query": null },
+        "output_contains": ["San Francisco"]
+      }
+    },
+    {
+      "id": "recall_name_001",
+      "description": "Agent should recall the user's name from memory",
+      "tags": ["recall", "memory"],
+      "input": "what's my name?",
+      "memory_seed": ["The user's name is Alex"],
+      "expected": {
+        "tool_call": { "name": "recall" },
+        "tool_args": { "query": null },
+        "output_contains": ["Alex"]
+      }
+    },
+    {
+      "id": "recall_pref_001",
+      "description": "Agent should recall a stored user preference",
+      "tags": ["recall", "memory"],
+      "input": "what programming language do I prefer?",
+      "memory_seed": ["The user prefers Python as their programming language"],
+      "expected": {
+        "tool_call": { "name": "recall" },
+        "tool_args": { "query": null },
+        "output_contains": ["Python"]
+      }
+    },
+    {
+      "id": "recall_project_001",
+      "description": "Agent should recall context about an ongoing project",
+      "tags": ["recall", "memory"],
+      "input": "what project are we currently working on?",
+      "memory_seed": ["The current project we are working on is agent-harness"],
+      "expected": {
+        "tool_call": { "name": "recall" },
+        "tool_args": { "query": null },
+        "output_contains": ["agent-harness"]
+      }
+    },
+    {
+      "id": "recall_job_001",
+      "description": "Agent should recall the user's job title from memory",
+      "tags": ["recall", "memory"],
+      "input": "what is my job title?",
+      "memory_seed": ["The user's job title is Senior Software Engineer"],
+      "expected": {
+        "tool_call": { "name": "recall" },
+        "tool_args": { "query": null },
+        "output_contains": ["Senior Software Engineer"]
+      }
+    },
+    {
+      "id": "direct_001",
+      "description": "Agent should answer directly without a tool",
+      "tags": ["direct"],
+      "input": "say hello",
+      "expected": {
+        "no_tool_call": true,
+        "output_contains": ["hello"]
+      }
+    },
+    {
+      "id": "direct_capital_001",
+      "description": "Agent should answer world-knowledge question directly, no tool",
+      "tags": ["direct"],
+      "input": "what is the capital of France?",
+      "expected": {
+        "no_tool_call": true,
+        "output_contains": ["Paris"]
+      }
+    },
+    {
+      "id": "direct_http_001",
+      "description": "Agent should expand an acronym directly from world knowledge",
+      "tags": ["direct"],
+      "input": "what does HTTP stand for?",
+      "expected": {
+        "no_tool_call": true,
+        "output_contains": ["Transfer Protocol"]
+      }
+    },
+    {
+      "id": "direct_week_001",
+      "description": "Agent should answer simple calendar fact directly",
+      "tags": ["direct"],
+      "input": "how many days are in a week?",
+      "expected": {
+        "no_tool_call": true,
+        "output_contains_any": ["7", "seven"]
+      }
+    },
+    {
+      "id": "direct_boiling_001",
+      "description": "Agent should answer basic science fact directly",
+      "tags": ["direct"],
+      "input": "what is the boiling point of water in Celsius?",
+      "expected": {
+        "no_tool_call": true,
+        "output_contains": ["100"]
+      }
+    },
+    {
+      "id": "amb_continents_001",
+      "description": "Agent should answer from world knowledge, not call calculator",
+      "tags": ["direct", "routing-ambiguity"],
+      "input": "how many continents are there?",
+      "expected": {
+        "no_tool_call": true,
+        "output_contains_any": ["7", "seven"]
+      }
+    },
+    {
+      "id": "amb_ww2_001",
+      "description": "Agent should answer historical fact directly, not use recall",
+      "tags": ["direct", "routing-ambiguity"],
+      "input": "what year did World War II end?",
+      "expected": {
+        "no_tool_call": true,
+        "output_contains": ["1945"]
+      }
+    },
+    {
+      "id": "amb_symbol_001",
+      "description": "Agent should answer chemistry fact directly, not use any tool",
+      "tags": ["direct", "routing-ambiguity"],
+      "input": "what is the chemical symbol for gold?",
+      "expected": {
+        "no_tool_call": true,
+        "output_contains": ["Au"]
+      }
+    },
+    {
+      "id": "amb_planets_001",
+      "description": "Agent should answer astronomy fact directly, not use calculator",
+      "tags": ["direct", "routing-ambiguity"],
+      "input": "how many planets are in our solar system?",
+      "expected": {
+        "no_tool_call": true,
+        "output_contains_any": ["8", "eight"]
       }
     }
   ]
