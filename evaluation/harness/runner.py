@@ -86,6 +86,7 @@ class EvalRunner:
         return CaseReport(
             case_id=case.id,
             input=case.input,
+            output=run_result.output,
             passed=passed,
             metric_results=metric_results,
         )

@@ -14,6 +14,7 @@ class CaseReport:
     case_id: str
     input: str
     passed: bool
+    output: str | None = None
     metric_results: list[MetricResult] = field(default_factory=list)
     error: str | None = None
 
@@ -66,6 +67,7 @@ class EvalReport:
                 {
                     "case_id": c.case_id,
                     "input": c.input,
+                    "output": c.output,
                     "passed": c.passed,
                     "error": c.error,
                     "metrics": [
