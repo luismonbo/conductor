@@ -1,14 +1,13 @@
 import { useState } from 'react';
-import type { ToolApprovalPayload } from '@/types';
 
-interface ApprovalCardProps {
-  payload: ToolApprovalPayload;
+interface MemoryApprovalCardProps {
+  proposed: string;
   onApprove: () => void;
-  onReject: () => void;
+  onDeny: () => void;
   onFeedback: (text: string) => void;
 }
 
-export function ApprovalCard({ payload, onApprove, onReject, onFeedback }: ApprovalCardProps) {
+export function MemoryApprovalCard({ proposed, onApprove, onDeny, onFeedback }: MemoryApprovalCardProps) {
   const [decided, setDecided] = useState(false);
   const [feedbackText, setFeedbackText] = useState('');
 
@@ -18,10 +17,10 @@ export function ApprovalCard({ payload, onApprove, onReject, onFeedback }: Appro
     onApprove();
   };
 
-  const handleReject = () => {
+  const handleDeny = () => {
     if (decided) return;
     setDecided(true);
-    onReject();
+    onDeny();
   };
 
   const handleFeedback = () => {
@@ -50,43 +49,29 @@ export function ApprovalCard({ payload, onApprove, onReject, onFeedback }: Appro
           letterSpacing: '0.08em',
         }}
       >
-        Tool approval required
+        Save to memory?
       </div>
 
-      {payload.tool_calls.map((tc) => (
-        <div key={tc.call_id} style={{ marginBottom: '10px' }}>
-          <div
-            style={{
-              fontFamily: 'var(--mono)',
-              fontSize: 'var(--text-sm)',
-              color: 'var(--accent)',
-              marginBottom: '4px',
-            }}
-          >
-            {tc.name}
-          </div>
-          <pre
-            style={{
-              margin: 0,
-              fontFamily: 'var(--mono)',
-              fontSize: 'var(--text-xs)',
-              color: 'var(--text-muted)',
-              whiteSpace: 'pre-wrap',
-              wordBreak: 'break-all',
-              background: 'var(--bg)',
-              padding: '6px 8px',
-              borderRadius: '4px',
-            }}
-          >
-            {JSON.stringify(tc.args, null, 2)}
-          </pre>
-        </div>
-      ))}
+      <div
+        style={{
+          fontFamily: 'var(--sans)',
+          fontSize: 'var(--text-sm)',
+          color: 'var(--text)',
+          background: 'var(--bg)',
+          padding: '10px 12px',
+          borderRadius: '6px',
+          borderLeft: '3px solid var(--accent)',
+          lineHeight: 1.5,
+          marginBottom: '12px',
+        }}
+      >
+        {proposed}
+      </div>
 
-      <div style={{ display: 'flex', gap: '8px', marginTop: '12px', justifyContent: 'flex-end' }}>
+      <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
         <button
           type="button"
-          onClick={handleReject}
+          onClick={handleDeny}
           disabled={decided}
           style={{
             padding: '6px 14px',

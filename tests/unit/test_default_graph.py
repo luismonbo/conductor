@@ -28,12 +28,18 @@ def _make_graph(responses: list[LLMResponse], registry: ToolRegistry | None = No
 
 
 async def _invoke_with_sentinel(graph, state_or_command, config: dict) -> list[AgentEvent]:
-    """Run graph.ainvoke concurrently with draining the event queue. Always puts sentinel."""
+    """Run graph.ainvoke concurrently with draining the event queue. Always puts sentinel.
+
+    Mirrors _run_graph in main.py: interrupt events are emitted after ainvoke returns
+    by inspecting result["__interrupt__"], not from inside the graph node.
+    """
     queue: asyncio.Queue = config["configurable"]["event_queue"]
 
     async def _go():
         try:
-            await graph.ainvoke(state_or_command, config)
+            result = await graph.ainvoke(state_or_command, config)
+            for intr in (result or {}).get("__interrupt__", ()):
+                await queue.put(AgentEvent(type="interrupt", args=intr.value))
         finally:
             await queue.put(None)
 

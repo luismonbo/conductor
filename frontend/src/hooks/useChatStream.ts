@@ -92,20 +92,22 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
           ? { ...msg, interruptPayload: undefined }
           : msg
       );
-      const userMsg: ConversationMessage = {
-        id: crypto.randomUUID(),
-        role: 'user',
-        text: action.text,
-      };
       const assistantMsg: AssistantMessage = {
         id: action.assistantId,
         role: 'assistant',
         blocks: [],
         isStreaming: true,
       };
+      const newMessages = action.text.trim()
+        ? [
+            ...clearedMessages,
+            { id: crypto.randomUUID(), role: 'user' as const, text: action.text },
+            assistantMsg,
+          ]
+        : [...clearedMessages, assistantMsg];
       return {
         ...state,
-        messages: [...clearedMessages, userMsg, assistantMsg],
+        messages: newMessages,
         streamStatus: 'streaming',
         inputValue: '',
         currentTool: null,
@@ -307,7 +309,7 @@ export function useChatStream() {
   );
 
   const resumeStream = useCallback(
-    async (decision: Record<string, unknown>) => {
+    async (decision: Record<string, unknown>, displayText = '') => {
       if (!state.threadId) return;
 
       abortRef.current?.abort();
@@ -315,7 +317,7 @@ export function useChatStream() {
       abortRef.current = controller;
 
       const assistantId = crypto.randomUUID();
-      dispatch({ type: 'SEND_USER_MESSAGE', text: '', assistantId });
+      dispatch({ type: 'SEND_USER_MESSAGE', text: displayText, assistantId });
 
       await _consumeStream(
         resumeChat(state.threadId, decision, controller.signal),

@@ -6,10 +6,13 @@ from __future__ import annotations
 import pytest
 
 from harness.adapters.memory.in_memory import InMemoryLongTerm
+from harness.adapters.memory.sqlite_store import SqliteLongTermMemory
 
 
-@pytest.fixture
-def memory():
+@pytest.fixture(params=["in_memory", "sqlite"])
+def memory(request, tmp_path):
+    if request.param == "sqlite":
+        return SqliteLongTermMemory(str(tmp_path / "test_memory.sqlite"))
     return InMemoryLongTerm()
 
 

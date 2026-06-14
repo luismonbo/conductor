@@ -1,14 +1,17 @@
-"""Default LangGraph agent — six-node StateGraph.
+"""Default LangGraph agent — seven-node StateGraph.
 
 Topology:
   START → call_model
             ├─ wants_tools + iteration_ok → approval_gate
-            │     ├─ needs_approval=True  → interrupt() [state saved to checkpointer]
-            │     │                         on resume: approved  → execute_tools
-            │     │                                   rejected → handle_rejection → call_model (loop)
-            │     └─ needs_approval=False → execute_tools → call_model (loop)
-            ├─ no_tools               → final
-            └─ iteration_limit        → error
+            │     ├─ memory tool    → interrupt() → approve → execute_tools → call_model (loop)
+            │     │                               → deny    → handle_rejection → call_model (loop)
+            │     │                               → feedback → refine → call_model (loop)
+            │     ├─ other approval → interrupt() → approve → execute_tools → call_model (loop)
+            │     │                               → deny    → handle_rejection → call_model (loop)
+            │     │                               → feedback → refine → call_model (loop)
+            │     └─ no approval    → execute_tools → call_model (loop)
+            ├─ no_tools             → final
+            └─ iteration_limit      → error
   final → END
   error → END
 
@@ -98,14 +101,26 @@ def build_graph(
         return "final"
 
     async def _approval_gate(state: GraphState, config: RunnableConfig) -> dict:
-        queue: asyncio.Queue = config["configurable"]["event_queue"]
         last = state["messages"][-1]
 
+        # Memory proposals get their own interrupt shape so the UI can render
+        # approve/deny buttons + a free-text feedback input.
+        # NOTE: queue.put() is intentionally absent here — interrupt events are
+        # emitted by _run_graph after ainvoke() returns so resume reruns of this
+        # node don't fire a duplicate event into the new SSE stream.
+        memory_calls = [tc for tc in last.tool_calls if tc.name == "remember"]
+        if memory_calls:
+            tc = memory_calls[0]
+            proposed = tc.arguments.get("text", "")
+            payload = {"mode": "memory_proposal", "proposed": proposed, "call_id": tc.id}
+            decision = interrupt(payload)
+            return {"decision": decision}
+
+        # Regular tool approval (any other tool with requires_approval=True)
         needs_approval = any(
             getattr(registry.get(tc.name), "requires_approval", False)
             for tc in last.tool_calls
         )
-
         if not needs_approval:
             return {}
 
@@ -113,12 +128,6 @@ def build_graph(
             {"name": tc.name, "args": tc.arguments, "call_id": tc.id}
             for tc in last.tool_calls
         ]
-        await queue.put(AgentEvent(
-            type="interrupt",
-            args={"mode": "approval", "tool_calls": tc_list},
-        ))
-        # sentinel is NOT put here — API _run() finally puts it after ainvoke() returns
-
         decision = interrupt({"mode": "approval", "tool_calls": tc_list})
         return {"decision": decision}
 
@@ -145,9 +154,43 @@ def build_graph(
 
     def _route_after_approval(state: GraphState) -> str:
         decision = state.get("decision")
-        if decision is not None:
-            return "execute_tools" if decision.get("approved") else "handle_rejection"
-        return "execute_tools"
+        if decision is None:
+            return "execute_tools"
+        action = decision.get("action")
+        if action == "approve":
+            return "execute_tools"
+        if action == "feedback":
+            return "refine"
+        if action == "deny":
+            return "handle_rejection"
+        # Legacy tool-approval shape: {"approved": true/false}
+        return "execute_tools" if decision.get("approved") else "handle_rejection"
+
+    async def _refine(state: GraphState, config: RunnableConfig) -> dict:
+        """Handle user feedback on any tool that requires approval.
+
+        Injects a tool result carrying the feedback so the agent can revise
+        its approach and retry. Works for any requires_approval tool, not just
+        memory writes.
+        """
+        queue: asyncio.Queue = config["configurable"]["event_queue"]
+        last = state["messages"][-1]
+        feedback = (state.get("decision") or {}).get("feedback", "")
+
+        refine_msgs = []
+        for tc in last.tool_calls:
+            refine_msgs.append(Message(
+                role=Role.TOOL,
+                content=(
+                    f"User feedback on {tc.name}: {feedback}. "
+                    "Please revise your approach and try again."
+                ),
+                tool_call_id=tc.id,
+                name=tc.name,
+            ))
+
+        await queue.put(AgentEvent(type="thinking", text=f"[User feedback: {feedback}]"))
+        return {"messages": refine_msgs, "decision": None}
 
     async def _execute_tools(state: GraphState, config: RunnableConfig) -> dict:
         queue: asyncio.Queue = config["configurable"]["event_queue"]
@@ -201,6 +244,7 @@ def build_graph(
     builder.add_node("final", _final)
     builder.add_node("error", _error)
     builder.add_node("handle_rejection", _handle_rejection)
+    builder.add_node("refine", _refine)
 
     builder.add_edge(START, "call_model")
     builder.add_conditional_edges(
@@ -211,10 +255,15 @@ def build_graph(
     builder.add_conditional_edges(
         "approval_gate",
         _route_after_approval,
-        {"execute_tools": "execute_tools", "handle_rejection": "handle_rejection"},
+        {
+            "execute_tools": "execute_tools",
+            "handle_rejection": "handle_rejection",
+            "refine": "refine",
+        },
     )
     builder.add_edge("handle_rejection", "call_model")
     builder.add_edge("execute_tools", "call_model")
+    builder.add_edge("refine", "call_model")
     builder.add_edge("final", END)
     builder.add_edge("error", END)
 

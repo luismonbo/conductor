@@ -18,8 +18,8 @@ export interface AgentEvent {
   readonly stopped_reason: string;
 }
 
-// Interrupt payload carried inside AgentEvent.args when type === 'interrupt'
-export interface InterruptPayload {
+// Interrupt payload variants carried inside AgentEvent.args when type === 'interrupt'
+export interface ToolApprovalPayload {
   readonly mode: 'approval';
   readonly tool_calls: ReadonlyArray<{
     name: string;
@@ -27,6 +27,14 @@ export interface InterruptPayload {
     call_id: string;
   }>;
 }
+
+export interface MemoryProposalPayload {
+  readonly mode: 'memory_proposal';
+  readonly proposed: string;
+  readonly call_id: string;
+}
+
+export type InterruptPayload = ToolApprovalPayload | MemoryProposalPayload;
 
 // First SSE payload (not an AgentEvent)
 export interface ThreadIdPayload {

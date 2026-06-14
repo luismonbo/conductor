@@ -12,11 +12,11 @@ from __future__ import annotations
 import uuid
 from collections import defaultdict
 
-from harness.core.memory.store import MemoryHit
+from harness.core.memory.store import LongTermMemory, MemoryHit, ShortTermMemory
 from harness.core.types import Message
 
 
-class InMemoryShortTerm:
+class InMemoryShortTerm(ShortTermMemory):
     def __init__(self) -> None:
         self._store: dict[str, list[Message]] = defaultdict(list)
 
@@ -30,7 +30,7 @@ class InMemoryShortTerm:
         self._store.pop(conversation_id, None)
 
 
-class InMemoryLongTerm:
+class InMemoryLongTerm(LongTermMemory):
     """Naive lexical scoring. Good enough to exercise the interface; NOT
     semantic. Use PgVectorLongTerm in real runs."""
 
@@ -45,14 +45,20 @@ class InMemoryLongTerm:
     async def search(self, query: str, k: int = 5) -> list[MemoryHit]:
         q = set(query.lower().split())
         scored: list[MemoryHit] = []
+        unscored: list[MemoryHit] = []
         for text, meta in self._items.values():
             words = set(text.lower().split())
             overlap = len(q & words)
             if overlap:
                 score = overlap / max(len(q), 1)
                 scored.append(MemoryHit(text=text, score=score, metadata=meta))
+            else:
+                unscored.append(MemoryHit(text=text, score=0.0, metadata=meta))
         scored.sort(key=lambda h: h.score, reverse=True)
-        return scored[:k]
+        # Fall back to returning all memories when no keyword matches so the
+        # agent is never left empty-handed just because the query phrasing
+        # differs from the stored text.
+        return (scored or unscored)[:k]
 
     async def update(self, memory_id: str, text: str) -> None:
         if memory_id in self._items:

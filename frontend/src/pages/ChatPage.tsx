@@ -11,24 +11,30 @@ export function ChatPage() {
     currentTool,
     inputValue,
     errorMessage,
+    interruptPayload,
     sendMessage,
     resumeStream,
     cancelStream,
     setInputValue,
   } = useChatStream();
 
-  const handleApprove = useCallback(
-    () => resumeStream({ approved: true }),
-    [resumeStream],
-  );
-  const handleReject = useCallback(
-    () => resumeStream({ approved: false }),
-    [resumeStream],
-  );
-
   const isStreaming = streamStatus === 'streaming';
   const isInterrupted = streamStatus === 'interrupted';
   const inputDisabled = isStreaming || isInterrupted;
+
+  // Tool approval (legacy shape)
+  const handleApprove = useCallback(() => resumeStream({ approved: true }), [resumeStream]);
+  const handleReject = useCallback(() => resumeStream({ approved: false }), [resumeStream]);
+
+  // Memory & generic feedback (new action shape)
+  const handleMemoryApprove = useCallback(() => resumeStream({ action: 'approve' }), [resumeStream]);
+  const handleMemoryDeny = useCallback(() => resumeStream({ action: 'deny' }), [resumeStream]);
+  const handleFeedback = useCallback(
+    (text: string) => resumeStream({ action: 'feedback', feedback: text }, text),
+    [resumeStream],
+  );
+
+  void interruptPayload; // used via MessageList → AssistantMessage discriminated union
 
   return (
     <div style={{
@@ -74,6 +80,9 @@ export function ChatPage() {
         messages={messages}
         onApprove={handleApprove}
         onReject={handleReject}
+        onFeedback={handleFeedback}
+        onMemoryApprove={handleMemoryApprove}
+        onMemoryDeny={handleMemoryDeny}
       />
 
       <ChatInput

@@ -15,7 +15,7 @@ class Settings(BaseSettings):
 
     # Backend selection
     llm_backend: str = "fake"          # fake | openai_compatible | azure
-    memory_backend: str = "in_memory"  # in_memory | pgvector
+    memory_backend: str = "sqlite"      # in_memory | sqlite | pgvector
     tool_parser: str = "native"        # native | prompted
 
     # OpenAI-compatible local server (llama.cpp llama-server / vLLM / etc.)

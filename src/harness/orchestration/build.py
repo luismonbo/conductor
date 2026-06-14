@@ -57,6 +57,11 @@ def build_llm(settings: Settings, parser: ToolCallParser) -> LLMClient:
 
 
 def build_long_term(settings: Settings) -> LongTermMemory:
+    if settings.memory_backend == "sqlite":
+        from harness.adapters.memory.sqlite_store import SqliteLongTermMemory
+
+        path = settings.memory_url or "./harness_memory.sqlite"
+        return SqliteLongTermMemory(path)
     if settings.memory_backend == "pgvector":
         raise NotImplementedError(
             "Wire PgVectorLongTerm with an embedder here (Phase 5)."
@@ -92,8 +97,11 @@ def build_agent_registry(settings: Settings, checkpointer) -> dict[str, object]:
     Adding a new agent means adding it here and in agents/<name>/.
     """
     from harness.agents.default.graph import build_graph as build_default_graph
+    from harness.agents.default.tools import build_registry
 
     llm = build_llm(settings, build_parser(settings))
+    long_term = build_long_term(settings)
+    registry = build_registry(long_term)
     return {
-        "default": build_default_graph(llm, checkpointer),
+        "default": build_default_graph(llm, checkpointer, registry=registry),
     }

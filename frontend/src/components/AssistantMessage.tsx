@@ -2,6 +2,7 @@ import { ThinkingBlock } from '@/components/ThinkingBlock';
 import { ToolCallPill } from '@/components/ToolCallPill';
 import { ToolResultPill } from '@/components/ToolResultPill';
 import { ApprovalCard } from '@/components/ApprovalCard';
+import { MemoryApprovalCard } from '@/components/MemoryApprovalCard';
 import type { InterruptPayload, MessageBlock } from '@/types';
 
 interface AssistantMessageProps {
@@ -11,6 +12,9 @@ interface AssistantMessageProps {
   interruptPayload?: InterruptPayload;
   onApprove?: () => void;
   onReject?: () => void;
+  onFeedback?: (text: string) => void;
+  onMemoryApprove?: () => void;
+  onMemoryDeny?: () => void;
 }
 
 export function AssistantMessage({
@@ -20,6 +24,9 @@ export function AssistantMessage({
   interruptPayload,
   onApprove,
   onReject,
+  onFeedback,
+  onMemoryApprove,
+  onMemoryDeny,
 }: AssistantMessageProps) {
   return (
     <div style={{ padding: '4px 16px', maxWidth: '80%' }}>
@@ -64,11 +71,20 @@ export function AssistantMessage({
           {finalText}
         </div>
       )}
-      {interruptPayload && onApprove && onReject && (
+      {interruptPayload?.mode === 'approval' && onApprove && onReject && onFeedback && (
         <ApprovalCard
           payload={interruptPayload}
           onApprove={onApprove}
           onReject={onReject}
+          onFeedback={onFeedback}
+        />
+      )}
+      {interruptPayload?.mode === 'memory_proposal' && onMemoryApprove && onMemoryDeny && onFeedback && (
+        <MemoryApprovalCard
+          proposed={interruptPayload.proposed}
+          onApprove={onMemoryApprove}
+          onDeny={onMemoryDeny}
+          onFeedback={onFeedback}
         />
       )}
       {isStreaming && blocks.length === 0 && !interruptPayload && (

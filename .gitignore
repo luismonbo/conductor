@@ -86,3 +86,6 @@ dist-ssr
 
 # Scripts directory
 scripts/
+
+# MCP servers
+.playwright-mcp

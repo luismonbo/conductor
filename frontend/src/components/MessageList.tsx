@@ -7,9 +7,12 @@ interface MessageListProps {
   messages: ConversationMessage[];
   onApprove: () => void;
   onReject: () => void;
+  onFeedback: (text: string) => void;
+  onMemoryApprove: () => void;
+  onMemoryDeny: () => void;
 }
 
-export function MessageList({ messages, onApprove, onReject }: MessageListProps) {
+export function MessageList({ messages, onApprove, onReject, onFeedback, onMemoryApprove, onMemoryDeny }: MessageListProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -47,6 +50,9 @@ export function MessageList({ messages, onApprove, onReject }: MessageListProps)
             interruptPayload={msg.interruptPayload}
             onApprove={onApprove}
             onReject={onReject}
+            onFeedback={onFeedback}
+            onMemoryApprove={onMemoryApprove}
+            onMemoryDeny={onMemoryDeny}
           />
         )
       )}

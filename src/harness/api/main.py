@@ -170,7 +170,13 @@ async def _run_graph(
     run_store: RunStore | None,
 ) -> None:
     try:
-        await graph.ainvoke(invoke_arg, config)
+        result = await graph.ainvoke(invoke_arg, config)
+        # Surface any interrupt payloads AFTER ainvoke returns so that resume
+        # reruns of the same node don't fire a duplicate interrupt event into
+        # the new SSE stream.
+        for intr in (result or {}).get("__interrupt__", ()):
+            stopped_reason_holder[0] = "interrupted"
+            await event_queue.put(AgentEvent(type="interrupt", args=intr.value))
     except asyncio.CancelledError:
         stopped_reason_holder[0] = "cancelled"
         await event_queue.put(AgentEvent(type="error", text="cancelled"))

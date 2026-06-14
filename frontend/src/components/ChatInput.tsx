@@ -8,6 +8,7 @@ interface ChatInputProps {
   onCancel: () => void;
   streamStatus: StreamStatus;
   disabled: boolean;
+  placeholder?: string;
 }
 
 export function ChatInput({
@@ -17,6 +18,7 @@ export function ChatInput({
   onCancel,
   streamStatus,
   disabled,
+  placeholder,
 }: ChatInputProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -44,7 +46,7 @@ export function ChatInput({
 
   const isStreaming = streamStatus === 'streaming';
   const isInterrupted = streamStatus === 'interrupted';
-  const placeholder = isInterrupted ? 'Waiting for your approval…' : 'Send a message…';
+  const resolvedPlaceholder = placeholder ?? (isInterrupted ? 'Waiting for approval…' : 'Send a message…');
 
   return (
     <div
@@ -63,7 +65,7 @@ export function ChatInput({
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={handleKeyDown}
         disabled={disabled}
-        placeholder={placeholder}
+        placeholder={resolvedPlaceholder}
         aria-label="Message"
         rows={1}
         style={{
@@ -80,7 +82,7 @@ export function ChatInput({
           lineHeight: '20px',
           minHeight: '40px',
           transition: 'border-color 0.15s',
-          opacity: isInterrupted ? 0.5 : 1,
+          opacity: disabled ? 0.5 : 1,
         }}
       />
       {isStreaming ? (
@@ -105,7 +107,7 @@ export function ChatInput({
           Cancel
         </button>
       ) : (
-        !isInterrupted && (
+        !disabled && (
           <button
             type="button"
             onClick={onSend}
