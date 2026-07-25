@@ -43,6 +43,20 @@ evaluation/reports/
 *.db
 harness.sqlite*
 
+# RAG data — raw/processed contents are local working copies (may be copyrighted,
+# regeneratable from raw); index_config manifests and directory placeholders stay tracked.
+# Collection dirs are re-included so git descends into them and sees the .gitkeep;
+# a file can't be re-included if its parent directory is excluded.
+data/raw/*
+!data/raw/*/
+data/raw/*/*
+!data/raw/*/.gitkeep
+data/processed/*
+!data/processed/*/
+data/processed/*/*
+!data/processed/*/.gitkeep
+data/*.db
+
 # Logs
 *.log
 
