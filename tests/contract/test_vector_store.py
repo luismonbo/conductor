@@ -47,8 +47,8 @@ async def _ping_postgres(psycopg) -> None:
     await conn.close()
 
 
-@pytest.fixture(params=["in_memory", "pgvector"])
-def store(request):
+@pytest.fixture(params=["in_memory", "pgvector", "milvus"])
+def store(request, tmp_path):
     if request.param == "in_memory":
         yield InMemoryVectorStore()
         return
@@ -60,6 +60,15 @@ def store(request):
         real_store = PgVectorStore(dsn=_PGVECTOR_DSN, table=table, vector_size=3)
         yield real_store
         asyncio.run(real_store.drop())
+        return
+    if request.param == "milvus":
+        pytest.importorskip("milvus_lite", reason="milvus_lite extra not installed")
+        from harness.adapters.vectorstore.milvus_store import MilvusStore
+
+        # Milvus Lite gets test isolation for free — a fresh tmp_path-scoped .db
+        # file per test, so no explicit teardown is needed.
+        uri = str(tmp_path / f"test_{uuid.uuid4().hex[:8]}.db")
+        yield MilvusStore(uri=uri, collection="test_rag_chunks", vector_size=3)
         return
     raise ValueError(request.param)
 
