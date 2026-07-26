@@ -19,6 +19,7 @@ from harness.core.agents.react import ReActAgent
 from harness.core.llm.client import LLMClient
 from harness.core.llm.tool_parsing import ToolCallParser
 from harness.core.memory.store import LongTermMemory
+from harness.core.rag.ingest import IngestionPipeline
 from harness.core.rag.ports import Embedder, VectorStore
 from harness.core.tools.registry import ToolRegistry
 
@@ -124,6 +125,19 @@ def build_parser_router():
     from harness.adapters.parsing.router import ParserRouter
 
     return ParserRouter(docling=DoclingParser(), markitdown=MarkitdownParser())
+
+
+def build_ingestion_pipeline(
+    settings: Settings, vector_store_backends: list[str], tracer=None
+) -> IngestionPipeline:
+    return IngestionPipeline(
+        parser=build_parser_router(),
+        normalizer=LlmNormalizer(build_llm(settings, build_parser(settings))),
+        chunker=StructureAwareChunker(),
+        embedder=build_embedder(settings),
+        vector_stores=[build_vector_store(settings, backend) for backend in vector_store_backends],
+        tracer=tracer,
+    )
 
 
 def build_agent(
