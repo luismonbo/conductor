@@ -12,13 +12,20 @@ dependencies = [
     "langgraph>=1.2.2",
     "langgraph-checkpoint-sqlite>=3.1.0",
     "markitdown[docx,pptx,xlsx]>=0.1.6",
+    "docling>=2.115.0",
 ]
 
 [project.optional-dependencies]
 azure = ["openai>=1.54", "azure-identity>=1.19"]
 pgvector = ["pgvector>=0.3", "psycopg[binary]>=3.2"]
 local = ["openai>=1.54"]  # llama-server / vLLM / any OpenAI-compatible server
-dev = ["pytest>=8.3", "pytest-asyncio>=0.24", "ruff>=0.7", "mypy>=1.13"]
+dev = [
+    "pytest>=8.3",
+ "pytest-asyncio>=0.24",
+ "ruff>=0.7",
+ "mypy>=1.13",
+ "fpdf2>=2.8.7",
+]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
