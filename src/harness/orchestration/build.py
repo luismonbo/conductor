@@ -7,8 +7,11 @@ means editing this file and nothing in core/.
 """
 from __future__ import annotations
 
+from harness.adapters.chunking.structure_aware import StructureAwareChunker
+from harness.adapters.embedding.fake import FakeEmbedder
 from harness.adapters.llm.parsers import NativeToolCallParser, PromptedToolCallParser
 from harness.adapters.memory.in_memory import InMemoryLongTerm
+from harness.adapters.normalization.llm_normalizer import LlmNormalizer
 from harness.adapters.tools.calculator import CalculatorTool
 from harness.adapters.tools.recall import RecallTool
 from harness.config.settings import Settings
@@ -16,6 +19,7 @@ from harness.core.agents.react import ReActAgent
 from harness.core.llm.client import LLMClient
 from harness.core.llm.tool_parsing import ToolCallParser
 from harness.core.memory.store import LongTermMemory
+from harness.core.rag.ports import Embedder, VectorStore
 from harness.core.tools.registry import ToolRegistry
 
 
@@ -67,6 +71,59 @@ def build_long_term(settings: Settings) -> LongTermMemory:
             "Wire PgVectorLongTerm with an embedder here (Phase 5)."
         )
     return InMemoryLongTerm()
+
+
+def build_embedder(settings: Settings) -> Embedder:
+    if settings.embedding_backend == "openai_compatible":
+        from harness.adapters.embedding.openai_compatible import OpenAICompatibleEmbedder
+
+        return OpenAICompatibleEmbedder(
+            base_url=settings.embedding_base_url,
+            model=settings.embedding_model,
+            api_key=settings.embedding_api_key,
+        )
+    if settings.embedding_backend == "azure":
+        raise NotImplementedError(
+            "Azure embeddings are not wired yet — use HARNESS_EMBEDDING_BACKEND=openai_compatible "
+            "or fake. See the RAG design doc's Explicitly Out of Scope section."
+        )
+    if settings.embedding_backend == "fake":
+        return FakeEmbedder(dimension=settings.embedding_dimension)
+    raise ValueError(f"Unknown embedding_backend: {settings.embedding_backend}")
+
+
+def build_vector_store(settings: Settings, backend: str) -> VectorStore:
+    if backend == "pgvector":
+        from harness.adapters.vectorstore.pgvector_store import PgVectorStore
+
+        return PgVectorStore(
+            dsn=settings.pgvector_url,
+            table=settings.pgvector_table,
+            vector_size=settings.embedding_dimension,
+        )
+    if backend == "milvus":
+        from harness.adapters.vectorstore.milvus_store import MilvusStore
+
+        return MilvusStore(
+            uri=settings.milvus_uri,
+            collection=settings.milvus_collection,
+            vector_size=settings.embedding_dimension,
+        )
+    if backend == "in_memory":
+        from harness.adapters.vectorstore.in_memory import InMemoryVectorStore
+
+        return InMemoryVectorStore()
+    raise ValueError(f"Unknown vector store backend: {backend}")
+
+
+def build_parser_router():
+    # Imported lazily: docling pulls torch + transformers, and this module is
+    # imported by the API and most of the test suite, which never parse a document.
+    from harness.adapters.parsing.docling_parser import DoclingParser
+    from harness.adapters.parsing.markitdown_parser import MarkitdownParser
+    from harness.adapters.parsing.router import ParserRouter
+
+    return ParserRouter(docling=DoclingParser(), markitdown=MarkitdownParser())
 
 
 def build_agent(
