@@ -33,6 +33,20 @@ class Settings(BaseSettings):
     # Empty until the pgvector backend is wired in Phase 5.
     memory_url: str = ""
 
+    # RAG — embedding backend (mirrors llm_backend's swap pattern)
+    embedding_backend: str = "fake"        # fake | openai_compatible | azure
+    embedding_base_url: str = "http://localhost:8081/v1"  # second llama-server, embedding model
+    embedding_model: str = "nomic-embed-text-v1.5"
+    embedding_api_key: str = ""
+    embedding_dimension: int = 768         # must match the store schema; changing this forces a reindex
+
+    # RAG — vector stores (distinct from HARNESS_MEMORY_BACKEND / HARNESS_MEMORY_URL)
+    rag_collection: str = "papers"
+    pgvector_url: str = ""                 # Postgres DSN; may equal checkpointer/memory DSN
+    pgvector_table: str = "rag_chunks"
+    milvus_uri: str = "./data/milvus_papers.db"
+    milvus_collection: str = "rag_chunks"
+
     # Checkpointer
     checkpointer: str = "sqlite"       # memory | sqlite | postgres
     checkpointer_url: str = "./harness.sqlite"
