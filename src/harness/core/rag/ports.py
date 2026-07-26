@@ -43,3 +43,10 @@ class VectorStore(Protocol):
     async def delete(self, document_id: str) -> None: ...
 
     async def count(self, collection: str | None = None) -> int: ...
+
+
+@runtime_checkable
+class Retriever(Protocol):
+    async def retrieve(
+        self, query: str, k: int = 5, collection: str | None = None
+    ) -> list[ScoredChunk]: ...
