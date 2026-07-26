@@ -21,6 +21,7 @@ from harness.core.llm.tool_parsing import ToolCallParser
 from harness.core.memory.store import LongTermMemory
 from harness.core.rag.ingest import IngestionPipeline
 from harness.core.rag.ports import Embedder, VectorStore
+from harness.core.rag.serve import RagPipeline, Retriever
 from harness.core.tools.registry import ToolRegistry
 
 
@@ -138,6 +139,16 @@ def build_ingestion_pipeline(
         vector_stores=[build_vector_store(settings, backend) for backend in vector_store_backends],
         tracer=tracer,
     )
+
+
+def build_rag_pipeline(
+    settings: Settings, vector_store_backend: str, tracer=None
+) -> RagPipeline:
+    embedder = build_embedder(settings)
+    vector_store = build_vector_store(settings, vector_store_backend)
+    retriever = Retriever(embedder=embedder, vector_store=vector_store)
+    llm = build_llm(settings, build_parser(settings))
+    return RagPipeline(retriever=retriever, llm=llm, tracer=tracer)
 
 
 def build_agent(
