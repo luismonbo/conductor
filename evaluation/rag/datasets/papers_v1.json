@@ -1,4 +1,95 @@
 {
   "version": "1.0",
-  "cases": []
+  "cases": [
+    {
+      "id": "attn_encoder_layers",
+      "query": "How many layers are in the encoder stack of the Transformer?",
+      "tags": ["smoke", "attention", "factual"],
+      "expected": {
+        "relevant_chunk_ids": ["papers/ad22e4e8c9f87f5e:5"],
+        "relevant_document_ids": ["papers/ad22e4e8c9f87f5e"],
+        "reference_answer": "The encoder is composed of a stack of N = 6 identical layers."
+      }
+    },
+    {
+      "id": "attn_num_heads",
+      "query": "How many parallel attention heads does the model use?",
+      "tags": ["smoke", "attention", "factual"],
+      "expected": {
+        "relevant_chunk_ids": ["papers/ad22e4e8c9f87f5e:10"],
+        "relevant_document_ids": ["papers/ad22e4e8c9f87f5e"],
+        "reference_answer": "It employs h = 8 parallel attention layers, or heads, with d_k = d_v = d_model/h = 64."
+      }
+    },
+    {
+      "id": "attn_training_hardware",
+      "query": "What hardware were the Transformer models trained on?",
+      "tags": ["attention", "factual"],
+      "expected": {
+        "relevant_chunk_ids": ["papers/ad22e4e8c9f87f5e:20"],
+        "relevant_document_ids": ["papers/ad22e4e8c9f87f5e"],
+        "reference_answer": "One machine with 8 NVIDIA P100 GPUs. Base models trained for 100,000 steps, about 12 hours."
+      }
+    },
+    {
+      "id": "attn_optimizer",
+      "query": "Which optimizer was used to train the Transformer, and with what settings?",
+      "tags": ["attention", "factual"],
+      "expected": {
+        "relevant_chunk_ids": ["papers/ad22e4e8c9f87f5e:21"],
+        "relevant_document_ids": ["papers/ad22e4e8c9f87f5e"],
+        "reference_answer": "The Adam optimizer with beta1 = 0.9, beta2 = 0.98 and epsilon = 1e-9, with a warmup-then-decay learning rate schedule."
+      }
+    },
+    {
+      "id": "attn_training_data",
+      "query": "What dataset was used for English-to-German training?",
+      "tags": ["attention", "factual"],
+      "expected": {
+        "relevant_chunk_ids": ["papers/ad22e4e8c9f87f5e:19"],
+        "relevant_document_ids": ["papers/ad22e4e8c9f87f5e"],
+        "reference_answer": "The standard WMT 2014 English-German dataset, about 4.5 million sentence pairs, encoded with byte-pair encoding over a shared source-target vocabulary of roughly 37000 tokens."
+      }
+    },
+    {
+      "id": "attn_why_positional_encoding",
+      "query": "Why does the Transformer need positional encodings?",
+      "tags": ["attention", "reasoning"],
+      "expected": {
+        "relevant_chunk_ids": ["papers/ad22e4e8c9f87f5e:15"],
+        "relevant_document_ids": ["papers/ad22e4e8c9f87f5e"],
+        "reference_answer": "The model contains no recurrence and no convolution, so information about the relative or absolute position of tokens must be injected explicitly for the model to use sequence order."
+      }
+    },
+    {
+      "id": "meta_definition",
+      "query": "What is meta-prompting?",
+      "tags": ["smoke", "meta-prompting", "definition"],
+      "expected": {
+        "relevant_chunk_ids": ["papers/23731d65a10a1398:0", "papers/23731d65a10a1398:4"],
+        "relevant_document_ids": ["papers/23731d65a10a1398"],
+        "reference_answer": "A scaffolding technique in which a single Meta Model coordinates multiple independent expert model queries and synthesizes their responses into a final answer."
+      }
+    },
+    {
+      "id": "meta_model_roles",
+      "query": "Which language model plays the Meta and Expert roles in the experiments?",
+      "tags": ["meta-prompting", "factual"],
+      "expected": {
+        "relevant_chunk_ids": ["papers/23731d65a10a1398:8"],
+        "relevant_document_ids": ["papers/23731d65a10a1398"],
+        "reference_answer": "The same LM, such as GPT-4, serves in both the Meta and Expert capacities; the roles are distinguished by their instructions, not by using different models."
+      }
+    },
+    {
+      "id": "unanswerable_from_corpus",
+      "query": "What is the melting point of tungsten?",
+      "tags": ["negative", "grounding"],
+      "expected": {
+        "relevant_chunk_ids": [],
+        "relevant_document_ids": [],
+        "reference_answer": "The context does not contain this information; the system should say so rather than answering from general knowledge."
+      }
+    }
+  ]
 }
