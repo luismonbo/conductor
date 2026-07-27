@@ -37,7 +37,8 @@ api / agents ──► orchestration ──► adapters ──► core
 | **Swappable checkpointer** | `MemorySaver` (tests) · `SqliteSaver` (local default) · Postgres (Phase 5) |
 | **SSE streaming** | Real-time `thinking`, `tool_call`, `tool_result`, `interrupt`, `final`, `error` events |
 | **React frontend** | Interrupt state UI: amber dot, "Waiting for approval", Reject button |
-| **74 tests** | Unit, integration, graph scenarios — all pass with zero credentials |
+| **RAG** | docling/markitdown ingestion → LLM-normalized sections → structure-aware chunks → pgvector + Milvus Lite; retrieval, grounded generation, and a RAG eval harness |
+| **249 tests** | Unit, integration, contract, graph scenarios — all pass with zero credentials |
 
 ---
 
@@ -52,8 +53,16 @@ src/harness/
 ├── adapters/
 │   ├── llm/              ← Azure, OpenAI-compatible, fake
 │   ├── tools/            ← calculator, recall
-│   └── memory/           ← in-memory, pgvector stub
-├── core/                 ← protocols + types, imports nothing outward
+│   ├── memory/           ← in-memory, pgvector stub (long-term conversational memory)
+│   ├── parsing/          ← docling, markitdown, router
+│   ├── normalization/    ← LLM structured-output normalizer
+│   ├── chunking/         ← structure-aware chunker
+│   ├── embedding/        ← openai-compatible, fake
+│   └── vectorstore/      ← pgvector, Milvus Lite, in-memory (RAG chunk index)
+├── core/
+│   ├── rag/              ← RAG schema, ports, ingestion + serving pipelines
+│   └── ...               ← protocols + types, imports nothing outward
+├── cli/                  ← ingest.py, rag_query.py
 ├── observability/        ← per-step tracer + token cost
 └── security/             ← input/content/output guards
 
@@ -87,7 +96,8 @@ cd frontend && pnpm install && pnpm dev
 
 Tests (no network, no credentials):
 ```bash
-uv run pytest -q   # 74 tests
+uv run pytest -q   # 249 tests
+# the pgvector contract cases skip cleanly unless `docker compose up -d postgres` is running
 ```
 
 ---
@@ -101,6 +111,12 @@ uv run pytest -q   # 74 tests
 | `HARNESS_AGENT` | `default` | agent name from registry |
 | `HARNESS_TOOL_PARSER` | `native` | `native` · `prompted` |
 | `HARNESS_MAX_ITERATIONS` | `8` | integer |
+| `HARNESS_EMBEDDING_BACKEND` | `fake` | `fake` · `openai_compatible` · `azure` (azure not yet wired) |
+| `HARNESS_EMBEDDING_MODEL` | `nomic-embed-text-v1.5` | any model your embedding endpoint serves |
+| `HARNESS_EMBEDDING_DIMENSION` | `768` | must match the vector store schema; changing it forces a reindex |
+| `HARNESS_PGVECTOR_URL` | — | Postgres DSN for the RAG chunk index |
+| `HARNESS_MILVUS_URI` | `./data/milvus_papers.db` | file path = Milvus Lite; `http(s)://` = a real server |
+| vector store (CLI `--vector-store`) | `pgvector` | `pgvector` · `milvus` · `in_memory` |
 
 Azure example:
 ```bash
@@ -142,6 +158,37 @@ Rejection (`approved: false`) routes to the `error` node.
 
 ---
 
+## RAG
+
+Drop documents into `data/raw/<collection>/` (gitignored), then ingest and query.
+Retrieval is a standalone primitive — it returns raw chunks, never a pre-baked
+answer — so a future agent tool can assess sufficiency and re-retrieve.
+
+```bash
+# Postgres + pgvector (Milvus Lite is embedded, no service needed)
+docker compose up -d postgres
+
+# ingest into both vector stores, then query one
+uv run python -m harness.cli.ingest --collection papers --vector-store all
+uv run python -m harness.cli.rag_query "What method does the paper use?" --show-context
+
+# same golden set against each backend, to compare them
+uv run python evaluation/run_rag_eval.py --vector-store pgvector
+uv run python evaluation/run_rag_eval.py --vector-store milvus
+```
+
+Ingestion is `parse → normalize → chunk → embed → upsert`. PDFs route to docling
+(layout-aware); everything else to markitdown, which is also the fallback if
+docling fails, so one bad document never aborts a run. Parser output is
+normalized into a common section schema by the model via tool-calling — long
+documents are windowed to stay inside the context budget.
+
+`evaluation/rag/datasets/papers_v1.json` ships empty on purpose: cases need
+known-correct passages from real documents, so it gets populated once a corpus
+exists. The eval runs clean against an empty index and reports a baseline.
+
+---
+
 ## Roadmap
 
 - [x] ReAct agent, tools, short-term memory, tracing, FastAPI
@@ -149,8 +196,14 @@ Rejection (`approved: false`) routes to the `error` node.
 - [x] React + TypeScript frontend (SSE streaming, cancel)
 - [x] **LangGraph `StateGraph` runtime + checkpointer**
 - [x] **HITL approval gate (`interrupt` / `resume`)**
+- [x] **RAG ingestion** — docling/markitdown parsing, LLM-normalized schema,
+      structure-aware chunking, dual pgvector + Milvus Lite vector stores
+- [x] **RAG retrieval + grounded generation**, RAG eval harness (recall@k, MRR,
+      faithfulness, answer relevancy)
 - [ ] Token streaming (`LLMClient.stream()`)
 - [ ] Full HITL UI (approve button, editable args)
 - [ ] Postgres checkpointer
 - [ ] Multi-agent: supervisor + specialized sub-agents
 - [ ] Verify gate (post-execution fact-checking)
+- [ ] RAG Phase 2 (hybrid retrieval, reranking, enforced idempotent re-ingestion,
+      groundedness checking, citations) and Phase 3 (agentic retrieval)
