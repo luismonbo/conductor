@@ -141,6 +141,72 @@ async def test_raises_when_every_window_fails():
 
 
 @pytest.mark.asyncio
+async def test_sections_missing_optional_fields_are_tolerated():
+    """Small local models omit fields the JSON schema marks required. Dropping
+    the whole document over one absent key loses the entire paper."""
+    llm = FakeLLMClient([
+        LLMResponse(text="", tool_calls=(
+            ToolCall(id="c", name="emit_normalized_document", arguments={
+                "sections": [
+                    {"text": "body with no title, level or kind"},
+                    {"title": "Proper", "level": 2, "kind": "table", "text": "| a |"},
+                ],
+            }),
+        )),
+    ])
+    normalizer = LlmNormalizer(llm)
+    parsed = ParsedContent(text="whatever", format="pdf", parser="docling")
+
+    [doc] = await normalizer.normalize(parsed, source_path="p.pdf", collection="papers")
+
+    assert doc.title == ""
+    assert doc.sections[0].title == ""
+    assert doc.sections[0].level == 0
+    assert doc.sections[0].kind == "prose"
+    assert doc.sections[0].text == "body with no title, level or kind"
+    assert doc.sections[1].kind == "table"
+
+
+@pytest.mark.asyncio
+async def test_sections_with_no_text_are_dropped():
+    llm = FakeLLMClient([
+        LLMResponse(text="", tool_calls=(
+            ToolCall(id="c", name="emit_normalized_document", arguments={
+                "title": "T",
+                "sections": [
+                    {"title": "Empty", "level": 1, "kind": "prose", "text": ""},
+                    {"title": "Real", "level": 1, "kind": "prose", "text": "content"},
+                ],
+            }),
+        )),
+    ])
+    normalizer = LlmNormalizer(llm)
+    parsed = ParsedContent(text="whatever", format="pdf", parser="docling")
+
+    [doc] = await normalizer.normalize(parsed, source_path="p.pdf", collection="papers")
+
+    assert [s.title for s in doc.sections] == ["Real"]
+
+
+@pytest.mark.asyncio
+async def test_malformed_section_entries_do_not_sink_the_document():
+    llm = FakeLLMClient([
+        LLMResponse(text="", tool_calls=(
+            ToolCall(id="c", name="emit_normalized_document", arguments={
+                "title": "T",
+                "sections": ["not an object", {"title": "Real", "text": "content"}],
+            }),
+        )),
+    ])
+    normalizer = LlmNormalizer(llm)
+    parsed = ParsedContent(text="whatever", format="pdf", parser="docling")
+
+    [doc] = await normalizer.normalize(parsed, source_path="p.pdf", collection="papers")
+
+    assert [s.title for s in doc.sections] == ["Real"]
+
+
+@pytest.mark.asyncio
 async def test_document_id_is_stable_regardless_of_window_size():
     """document_id derives from the whole document's content hash, so changing
     the window size must not silently create a duplicate document."""

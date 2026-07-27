@@ -128,12 +128,21 @@ class LlmNormalizer:
             if not title:
                 title = args.get("title", "")
             for raw in args.get("sections", []):
+                # Small local models omit fields the JSON schema marks required,
+                # and occasionally emit a bare string instead of an object.
+                # Falling back to DocumentSection's own defaults keeps the rest
+                # of the paper rather than dropping it over one absent key.
+                if not isinstance(raw, dict):
+                    continue
+                text = raw.get("text") or ""
+                if not text.strip():
+                    continue  # an empty section would chunk to nothing anyway
                 sections.append(
                     DocumentSection(
-                        title=raw["title"],
-                        level=raw["level"],
-                        kind=raw["kind"],
-                        text=raw["text"],
+                        title=raw.get("title") or "",
+                        level=raw.get("level") or 0,
+                        kind=raw.get("kind") or "prose",
+                        text=text,
                         # Renumber across windows: each window numbers its own
                         # sections from 0, which would collide on merge.
                         order=len(sections),
