@@ -66,7 +66,13 @@ class MilvusStore:
     def _ensure_ready(self) -> None:
         if self._ready:
             return
-        if self._collection not in self._client.list_collections():
+        if self._collection in self._client.list_collections():
+            # Creating a collection loads it, so a writer never reaches here.
+            # A reader in a fresh process creates nothing and would search an
+            # unloaded collection: "state 'released'; call load() before
+            # search/get/query". load_collection is idempotent.
+            self._client.load_collection(collection_name=self._collection)
+        else:
             schema = self._client.create_schema(auto_id=False, enable_dynamic_field=False)
             schema.add_field("chunk_id", DataType.VARCHAR, is_primary=True, max_length=_ID_FIELD_MAX_LEN)
             schema.add_field("vector", DataType.FLOAT_VECTOR, dim=self._vector_size)
