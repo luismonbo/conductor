@@ -15,9 +15,12 @@ from evaluation.rag.metric import RagMetric
 
 
 class RagRunner:
-    def __init__(self, pipeline_factory) -> None:
+    def __init__(self, pipeline_factory, k: int = 5) -> None:
         # pipeline_factory(tracer) returns a fresh RagPipeline, sync or async
         self._factory = pipeline_factory
+        # k is part of the benchmark's identity: recall@k and MRR are not
+        # comparable across different k, so it is recorded, not implicit.
+        self._k = k
 
     def run(
         self, dataset: RagDataset, metrics: list[RagMetric], dataset_name: str = "dataset"
@@ -39,7 +42,7 @@ class RagRunner:
             pipeline = (
                 await pipeline_or_coro if asyncio.iscoroutine(pipeline_or_coro) else pipeline_or_coro
             )
-            result = await pipeline.answer(case.query)
+            result = await pipeline.answer(case.query, k=self._k)
         except Exception as exc:
             return CaseReport(case_id=case.id, input=case.query, passed=False, error=str(exc))
 

@@ -21,7 +21,7 @@ from harness.core.llm.tool_parsing import ToolCallParser
 from harness.core.memory.store import LongTermMemory
 from harness.core.rag.ingest import IngestionPipeline
 from harness.core.rag.ports import Embedder, VectorStore
-from harness.core.rag.serve import RagPipeline, Retriever
+from harness.core.rag.serve import DiversifiedRetriever, RagPipeline, Retriever
 from harness.core.tools.registry import ToolRegistry
 
 
@@ -147,6 +147,12 @@ def build_rag_pipeline(
     embedder = build_embedder(settings)
     vector_store = build_vector_store(settings, vector_store_backend)
     retriever = Retriever(embedder=embedder, vector_store=vector_store)
+    if settings.rag_per_document_k > 0:
+        retriever = DiversifiedRetriever(
+            retriever,
+            per_document_k=settings.rag_per_document_k,
+            overfetch=settings.rag_overfetch,
+        )
     llm = build_llm(settings, build_parser(settings))
     return RagPipeline(retriever=retriever, llm=llm, tracer=tracer)
 

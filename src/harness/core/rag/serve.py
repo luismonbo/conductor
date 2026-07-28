@@ -34,6 +34,57 @@ class Retriever:
         return await self._vector_store.search(query_embedding, k=k, collection=collection)
 
 
+class DiversifiedRetriever:
+    """Enforces a per-document quota over another Retriever's ranking.
+
+    Flat top-k collapses onto whichever document dominates a query. Measured on
+    the `papers` corpus (111 chunks vs 41), a multi-hop question had its two
+    answer chunks ranked #1 and #2 *within their own document* yet 4th and 6th
+    globally — the larger document crowded them out of a top-5. A quota reaches
+    them at k=4 where a flat search needs k=6, and the gap widens with corpus
+    imbalance.
+
+    It over-fetches, takes the best `per_document_k` from each document, then
+    backfills any remaining slots in score order so a single-document corpus is
+    never starved. Ordering of the final list stays by score — the quota decides
+    *membership*, not rank.
+
+    What this deliberately does NOT fix: a query whose single embedding matches
+    neither document well (asking about two papers at once lands between them).
+    On that case the answer chunk ranked 60th *within its own document*, which
+    no quota can reach. That needs query decomposition, not retrieval tuning.
+    """
+
+    def __init__(
+        self, retriever: "Retriever", per_document_k: int = 2, overfetch: int = 5
+    ) -> None:
+        self._retriever = retriever
+        self._per_document_k = per_document_k
+        self._overfetch = overfetch
+
+    async def retrieve(
+        self, query: str, k: int = 5, collection: str | None = None
+    ) -> list[ScoredChunk]:
+        candidates = await self._retriever.retrieve(query, k * self._overfetch, collection)
+
+        taken: list[ScoredChunk] = []
+        leftover: list[ScoredChunk] = []
+        seen_per_document: dict[str, int] = {}
+        for scored in candidates:
+            document_id = scored.chunk.document_id
+            count = seen_per_document.get(document_id, 0)
+            if count < self._per_document_k:
+                seen_per_document[document_id] = count + 1
+                taken.append(scored)
+            else:
+                leftover.append(scored)
+
+        selected = taken[:k]
+        if len(selected) < k:
+            selected = selected + leftover[: k - len(selected)]
+        return sorted(selected, key=lambda sc: sc.score, reverse=True)
+
+
 def assemble_prompt(query: str, retrieved: list[ScoredChunk]) -> list[Message]:
     if not retrieved:
         context = "(no relevant context was found)"

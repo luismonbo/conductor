@@ -42,6 +42,11 @@ def _parse_args() -> argparse.Namespace:
         "--vector-store", default="pgvector", choices=["pgvector", "milvus", "in_memory"]
     )
     parser.add_argument("--backend", default=None, help="Override HARNESS_LLM_BACKEND")
+    parser.add_argument("--k", type=int, default=None, help="Retrieval depth (default HARNESS_RAG_K)")
+    parser.add_argument(
+        "--per-document-k", type=int, default=None,
+        help="Max chunks per document; 0 disables the quota (default HARNESS_RAG_PER_DOCUMENT_K)",
+    )
     return parser.parse_args()
 
 
@@ -55,8 +60,15 @@ def main() -> int:
         return 1
 
     settings = get_settings()
+    overrides: dict = {}
     if args.backend:
-        settings = settings.model_copy(update={"llm_backend": args.backend})
+        overrides["llm_backend"] = args.backend
+    if args.k is not None:
+        overrides["rag_k"] = args.k
+    if args.per_document_k is not None:
+        overrides["rag_per_document_k"] = args.per_document_k
+    if overrides:
+        settings = settings.model_copy(update=overrides)
 
     dataset = RagDataset.load(dataset_path).filter_by_tags(args.tags)
     if not dataset.cases:
@@ -79,8 +91,12 @@ def main() -> int:
         RecallAtKMetric(), MRRMetric(),
         FaithfulnessMetric(judge=judge_llm), AnswerRelevancyMetric(judge=judge_llm),
     ]
-    runner = RagRunner(pipeline_factory)
-    print(f"Running {len(dataset.cases)} case(s) from {dataset_path.name} against {args.vector_store} ...")
+    runner = RagRunner(pipeline_factory, k=settings.rag_k)
+    quota = settings.rag_per_document_k or "off"
+    print(
+        f"Running {len(dataset.cases)} case(s) from {dataset_path.name} against "
+        f"{args.vector_store} (k={settings.rag_k}, per-document quota={quota}) ..."
+    )
     report = runner.run(dataset, metrics, dataset_name=dataset_path.name)
 
     out_path = report.save(_REPORTS_DIR)
