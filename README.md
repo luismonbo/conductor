@@ -117,6 +117,8 @@ uv run pytest -q   # 249 tests
 | `HARNESS_PGVECTOR_URL` | — | Postgres DSN for the RAG chunk index |
 | `HARNESS_MILVUS_URI` | `./data/milvus_papers.db` | file path = Milvus Lite; `http(s)://` = a real server |
 | vector store (CLI `--vector-store`) | `pgvector` | `pgvector` · `milvus` · `in_memory` |
+| `HARNESS_RAG_K` | `5` | retrieval depth |
+| `HARNESS_RAG_PER_DOCUMENT_K` | `2` | max chunks per document; `0` = plain flat top-k |
 
 Azure example:
 ```bash
