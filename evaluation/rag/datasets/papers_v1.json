@@ -90,6 +90,67 @@
         "relevant_document_ids": [],
         "reference_answer": "The context does not contain this information; the system should say so rather than answering from general knowledge."
       }
+    },
+
+    {
+      "id": "hard_paraphrase_doubling_down",
+      "query": "How does the approach stop a model from stubbornly repeating its own mistakes?",
+      "tags": ["hard", "paraphrase", "meta-prompting"],
+      "expected": {
+        "relevant_chunk_ids": ["papers/23731d65a10a1398:18"],
+        "relevant_document_ids": ["papers/23731d65a10a1398"],
+        "reference_answer": "Through 'fresh eyes' — consulting new expert instances that have not seen the prior reasoning, which mitigates language models doubling-down on their mistakes and exhibiting overconfidence."
+      }
+    },
+    {
+      "id": "hard_paraphrase_no_solution",
+      "query": "What does the system do when no valid answer can be found at all?",
+      "tags": ["hard", "paraphrase", "meta-prompting"],
+      "expected": {
+        "relevant_chunk_ids": ["papers/23731d65a10a1398:25"],
+        "relevant_document_ids": ["papers/23731d65a10a1398"],
+        "reference_answer": "Meta-prompting lets the Meta Model acknowledge the absence or impossibility of a valid solution more often than other prompting methods — for example reporting no solution 9 times out of 100 Game of 24 examples with Expert Python, and 15 without it."
+      }
+    },
+    {
+      "id": "hard_multihop_gpt4_vs_gpt35",
+      "query": "Which model ran the main experiments, and how well did the weaker alternative do?",
+      "tags": ["hard", "multi-hop", "meta-prompting"],
+      "expected": {
+        "relevant_chunk_ids": ["papers/23731d65a10a1398:12", "papers/23731d65a10a1398:27"],
+        "relevant_document_ids": ["papers/23731d65a10a1398"],
+        "reference_answer": "Main experiments used GPT-4 (gpt-4-32k), with GPT-3.5 (gpt-35-turbo) in supplementary experiments. GPT-3.5 showed a more limited scope of improvement — notable on Sonnet Writing and Checkmate-in-One, but not consistently above baseline."
+      }
+    },
+    {
+      "id": "hard_crossdoc_two_methods",
+      "query": "Each paper introduces a new technique. Name both and say what each one replaces or improves on.",
+      "tags": ["hard", "cross-document"],
+      "expected": {
+        "relevant_chunk_ids": ["papers/ad22e4e8c9f87f5e:33", "papers/23731d65a10a1398:0"],
+        "relevant_document_ids": ["papers/ad22e4e8c9f87f5e", "papers/23731d65a10a1398"],
+        "reference_answer": "The Transformer, the first sequence transduction model based entirely on attention, replacing the recurrent layers usually used in encoder-decoder architectures; and meta-prompting, a scaffolding technique that improves a single language model's functionality by having a Meta Model coordinate expert instances."
+      }
+    },
+    {
+      "id": "hard_crossdoc_which_tasks",
+      "query": "Which of these papers evaluates on machine translation, and which one uses the Game of 24?",
+      "tags": ["hard", "cross-document", "disambiguation"],
+      "expected": {
+        "relevant_chunk_ids": ["papers/ad22e4e8c9f87f5e:23", "papers/23731d65a10a1398:25"],
+        "relevant_document_ids": ["papers/ad22e4e8c9f87f5e", "papers/23731d65a10a1398"],
+        "reference_answer": "The Transformer paper evaluates on machine translation (WMT 2014 English-to-German and English-to-French); the meta-prompting paper uses the Game of 24 among its tasks."
+      }
+    },
+    {
+      "id": "hard_negative_adjacent",
+      "query": "How many parameters does GPT-4 have?",
+      "tags": ["hard", "negative", "grounding"],
+      "expected": {
+        "relevant_chunk_ids": [],
+        "relevant_document_ids": [],
+        "reference_answer": "Not stated anywhere in the corpus. GPT-4 is used as the experiment model, so topically similar context will be retrieved, but no passage gives a parameter count — the answer must decline rather than supply outside knowledge."
+      }
     }
   ]
 }

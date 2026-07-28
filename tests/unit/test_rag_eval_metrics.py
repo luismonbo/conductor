@@ -97,6 +97,45 @@ async def test_mrr_scores_reciprocal_of_first_relevant_rank():
 
 
 @pytest.mark.asyncio
+async def test_mrr_uses_the_same_granularity_as_recall():
+    """A case labelled with chunk ids must be scored on chunks by BOTH metrics.
+
+    Falling back to a document-level match here would report 'first relevant
+    hit at rank 1' for a retrieval that surfaced no labelled chunk at all,
+    while recall_at_k reported 0.00 for the very same result — two metrics
+    telling contradictory stories about one retrieval.
+    """
+    case = RagEvalCase(
+        id="q1", query="q",
+        expected=RagExpected(
+            relevant_chunk_ids=["doc1:7", "doc2:3"],
+            relevant_document_ids=["doc1", "doc2"],
+        ),
+    )
+    # Chunks from the right documents, but none of the labelled chunks.
+    result = _result(["doc1:0", "doc2:1"])
+
+    recall = await RecallAtKMetric().score(case, result, TraceCollector())
+    mrr = await MRRMetric().score(case, result, TraceCollector())
+
+    assert recall.score == 0.0
+    assert mrr.score == 0.0
+    assert not mrr.passed
+
+
+@pytest.mark.asyncio
+async def test_mrr_falls_back_to_documents_when_only_documents_are_labelled():
+    case = RagEvalCase(id="q1", query="q", expected=RagExpected(relevant_document_ids=["doc2"]))
+    result = _result(["doc1:0", "doc2:5"])
+
+    mr = await MRRMetric().score(case, result, TraceCollector())
+
+    assert mr.passed
+    assert mr.score == pytest.approx(0.5)
+    assert "document" in mr.reason
+
+
+@pytest.mark.asyncio
 async def test_mrr_zero_when_not_found():
     case = RagEvalCase(id="q1", query="q", expected=RagExpected(relevant_chunk_ids=["doc9:0"]))
     result = _result(["doc1:0"])

@@ -19,15 +19,28 @@ class MRRMetric:
         if not expected_chunks and not expected_docs:
             return MetricResult(name=self.name, passed=True, score=1.0, reason="skipped")
 
-        for rank, scored_chunk in enumerate(result.retrieved, start=1):
-            if (
-                scored_chunk.chunk.chunk_id in expected_chunks
-                or scored_chunk.chunk.document_id in expected_docs
-            ):
+        # Mirror RecallAtKMetric's granularity choice exactly: prefer chunk ids
+        # when the case declares them, else fall back to documents. ORing the
+        # two instead lets a case score MRR 1.00 ("first relevant hit at rank
+        # 1") while recall reports 0.00, because any chunk from a labelled
+        # document counts as a hit -- the two metrics then describe the same
+        # retrieval differently, which is worse than either being strict.
+        if expected_chunks:
+            expected_ids = expected_chunks
+            retrieved_ids = [sc.chunk.chunk_id for sc in result.retrieved]
+            granularity = "chunk"
+        else:
+            expected_ids = expected_docs
+            retrieved_ids = [sc.chunk.document_id for sc in result.retrieved]
+            granularity = "document"
+
+        for rank, retrieved_id in enumerate(retrieved_ids, start=1):
+            if retrieved_id in expected_ids:
                 return MetricResult(
                     name=self.name, passed=True, score=1.0 / rank,
-                    reason=f"first relevant hit at rank {rank}",
+                    reason=f"first relevant {granularity} at rank {rank}",
                 )
         return MetricResult(
-            name=self.name, passed=False, score=0.0, reason="no relevant chunk/document found"
+            name=self.name, passed=False, score=0.0,
+            reason=f"no relevant {granularity} found",
         )
