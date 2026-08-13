@@ -41,7 +41,7 @@ api / agents ──► orchestration ──► adapters ──► core
 | **Multi-provider models** | LiteLLM proxy fans one adapter out to Ollama/Anthropic/OpenAI/Gemini by model name; `resolve_model()` precedence: tool pin > agent pin > UI picker > default |
 | **Self-hosted tracing** | Langfuse captures trace trees via LangChain callbacks — fire-and-forget, chat is unaffected if it's down |
 | **Threaded chat UI** | Model picker, thread sidebar with transcript reload (`GET /models`, `GET /threads`) |
-| **288 tests** | Unit, integration, contract, graph scenarios — all pass with zero credentials |
+| **301 tests** | Unit, integration, contract, graph scenarios — all pass with zero credentials |
 
 ---
 
@@ -114,7 +114,7 @@ cd frontend && pnpm install && pnpm dev
 
 Tests (no network, no credentials):
 ```bash
-uv run pytest -q   # 288 tests
+uv run pytest -q   # 301 tests
 # the pgvector contract cases skip cleanly unless `docker compose up -d postgres` is running
 ```
 
@@ -201,6 +201,24 @@ picker > default** — via `resolve_model()`
 ([model_resolution.py](src/harness/core/llm/model_resolution.py)). Pins beat the
 picker on purpose: the model picker steers the conductor, never a component that
 was pinned for cost or capability reasons.
+
+### Troubleshooting `make up`
+
+- **`local-gemma` fails or 404s**: `litellm_config.yaml`'s default points at
+  `ollama_chat/gemma3`, a placeholder — run `ollama list` and edit that line to
+  match a model you've actually pulled.
+- **Reusing a `postgres_data` volume from before this Makefile existed**: the
+  `litellm`/`langfuse` databases only get created by `create-databases.sql` on a
+  *fresh* volume. Run `make init-dbs` once.
+- **`clickhouse` container stuck `unhealthy` (blocks `langfuse-web`/`langfuse-worker`)**:
+  the official image has a first-boot race — setting `CLICKHOUSE_USER`/`PASSWORD`
+  makes its entrypoint start a temporary server to create that user, and on some
+  hosts the temp instance doesn't release its ports before the real one starts.
+  The real process logs "Ready for connections" anyway but never actually binds
+  HTTP/TCP. `docker compose restart clickhouse` sometimes clears it; if not,
+  remember tracing is optional (blank `LANGFUSE_PUBLIC_KEY`/`SECRET_KEY` = chat
+  works, tracing just no-ops) — `docker compose up -d postgres litellm` alone is
+  enough to use every model profile without Langfuse at all.
 
 ---
 
