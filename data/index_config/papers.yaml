@@ -1,0 +1,9 @@
+collection: papers
+embedding_model: nomic-embed-text
+embedding_dimension: 768
+chunk_version: 1
+vector_stores:
+- pgvector
+- milvus
+documents_ingested: 3
+documents_failed: 0
