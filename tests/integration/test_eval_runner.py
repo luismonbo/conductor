@@ -4,7 +4,6 @@ Scripts the fake client to call the calculator tool and produce "108",
 then asserts all three metrics pass for the calc_mul_001 case.
 No network, no real LLM — fully deterministic.
 """
-import pytest
 
 from harness.adapters.llm.fake import FakeLLMClient
 from harness.adapters.memory.in_memory import InMemoryLongTerm

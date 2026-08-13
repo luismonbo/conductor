@@ -3,7 +3,6 @@ import json
 import tempfile
 from pathlib import Path
 
-import pytest
 
 from evaluation.harness.dataset import Dataset
 

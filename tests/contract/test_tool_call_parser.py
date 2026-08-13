@@ -4,7 +4,6 @@ the SDK. This is where you'd add adversarial fixtures (malformed JSON, prose
 calls) before trusting a small model on the Pi."""
 from __future__ import annotations
 
-import pytest
 
 from harness.adapters.llm.parsers import NativeToolCallParser, PromptedToolCallParser
 from harness.core.types import ToolSpec

@@ -4,7 +4,6 @@ from __future__ import annotations
 import pytest
 from harness.adapters.tools.calculator import CalculatorTool
 from harness.core.tools.registry import ToolRegistry
-from harness.core.types import ToolCall
 
 
 @pytest.mark.unit

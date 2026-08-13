@@ -2,7 +2,6 @@
 
 No agent, no network — metrics receive pre-built AgentRunResult objects.
 """
-import pytest
 
 from harness.observability.tracer import TraceCollector
 
