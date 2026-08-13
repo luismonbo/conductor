@@ -18,6 +18,7 @@ class FakeLLMClient(LLMClient):
     def __init__(self, scripted: list[LLMResponse]) -> None:
         self._queue: deque[LLMResponse] = deque(scripted)
         self.calls: list[list[Message]] = []
+        self.requested_models: list[str | None] = []
 
     @property
     def model_id(self) -> str:
@@ -27,7 +28,9 @@ class FakeLLMClient(LLMClient):
         self,
         messages: list[Message],
         tools: list[ToolSpec] | None = None,
+        model: str | None = None,
     ) -> LLMResponse:
+        self.requested_models.append(model)
         self.calls.append(list(messages))
         if not self._queue:
             return LLMResponse(text="(no scripted response left)")
@@ -37,7 +40,9 @@ class FakeLLMClient(LLMClient):
         self,
         messages: list[Message],
         tools: list[ToolSpec] | None = None,
+        model: str | None = None,
     ) -> AsyncGenerator[str | LLMResponse, None]:
+        self.requested_models.append(model)
         self.calls.append(list(messages))
         if not self._queue:
             response = LLMResponse(text="(no scripted response left)")

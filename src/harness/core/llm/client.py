@@ -27,12 +27,14 @@ class LLMClient(Protocol):
         self,
         messages: list[Message],
         tools: list[ToolSpec] | None = None,
+        model: str | None = None,
     ) -> LLMResponse: ...
 
     def stream(
         self,
         messages: list[Message],
         tools: list[ToolSpec] | None = None,
+        model: str | None = None,
     ) -> AsyncGenerator[str | LLMResponse, None]:
         """Implement as an async generator function (async def + yield).
 

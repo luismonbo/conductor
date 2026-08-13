@@ -141,10 +141,11 @@ class _OpenAIBaseClient(LLMClient):
         self,
         messages: list[Message],
         tools: list[ToolSpec] | None = None,
+        model: str | None = None,
     ) -> LLMResponse:
         wire_messages = build_request_messages(messages, self._parser, tools)
         kwargs: dict = {
-            "model": self._model_id,
+            "model": model or self._model_id,
             "messages": wire_messages,
             "temperature": self._temperature,
         }
@@ -158,10 +159,11 @@ class _OpenAIBaseClient(LLMClient):
         self,
         messages: list[Message],
         tools: list[ToolSpec] | None = None,
+        model: str | None = None,
     ) -> AsyncGenerator[str | LLMResponse, None]:
         wire_messages = build_request_messages(messages, self._parser, tools)
         kwargs: dict = {
-            "model": self._model_id,
+            "model": model or self._model_id,
             "messages": wire_messages,
             "temperature": self._temperature,
             "stream": True,
