@@ -235,6 +235,7 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
         "messages": [Message(role=Role.USER, content=req.message)],
         "iteration": 0,
         "max_iterations": settings.max_iterations,
+        "model_override": req.model,
     }
 
     run_store = await _get_run_store()

@@ -47,7 +47,7 @@ def build_llm(settings: Settings, parser: ToolCallParser) -> LLMClient:
 
         return OpenAICompatibleClient(
             base_url=settings.llm_base_url,
-            model=settings.llm_model,
+            model=settings.default_model or settings.llm_model,
             parser=parser,
             api_key=settings.llm_api_key,
         )

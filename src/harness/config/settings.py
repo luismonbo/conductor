@@ -23,6 +23,10 @@ class Settings(BaseSettings):
     llm_model: str = "gemma4:a2b"
     llm_api_key: str = ""              # most local servers ignore this
 
+    # Default model profile sent to the proxy when no pin/override applies.
+    # Supersedes llm_model when set; llm_model remains the fallback.
+    default_model: str = ""
+
     # Azure OpenAI
     azure_endpoint: str = ""
     azure_deployment: str = "gpt-5.4-mini"
