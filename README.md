@@ -38,7 +38,10 @@ api / agents ──► orchestration ──► adapters ──► core
 | **SSE streaming** | Real-time `thinking`, `tool_call`, `tool_result`, `interrupt`, `final`, `error` events |
 | **React frontend** | Interrupt state UI: amber dot, "Waiting for approval", Reject button |
 | **RAG** | docling/markitdown ingestion → LLM-normalized sections → structure-aware chunks → pgvector + Milvus Lite; retrieval, grounded generation, and a RAG eval harness |
-| **249 tests** | Unit, integration, contract, graph scenarios — all pass with zero credentials |
+| **Multi-provider models** | LiteLLM proxy fans one adapter out to Ollama/Anthropic/OpenAI/Gemini by model name; `resolve_model()` precedence: tool pin > agent pin > UI picker > default |
+| **Self-hosted tracing** | Langfuse captures trace trees via LangChain callbacks — fire-and-forget, chat is unaffected if it's down |
+| **Threaded chat UI** | Model picker, thread sidebar with transcript reload (`GET /models`, `GET /threads`) |
+| **288 tests** | Unit, integration, contract, graph scenarios — all pass with zero credentials |
 
 ---
 
@@ -76,8 +79,23 @@ frontend/src/
 
 ## Quick start
 
+Full stack (LiteLLM proxy + Langfuse + Postgres), then API and frontend each in
+their own terminal:
+
 ```bash
 uv sync
+cp .env.example .env   # fill in provider keys for the profiles you'll use
+
+make up     # infra: postgres, litellm, langfuse
+make api    # FastAPI, reload
+make web    # Vite dev server
+```
+
+`make up` validates `litellm_config.yaml` before starting anything, so a typo
+in a model profile fails fast instead of surfacing as an opaque proxy 400.
+
+Fallback — raw commands, no proxy/tracing, fake LLM, zero credentials:
+```bash
 uv run uvicorn harness.api.main:app --reload --app-dir src
 
 # health check
@@ -89,14 +107,14 @@ curl -N -X POST localhost:8000/chat/stream \
   -d '{"message": "what is 12 * 9?"}'
 ```
 
-Frontend:
+Frontend (raw):
 ```bash
 cd frontend && pnpm install && pnpm dev
 ```
 
 Tests (no network, no credentials):
 ```bash
-uv run pytest -q   # 249 tests
+uv run pytest -q   # 288 tests
 # the pgvector contract cases skip cleanly unless `docker compose up -d postgres` is running
 ```
 
@@ -119,6 +137,10 @@ uv run pytest -q   # 249 tests
 | vector store (CLI `--vector-store`) | `pgvector` | `pgvector` · `milvus` · `in_memory` |
 | `HARNESS_RAG_K` | `5` | retrieval depth |
 | `HARNESS_RAG_PER_DOCUMENT_K` | `2` | max chunks per document; `0` = plain flat top-k |
+| `HARNESS_DEFAULT_MODEL` | — | LiteLLM profile name sent when no pin/override applies; supersedes `HARNESS_LLM_MODEL` when set |
+| `LITELLM_MASTER_KEY` | — | proxy auth; must equal `HARNESS_LLM_API_KEY` |
+| `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` | — | empty = tracing disabled, chat unaffected |
+| `LANGFUSE_HOST` | `http://localhost:3000` | self-hosted Langfuse UI |
 
 Azure example:
 ```bash
@@ -128,11 +150,12 @@ export HARNESS_AZURE_DEPLOYMENT=gpt-4o
 # omit HARNESS_AZURE_API_KEY to use managed identity
 ```
 
-Local model (llama.cpp / vLLM / Ollama):
+Local model / any provider, via the LiteLLM proxy (default; see "Model routing" below):
 ```bash
 export HARNESS_LLM_BACKEND=openai_compatible
-export HARNESS_LLM_BASE_URL=http://localhost:8080/v1
-export HARNESS_LLM_MODEL=gemma-3-4b
+export HARNESS_LLM_BASE_URL=http://localhost:4000/v1
+export HARNESS_LLM_API_KEY=$LITELLM_MASTER_KEY
+export HARNESS_DEFAULT_MODEL=local-gemma
 ```
 
 ---
@@ -157,6 +180,27 @@ curl -X POST localhost:8000/resume/<thread_id> \
 ```
 
 Rejection (`approved: false`) routes to the `error` node.
+
+---
+
+## Model routing
+
+The harness keeps exactly one LLM adapter in the hot path — `OpenAICompatibleClient`
+— pointed at a LiteLLM proxy container that fans out to Ollama/Anthropic/OpenAI/Gemini
+by model name. Four profiles ship by default (`litellm_config.yaml`):
+
+| Profile | Provider |
+|---------|----------|
+| `local-gemma` | Ollama, on the host |
+| `claude` | Anthropic |
+| `gpt` | OpenAI |
+| `gemini-flash` | Gemini |
+
+Every call site resolves its model by precedence — **tool pin > agent pin > UI
+picker > default** — via `resolve_model()`
+([model_resolution.py](src/harness/core/llm/model_resolution.py)). Pins beat the
+picker on purpose: the model picker steers the conductor, never a component that
+was pinned for cost or capability reasons.
 
 ---
 
@@ -202,10 +246,14 @@ exists. The eval runs clean against an empty index and reports a baseline.
       structure-aware chunking, dual pgvector + Milvus Lite vector stores
 - [x] **RAG retrieval + grounded generation**, RAG eval harness (recall@k, MRR,
       faithfulness, answer relevancy)
-- [ ] Token streaming (`LLMClient.stream()`)
+- [x] Token streaming (`LLMClient.stream()`)
+- [x] **Multi-provider models** — LiteLLM proxy, `resolve_model()` precedence hierarchy
+- [x] **Self-hosted Langfuse tracing** — LangChain callbacks, fire-and-forget
+- [x] **Model picker + thread sidebar** — `GET /models`, `GET /threads`, transcript reload
 - [ ] Full HITL UI (approve button, editable args)
 - [ ] Postgres checkpointer
 - [ ] Multi-agent: supervisor + specialized sub-agents
 - [ ] Verify gate (post-execution fact-checking)
 - [ ] RAG Phase 2 (hybrid retrieval, reranking, enforced idempotent re-ingestion,
       groundedness checking, citations) and Phase 3 (agentic retrieval)
+- [ ] Tool-level model pins (`resolve_model` supports `tool_pin`; no consumer yet)
