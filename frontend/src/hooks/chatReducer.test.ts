@@ -38,7 +38,7 @@ describe('chatReducer — APPEND_THINKING (token streaming path)', () => {
 
     const assistant = state.messages.find((m) => m.role === 'assistant');
     expect(assistant?.blocks).toHaveLength(1);
-    expect(assistant?.blocks[0].text).toBe('The answer is 42');
+    expect(assistant?.blocks[0]).toEqual({ kind: 'thinking', text: 'The answer is 42' });
   });
 
   it('does not mutate the previous state', () => {
