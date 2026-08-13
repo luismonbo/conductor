@@ -109,6 +109,12 @@ export type StreamStatus = 'idle' | 'streaming' | 'interrupted' | 'done' | 'erro
 export interface ChatRequest {
   readonly message: string;
   readonly thread_id?: string;
+  readonly model?: string;
+}
+
+export interface ModelsResponse {
+  readonly models: string[];
+  readonly default: string;
 }
 
 export interface ResumeRequest {

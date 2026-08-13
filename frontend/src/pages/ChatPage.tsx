@@ -1,14 +1,17 @@
-import { useCallback } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useChatStream } from '@/hooks/useChatStream';
+import { fetchModels } from '@/api';
 import { StatusBar } from '@/components/StatusBar';
 import { MessageList } from '@/components/MessageList';
 import { ChatInput } from '@/components/ChatInput';
+import { ModelPicker } from '@/components/ModelPicker';
 
 export function ChatPage() {
   const {
     messages,
     streamStatus,
     currentTool,
+    threadId,
     inputValue,
     errorMessage,
     interruptPayload,
@@ -21,6 +24,25 @@ export function ChatPage() {
   const isStreaming = streamStatus === 'streaming';
   const isInterrupted = streamStatus === 'interrupted';
   const inputDisabled = isStreaming || isInterrupted;
+
+  const [models, setModels] = useState<string[]>([]);
+  const [selectedModel, setSelectedModel] = useState<string>('');
+
+  useEffect(() => {
+    fetchModels()
+      .then((r) => {
+        setModels(r.models);
+        const stored = localStorage.getItem('harness:model:last');
+        setSelectedModel(stored && r.models.includes(stored) ? stored : r.default);
+      })
+      .catch(() => setModels([]));
+  }, []);
+
+  const handleModelChange = useCallback((m: string) => {
+    setSelectedModel(m);
+    localStorage.setItem('harness:model:last', m);
+    if (threadId) localStorage.setItem(`harness:model:${threadId}`, m);
+  }, [threadId]);
 
   // Tool approval (legacy shape)
   const handleApprove = useCallback(() => resumeStream({ approved: true }), [resumeStream]);
@@ -59,7 +81,15 @@ export function ChatPage() {
         }}>
           agent harness
         </span>
-        <StatusBar streamStatus={streamStatus} currentTool={currentTool} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <ModelPicker
+            models={models}
+            value={selectedModel}
+            onChange={handleModelChange}
+            disabled={inputDisabled}
+          />
+          <StatusBar streamStatus={streamStatus} currentTool={currentTool} />
+        </div>
       </header>
 
       {errorMessage && (
@@ -88,7 +118,7 @@ export function ChatPage() {
       <ChatInput
         value={inputValue}
         onChange={setInputValue}
-        onSend={() => sendMessage(inputValue)}
+        onSend={() => sendMessage(inputValue, selectedModel || undefined)}
         onCancel={cancelStream}
         streamStatus={streamStatus}
         disabled={inputDisabled}

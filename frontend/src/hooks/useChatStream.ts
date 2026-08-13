@@ -287,7 +287,7 @@ export function useChatStream() {
   );
 
   const sendMessage = useCallback(
-    async (text: string) => {
+    async (text: string, model?: string) => {
       if (state.streamStatus === 'streaming') return;
       if (!text.trim()) return;
 
@@ -300,7 +300,7 @@ export function useChatStream() {
 
       await _consumeStream(
         streamChat(
-          { message: text, thread_id: state.threadId ?? undefined },
+          { message: text, thread_id: state.threadId ?? undefined, model },
           controller.signal,
         ),
       );

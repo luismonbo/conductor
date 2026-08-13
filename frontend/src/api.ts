@@ -6,6 +6,7 @@ import {
   type CancelResponse,
   type ChatRequest,
   type HealthResponse,
+  type ModelsResponse,
   type ResumeRequest,
   type ThreadIdPayload,
 } from '@/types';
@@ -72,6 +73,14 @@ export async function cancelChat(threadId: string): Promise<CancelResponse> {
     throw new Error(`Cancel request failed: ${response.status} ${response.statusText}`);
   }
   return response.json() as Promise<CancelResponse>;
+}
+
+export async function fetchModels(): Promise<ModelsResponse> {
+  const response = await fetch(`${BASE}/models`);
+  if (!response.ok) {
+    throw new Error(`Models request failed: ${response.status} ${response.statusText}`);
+  }
+  return response.json() as Promise<ModelsResponse>;
 }
 
 export async function healthCheck(): Promise<HealthResponse> {
