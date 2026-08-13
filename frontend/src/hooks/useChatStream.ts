@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useReducer, useRef } from 'react';
-import { streamChat, cancelChat, resumeChat } from '@/api';
+import { streamChat, cancelChat, resumeChat, fetchThreadMessages } from '@/api';
 import {
   isThreadIdPayload,
   type AgentEvent,
@@ -10,6 +10,7 @@ import {
   type StreamStatus,
   type ThinkingBlock,
   type ThreadIdPayload,
+  type ThreadMessageDTO,
 } from '@/types';
 
 // ---------------------------------------------------------------------------
@@ -50,7 +51,9 @@ type ChatAction =
   | { type: 'STREAM_FINAL'; text: string; stopped_reason: string }
   | { type: 'STREAM_ERROR'; text: string }
   | { type: 'STREAM_INTERRUPT'; payload: InterruptPayload }
-  | { type: 'STREAM_CANCELLED' };
+  | { type: 'STREAM_CANCELLED' }
+  | { type: 'LOAD_THREAD'; threadId: string; messages: ConversationMessage[] }
+  | { type: 'NEW_THREAD' };
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -208,9 +211,56 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       return { ...state, messages, streamStatus: 'idle', currentTool: null, errorMessage: null };
     }
 
+    case 'LOAD_THREAD':
+      return {
+        ...initialState,
+        threadId: action.threadId,
+        messages: action.messages,
+      };
+
+    case 'NEW_THREAD':
+      return { ...initialState };
+
     default:
       return state;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Transcript mapping
+// ---------------------------------------------------------------------------
+
+export function threadMessagesToConversation(
+  dtos: ThreadMessageDTO[],
+): ConversationMessage[] {
+  const out: ConversationMessage[] = [];
+  for (const dto of dtos) {
+    if (dto.role === 'user') {
+      out.push({ id: crypto.randomUUID(), role: 'user', text: dto.content });
+    } else if (dto.role === 'assistant') {
+      out.push({
+        id: crypto.randomUUID(),
+        role: 'assistant',
+        isStreaming: false,
+        finalText: dto.content || undefined,
+        blocks: dto.tool_calls.map((tc) => ({
+          kind: 'tool_call' as const, name: tc.name, args: tc.args, call_id: tc.call_id,
+        })),
+      });
+    } else if (dto.role === 'tool') {
+      const prev = out[out.length - 1];
+      if (prev && prev.role === 'assistant') {
+        out[out.length - 1] = {
+          ...prev,
+          blocks: [...prev.blocks, {
+            kind: 'tool_result' as const, text: dto.content,
+            name: dto.name, call_id: dto.tool_call_id, is_error: false,
+          }],
+        };
+      }
+    }
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -337,6 +387,21 @@ export function useChatStream() {
     dispatch({ type: 'SET_INPUT', value });
   }, []);
 
+  const loadThread = useCallback(async (threadId: string) => {
+    abortRef.current?.abort();
+    const body = await fetchThreadMessages(threadId);
+    dispatch({
+      type: 'LOAD_THREAD',
+      threadId,
+      messages: threadMessagesToConversation(body.messages),
+    });
+  }, []);
+
+  const newThread = useCallback(() => {
+    abortRef.current?.abort();
+    dispatch({ type: 'NEW_THREAD' });
+  }, []);
+
   useEffect(() => {
     return () => { abortRef.current?.abort(); };
   }, []);
@@ -353,5 +418,7 @@ export function useChatStream() {
     resumeStream,
     cancelStream,
     setInputValue,
+    loadThread,
+    newThread,
   };
 }

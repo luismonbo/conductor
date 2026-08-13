@@ -117,6 +117,26 @@ export interface ModelsResponse {
   readonly default: string;
 }
 
+export interface ThreadSummary {
+  readonly thread_id: string;
+  readonly last_at: string;
+  readonly runs: number;
+  readonly title: string;
+}
+
+export interface ThreadMessageDTO {
+  readonly role: string;
+  readonly content: string;
+  readonly tool_calls: ReadonlyArray<{ name: string; args: Record<string, unknown>; call_id: string }>;
+  readonly tool_call_id: string;
+  readonly name: string;
+}
+
+export interface ThreadMessagesResponse {
+  readonly thread_id: string;
+  readonly messages: ThreadMessageDTO[];
+}
+
 export interface ResumeRequest {
   readonly decision: Record<string, unknown>;
 }

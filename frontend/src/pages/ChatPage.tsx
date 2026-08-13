@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useChatStream } from '@/hooks/useChatStream';
-import { fetchModels } from '@/api';
+import { fetchModels, fetchThreads } from '@/api';
+import type { ThreadSummary } from '@/types';
 import { StatusBar } from '@/components/StatusBar';
 import { MessageList } from '@/components/MessageList';
 import { ChatInput } from '@/components/ChatInput';
 import { ModelPicker } from '@/components/ModelPicker';
+import { ThreadSidebar } from '@/components/ThreadSidebar';
 
 export function ChatPage() {
   const {
@@ -19,6 +21,8 @@ export function ChatPage() {
     resumeStream,
     cancelStream,
     setInputValue,
+    loadThread,
+    newThread,
   } = useChatStream();
 
   const isStreaming = streamStatus === 'streaming';
@@ -27,6 +31,7 @@ export function ChatPage() {
 
   const [models, setModels] = useState<string[]>([]);
   const [selectedModel, setSelectedModel] = useState<string>('');
+  const [threads, setThreads] = useState<ThreadSummary[]>([]);
 
   useEffect(() => {
     fetchModels()
@@ -38,11 +43,33 @@ export function ChatPage() {
       .catch(() => setModels([]));
   }, []);
 
+  // Refresh the sidebar on mount (status starts idle) and after each run.
+  useEffect(() => {
+    if (streamStatus === 'idle' || streamStatus === 'done') {
+      fetchThreads()
+        .then((r) => setThreads(r.threads))
+        .catch(() => { /* sidebar just stays as-is */ });
+    }
+  }, [streamStatus]);
+
   const handleModelChange = useCallback((m: string) => {
     setSelectedModel(m);
     localStorage.setItem('harness:model:last', m);
     if (threadId) localStorage.setItem(`harness:model:${threadId}`, m);
   }, [threadId]);
+
+  const handleSelectThread = useCallback((id: string) => {
+    loadThread(id)
+      .then(() => {
+        const stored = localStorage.getItem(`harness:model:${id}`);
+        if (stored) {
+          setSelectedModel((current) =>
+            models.includes(stored) ? stored : current,
+          );
+        }
+      })
+      .catch(() => { /* thread stays unloaded; sidebar unchanged */ });
+  }, [loadThread, models]);
 
   // Tool approval (legacy shape)
   const handleApprove = useCallback(() => resumeStream({ approved: true }), [resumeStream]);
@@ -61,9 +88,22 @@ export function ChatPage() {
   return (
     <div style={{
       display: 'flex',
-      flexDirection: 'column',
       height: '100%',
     }}>
+      <ThreadSidebar
+        threads={threads}
+        activeThreadId={threadId}
+        onSelect={handleSelectThread}
+        onNew={newThread}
+      />
+
+      <div style={{
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100%',
+        flex: 1,
+        minWidth: 0,
+      }}>
       <header style={{
         borderBottom: '1px solid var(--border)',
         padding: '12px 16px',
@@ -123,6 +163,7 @@ export function ChatPage() {
         streamStatus={streamStatus}
         disabled={inputDisabled}
       />
+      </div>
     </div>
   );
 }
