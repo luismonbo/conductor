@@ -36,6 +36,15 @@ SET finished_at = ?, stopped_reason = ?,
 WHERE run_id = ?
 """
 
+_LIST_THREADS = """
+SELECT thread_id, MAX(started_at) AS last_at, COUNT(*) AS runs
+FROM runs
+WHERE thread_id IS NOT NULL
+GROUP BY thread_id
+ORDER BY last_at DESC
+LIMIT ?
+"""
+
 
 class RunStore:
     def __init__(self, conn: aiosqlite.Connection) -> None:
@@ -58,6 +67,17 @@ class RunStore:
             await self._conn.commit()
         except Exception:
             logger.exception("RunStore.start_run failed for run_id=%s", run_id)
+
+    async def list_threads(self, limit: int = 50) -> list[dict]:
+        try:
+            cur = await self._conn.execute(_LIST_THREADS, (limit,))
+            rows = await cur.fetchall()
+            return [
+                {"thread_id": r[0], "last_at": r[1], "runs": r[2]} for r in rows
+            ]
+        except Exception:
+            logger.exception("RunStore.list_threads failed")
+            return []
 
     async def finish_run(
         self,

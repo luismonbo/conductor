@@ -16,7 +16,7 @@ import uuid
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from langgraph.types import Command
@@ -135,6 +135,71 @@ async def list_models() -> dict:
     except Exception:
         # Proxy down is not an API error: the picker just hides.
         return {"models": [], "default": default}
+
+
+# ---------------------------------------------------------------------------
+# Threads
+# ---------------------------------------------------------------------------
+
+async def _thread_state_messages(graph: Any, thread_id: str) -> list[Message] | None:
+    snapshot = await graph.aget_state(
+        {"configurable": {"thread_id": thread_id}}
+    )
+    if not snapshot or not snapshot.values:
+        return None
+    return snapshot.values.get("messages") or None
+
+
+def _title_from(messages: list[Message]) -> str:
+    first_user = next((m for m in messages if m.role == Role.USER), None)
+    return (first_user.content[:60] if first_user else "")
+
+
+@app.get("/threads")
+async def list_threads() -> dict:
+    run_store = await _get_run_store()
+    if run_store is None:
+        return {"threads": []}
+    settings = get_settings()
+    registry = await _get_registry()
+    graph = registry[settings.agent]
+    rows = await run_store.list_threads()
+
+    async def _summarize(row: dict) -> dict:
+        try:
+            messages = await _thread_state_messages(graph, row["thread_id"])
+            title = _title_from(messages) if messages else ""
+        except Exception:
+            title = ""
+        return {**row, "title": title}
+
+    threads = await asyncio.gather(*(_summarize(r) for r in rows))
+    return {"threads": list(threads)}
+
+
+@app.get("/threads/{thread_id}")
+async def thread_messages(thread_id: str) -> dict:
+    settings = get_settings()
+    registry = await _get_registry()
+    graph = registry[settings.agent]
+    messages = await _thread_state_messages(graph, thread_id)
+    if messages is None:
+        raise HTTPException(status_code=404, detail="unknown thread")
+    out = [
+        {
+            "role": m.role.value,
+            "content": m.content,
+            "tool_calls": [
+                {"name": tc.name, "args": tc.arguments, "call_id": tc.id}
+                for tc in (m.tool_calls or ())
+            ],
+            "tool_call_id": m.tool_call_id or "",
+            "name": m.name or "",
+        }
+        for m in messages
+        if m.role != Role.SYSTEM
+    ]
+    return {"thread_id": thread_id, "messages": out}
 
 
 # ---------------------------------------------------------------------------
