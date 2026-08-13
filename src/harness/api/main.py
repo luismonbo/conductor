@@ -14,6 +14,7 @@ import json
 import os
 import uuid
 from contextlib import asynccontextmanager
+from typing import Any
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -105,6 +106,35 @@ async def _get_registry() -> dict[str, object]:
 @app.get("/health")
 async def health() -> dict:
     return {"status": "ok", "backend": get_settings().llm_backend}
+
+
+# ---------------------------------------------------------------------------
+# Model listing
+# ---------------------------------------------------------------------------
+
+async def _list_model_ids(client: Any) -> list[str]:
+    page = await client.models.list()
+    return sorted(m.id for m in page.data)
+
+
+@app.get("/models")
+async def list_models() -> dict:
+    """Model profiles the proxy serves; the UI picker feeds from this."""
+    settings = get_settings()
+    default = settings.default_model or settings.llm_model
+    if settings.llm_backend != "openai_compatible":
+        return {"models": [], "default": default}
+    from openai import AsyncOpenAI
+
+    client = AsyncOpenAI(
+        base_url=settings.llm_base_url,
+        api_key=settings.llm_api_key or "sk-no-key-required",
+    )
+    try:
+        return {"models": await _list_model_ids(client), "default": default}
+    except Exception:
+        # Proxy down is not an API error: the picker just hides.
+        return {"models": [], "default": default}
 
 
 # ---------------------------------------------------------------------------
