@@ -11,11 +11,108 @@ services:
       POSTGRES_PASSWORD: harness
       POSTGRES_DB: harness
     ports: ["5432:5432"]
-    volumes: ["postgres_data:/var/lib/postgresql/data"]
-  # ollama:                      # uncomment for the local Gemma-4 path
-  #   image: ollama/ollama:latest
+    volumes:
+      - "postgres_data:/var/lib/postgresql/data"
+      - "./scripts/create-databases.sql:/docker-entrypoint-initdb.d/create-databases.sql"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U harness"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  litellm:
+    image: ghcr.io/berriai/litellm:main-stable
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    ports: ["4000:4000"]
+    env_file: .env
+    environment:
+      LITELLM_DATABASE_URL: postgresql://harness:harness@postgres:5432/litellm
+      STORE_MODEL_IN_DB: "false"
+    volumes:
+      - "./litellm_config.yaml:/app/config.yaml"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      postgres: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:4000/health/liveliness || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  langfuse-web:
+    image: langfuse/langfuse:3
+    ports: ["3000:3000"]
+    env_file: .env
+    environment: &langfuse_env
+      DATABASE_URL: postgresql://harness:harness@postgres:5432/langfuse
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_MIGRATION_URL: clickhouse://clickhouse:9000
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: clickhouse
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_AUTH: redispassword
+      LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse
+      LANGFUSE_S3_EVENT_UPLOAD_REGION: auto
+      LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: minio
+      LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: miniosecret
+      LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://minio:9000
+      LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
+      NEXTAUTH_URL: http://localhost:3000
+      TELEMETRY_ENABLED: "false"
+    depends_on:
+      postgres: { condition: service_healthy }
+      clickhouse: { condition: service_healthy }
+      redis: { condition: service_started }
+      minio: { condition: service_started }
+
+  langfuse-worker:
+    image: langfuse/langfuse-worker:3
+    env_file: .env
+    environment: *langfuse_env
+    depends_on:
+      postgres: { condition: service_healthy }
+      clickhouse: { condition: service_healthy }
+      redis: { condition: service_started }
+      minio: { condition: service_started }
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.3-alpine
+    environment:
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: clickhouse
+      CLICKHOUSE_DB: default
+    volumes:
+      - "clickhouse_data:/var/lib/clickhouse"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8123/ping || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--requirepass", "redispassword"]
+
+  minio:
+    image: minio/minio:latest
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: miniosecret
+    volumes:
+      - "minio_data:/data"
+    entrypoint: sh
+    # create the bucket on first boot, then run the server
+    command: -c 'mkdir -p /data/langfuse && minio server /data --console-address ":9001"'
+
+  # ollama:                      # runs natively on the host (menu-bar app);
+  #   image: ollama/ollama:latest  # uncomment only if you prefer containerized
   #   ports: ["11434:11434"]
   #   volumes: ["ollama_data:/root/.ollama"]
+
 volumes:
   postgres_data:
+  clickhouse_data:
+  minio_data:
   # ollama_data:
