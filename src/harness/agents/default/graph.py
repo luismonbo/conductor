@@ -34,6 +34,7 @@ from langgraph.types import interrupt
 from harness.agents.default.prompt import SYSTEM_PROMPT
 from harness.agents.default.tools import build_registry
 from harness.core.llm.client import LLMClient
+from harness.core.llm.model_resolution import resolve_model
 from harness.core.tools.registry import ToolRegistry
 from harness.core.types import AgentEvent, LLMResponse, Message, Role
 
@@ -43,6 +44,7 @@ class GraphState(TypedDict):
     iteration: int
     max_iterations: int
     decision: NotRequired[dict | None]  # populated on interrupt resume
+    model_override: NotRequired[str | None]  # UI picker; pins beat it
 
 
 def build_graph(
@@ -50,6 +52,7 @@ def build_graph(
     checkpointer: Any,
     sub_agents: dict[str, Any] = {},
     registry: ToolRegistry | None = None,
+    model_pin: str | None = None,
 ) -> Any:
     """Compile and return the default agent graph.
 
@@ -65,8 +68,12 @@ def build_graph(
         if not msgs or msgs[0].role != Role.SYSTEM:
             msgs = [Message(role=Role.SYSTEM, content=SYSTEM_PROMPT)] + msgs
 
+        model = resolve_model(
+            agent_pin=model_pin,
+            request_override=state.get("model_override"),
+        )
         response: LLMResponse | None = None
-        async for item in llm.stream(msgs, registry.specs()):
+        async for item in llm.stream(msgs, registry.specs(), model=model):
             if isinstance(item, str):
                 if item:
                     await queue.put(AgentEvent(type="token", text=item))
