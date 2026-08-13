@@ -1,3 +1,6 @@
+import { marked } from 'marked';
+import DOMPurify from 'dompurify';
+import { useMemo } from 'react';
 import { ThinkingBlock } from '@/components/ThinkingBlock';
 import { ToolCallPill } from '@/components/ToolCallPill';
 import { ToolResultPill } from '@/components/ToolResultPill';
@@ -28,6 +31,14 @@ export function AssistantMessage({
   onMemoryApprove,
   onMemoryDeny,
 }: AssistantMessageProps) {
+  const finalHtml = useMemo(
+    () =>
+      finalText
+        ? DOMPurify.sanitize(marked.parse(finalText, { async: false }) as string)
+        : '',
+    [finalText],
+  );
+
   return (
     <div style={{ padding: '4px 16px', maxWidth: '80%' }}>
       {blocks.map((block, i) => {
@@ -60,16 +71,10 @@ export function AssistantMessage({
       })}
       {finalText && (
         <div
-          style={{
-            fontFamily: 'var(--sans)',
-            fontSize: 'var(--text-base)',
-            color: 'var(--text)',
-            lineHeight: 1.7,
-            marginTop: blocks.length > 0 ? '8px' : '0',
-          }}
-        >
-          {finalText}
-        </div>
+          className="final-prose"
+          style={{ marginTop: blocks.length > 0 ? '8px' : '0' }}
+          dangerouslySetInnerHTML={{ __html: finalHtml }}
+        />
       )}
       {interruptPayload?.mode === 'approval' && onApprove && onReject && onFeedback && (
         <ApprovalCard

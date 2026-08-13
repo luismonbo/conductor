@@ -15,10 +15,20 @@ from harness.core.types import LLMResponse, Message, ToolSpec
 
 
 class FakeLLMClient(LLMClient):
-    def __init__(self, scripted: list[LLMResponse]) -> None:
+    def __init__(self, scripted: list[LLMResponse], repeat_last: bool = False) -> None:
         self._queue: deque[LLMResponse] = deque(scripted)
+        self._repeat_last = repeat_last
+        self._last: LLMResponse | None = None
         self.calls: list[list[Message]] = []
         self.requested_models: list[str | None] = []
+
+    def _next_response(self) -> LLMResponse:
+        if not self._queue:
+            if self._repeat_last and self._last is not None:
+                return self._last
+            return LLMResponse(text="(no scripted response left)")
+        self._last = self._queue.popleft()
+        return self._last
 
     @property
     def model_id(self) -> str:
@@ -32,9 +42,7 @@ class FakeLLMClient(LLMClient):
     ) -> LLMResponse:
         self.requested_models.append(model)
         self.calls.append(list(messages))
-        if not self._queue:
-            return LLMResponse(text="(no scripted response left)")
-        return self._queue.popleft()
+        return self._next_response()
 
     async def stream(
         self,
@@ -44,10 +52,7 @@ class FakeLLMClient(LLMClient):
     ) -> AsyncGenerator[str | LLMResponse, None]:
         self.requested_models.append(model)
         self.calls.append(list(messages))
-        if not self._queue:
-            response = LLMResponse(text="(no scripted response left)")
-        else:
-            response = self._queue.popleft()
+        response = self._next_response()
 
         # Yield text word-by-word so tests can assert on individual token events.
         if response.text:

@@ -53,11 +53,13 @@ def build_llm(settings: Settings, parser: ToolCallParser) -> LLMClient:
         )
     if settings.llm_backend == "fake":
         # Scripted in tests; here we return a trivial echo so the app boots.
+        # repeat_last keeps the served fake answering every message (demo/e2e).
         from harness.adapters.llm.fake import FakeLLMClient
         from harness.core.types import LLMResponse
 
         return FakeLLMClient(
-            [LLMResponse(text="Fake backend is active. Set HARNESS_LLM_BACKEND=azure.")]
+            [LLMResponse(text="Fake backend is active. Set HARNESS_LLM_BACKEND=azure.")],
+            repeat_last=True,
         )
     raise ValueError(f"Unknown llm_backend: {settings.llm_backend}")
 

@@ -83,9 +83,16 @@ details.error-result summary::before { color: var(--color-error); }
   line-height: 1.7;
   overflow-wrap: break-word;
 }
-.thinking-prose p { margin-bottom: 0.75em; }
-.thinking-prose p:last-child { margin-bottom: 0; }
-.thinking-prose code {
+.final-prose {
+  font-family: var(--sans);
+  font-size: var(--text-base);
+  color: var(--text);
+  line-height: 1.7;
+  overflow-wrap: break-word;
+}
+.thinking-prose p, .final-prose p { margin-bottom: 0.75em; }
+.thinking-prose p:last-child, .final-prose p:last-child { margin-bottom: 0; }
+.thinking-prose code, .final-prose code {
   font-family: var(--mono);
   font-size: 0.9em;
   color: var(--text-code);
@@ -93,7 +100,7 @@ details.error-result summary::before { color: var(--color-error); }
   padding: 1px 5px;
   border-radius: 3px;
 }
-.thinking-prose pre {
+.thinking-prose pre, .final-prose pre {
   background: var(--surface-raised);
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -102,17 +109,18 @@ details.error-result summary::before { color: var(--color-error); }
   margin: 0.75em 0;
   word-break: break-word;
 }
-.thinking-prose pre code {
+.thinking-prose pre code, .final-prose pre code {
   background: none;
   padding: 0;
   color: var(--text-code);
 }
-.thinking-prose ul, .thinking-prose ol {
+.thinking-prose ul, .thinking-prose ol, .final-prose ul, .final-prose ol {
   padding-left: 1.5em;
   margin-bottom: 0.75em;
 }
-.thinking-prose li { margin-bottom: 0.25em; }
-.thinking-prose h1, .thinking-prose h2, .thinking-prose h3 {
+.thinking-prose li, .final-prose li { margin-bottom: 0.25em; }
+.thinking-prose h1, .thinking-prose h2, .thinking-prose h3,
+.final-prose h1, .final-prose h2, .final-prose h3 {
   color: var(--text);
   margin: 1em 0 0.5em;
   font-weight: 600;
