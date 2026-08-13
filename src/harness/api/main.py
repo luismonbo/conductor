@@ -17,6 +17,7 @@ import uuid
 from contextlib import asynccontextmanager
 from typing import Any
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -33,6 +34,13 @@ from harness.observability.token_accumulator import TokenAccumulator
 from harness.observability.tracer import TraceCollector
 from harness.orchestration.build import build_agent, build_agent_registry
 from harness.orchestration.checkpointer import build_checkpointer
+
+# Settings() reads HARNESS_-prefixed vars straight from .env itself, but this
+# module's own os.environ.get() calls (Langfuse keys in _build_callbacks)
+# need the file loaded into the real process environment first — Docker's
+# env_file: only does this for the containerized api service, not `make api`.
+# override=False: a real shell export always wins over .env.
+load_dotenv(override=False)
 
 # Lazy-initialized module-level state
 _run_store: RunStore | None = None

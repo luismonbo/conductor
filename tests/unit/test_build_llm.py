@@ -10,11 +10,17 @@ from harness.orchestration.build import build_llm
 
 
 def test_build_llm_selects_openai_compatible():
+    # default_model must be pinned explicitly, not left to field-default
+    # omission: pymilvus calls load_dotenv() on import as a side effect,
+    # which can leak the real .env's HARNESS_DEFAULT_MODEL into os.environ
+    # for the rest of the process — _env_file=None only disables the file
+    # source, not the OS-environment source pydantic-settings also reads.
     settings = Settings(
         _env_file=None,
         llm_backend="openai_compatible",
         llm_base_url="http://localhost:8080/v1",
         llm_model="gemma4:a2b",
+        default_model="",
     )
     client = build_llm(settings, NativeToolCallParser())
     assert isinstance(client, OpenAICompatibleClient)

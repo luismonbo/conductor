@@ -5,7 +5,7 @@
 model_list:
   - model_name: local-gemma
     litellm_params:
-      model: ollama_chat/gemma3
+      model: ollama_chat/gemma4:e2b
       api_base: http://host.docker.internal:11434
   - model_name: claude
     litellm_params:
