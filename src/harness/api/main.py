@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import json
+import logging
 import os
 import uuid
 from contextlib import asynccontextmanager
@@ -234,6 +235,48 @@ async def chat(req: ChatRequest) -> ChatResponse:
 
 
 # ---------------------------------------------------------------------------
+# Observability + error shaping
+# ---------------------------------------------------------------------------
+
+def _make_langfuse_handler() -> Any:
+    # Separate function so tests can stub construction failures.
+    from langfuse.langchain import CallbackHandler
+
+    return CallbackHandler()
+
+
+def _build_callbacks(thread_id: str, agent_name: str) -> tuple[list, dict]:
+    """Langfuse tracing config. Fire-and-forget: any failure returns empty.
+
+    The SDK reads LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY / LANGFUSE_HOST
+    from the environment itself; we only gate on their presence.
+    """
+    if not (os.environ.get("LANGFUSE_PUBLIC_KEY") and os.environ.get("LANGFUSE_SECRET_KEY")):
+        return [], {}
+    try:
+        handler = _make_langfuse_handler()
+    except Exception:
+        logging.getLogger(__name__).exception("langfuse handler unavailable")
+        return [], {}
+    return [handler], {
+        "langfuse_session_id": thread_id,
+        "langfuse_tags": [agent_name],
+    }
+
+
+_CONNECTION_ERROR_NAMES = {"APIConnectionError", "APITimeoutError", "ConnectError"}
+
+
+def _friendly_error(exc: Exception) -> str:
+    if type(exc).__name__ in _CONNECTION_ERROR_NAMES:
+        return (
+            "LLM gateway unreachable — is the stack running? Try `make up`. "
+            f"({exc})"
+        )
+    return str(exc)
+
+
+# ---------------------------------------------------------------------------
 # Shared SSE generator
 # ---------------------------------------------------------------------------
 
@@ -278,7 +321,7 @@ async def _run_graph(
         raise
     except Exception as exc:
         stopped_reason_holder[0] = "error"
-        await event_queue.put(AgentEvent(type="error", text=str(exc)))
+        await event_queue.put(AgentEvent(type="error", text=_friendly_error(exc)))
     finally:
         _running.pop(thread_id, None)
         if run_store:
@@ -318,13 +361,16 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
     accumulator = TokenAccumulator()
     stopped_reason_holder: list[str] = ["unknown"]
     event_queue: asyncio.Queue[AgentEvent | None] = asyncio.Queue()
+    callbacks, lf_metadata = _build_callbacks(thread_id, agent_name)
     config = {
         "configurable": {
             "thread_id": thread_id,
             "event_queue": event_queue,
             "token_accumulator": accumulator,
             "stopped_reason_holder": stopped_reason_holder,
-        }
+        },
+        "callbacks": callbacks,
+        "metadata": lf_metadata,
     }
     input_state = {
         "messages": [Message(role=Role.USER, content=req.message)],
@@ -368,13 +414,16 @@ async def resume_run(thread_id: str, req: ResumeRequest) -> StreamingResponse:
     accumulator = TokenAccumulator()
     stopped_reason_holder: list[str] = ["unknown"]
     event_queue: asyncio.Queue[AgentEvent | None] = asyncio.Queue()
+    callbacks, lf_metadata = _build_callbacks(thread_id, settings.agent)
     config = {
         "configurable": {
             "thread_id": thread_id,
             "event_queue": event_queue,
             "token_accumulator": accumulator,
             "stopped_reason_holder": stopped_reason_holder,
-        }
+        },
+        "callbacks": callbacks,
+        "metadata": lf_metadata,
     }
 
     run_store = await _get_run_store()
