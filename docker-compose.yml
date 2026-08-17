@@ -40,71 +40,12 @@ services:
       timeout: 5s
       retries: 20
 
-  langfuse-web:
-    image: langfuse/langfuse:3
-    ports: ["3000:3000"]
-    env_file: .env
-    environment: &langfuse_env
-      DATABASE_URL: postgresql://harness:harness@postgres:5432/langfuse
-      CLICKHOUSE_URL: http://clickhouse:8123
-      CLICKHOUSE_MIGRATION_URL: clickhouse://clickhouse:9000
-      CLICKHOUSE_USER: clickhouse
-      CLICKHOUSE_PASSWORD: clickhouse
-      REDIS_HOST: redis
-      REDIS_PORT: "6379"
-      REDIS_AUTH: redispassword
-      LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse
-      LANGFUSE_S3_EVENT_UPLOAD_REGION: auto
-      LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: minio
-      LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: miniosecret
-      LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://minio:9000
-      LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
-      NEXTAUTH_URL: http://localhost:3000
-      TELEMETRY_ENABLED: "false"
-    depends_on:
-      postgres: { condition: service_healthy }
-      clickhouse: { condition: service_healthy }
-      redis: { condition: service_started }
-      minio: { condition: service_started }
-
-  langfuse-worker:
-    image: langfuse/langfuse-worker:3
-    env_file: .env
-    environment: *langfuse_env
-    depends_on:
-      postgres: { condition: service_healthy }
-      clickhouse: { condition: service_healthy }
-      redis: { condition: service_started }
-      minio: { condition: service_started }
-
-  clickhouse:
-    image: clickhouse/clickhouse-server:24.3-alpine
-    environment:
-      CLICKHOUSE_USER: clickhouse
-      CLICKHOUSE_PASSWORD: clickhouse
-      CLICKHOUSE_DB: default
-    volumes:
-      - "clickhouse_data:/var/lib/clickhouse"
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8123/ping || exit 1"]
-      interval: 5s
-      timeout: 5s
-      retries: 20
-
-  redis:
-    image: redis:7-alpine
-    command: ["redis-server", "--requirepass", "redispassword"]
-
-  minio:
-    image: minio/minio:latest
-    environment:
-      MINIO_ROOT_USER: minio
-      MINIO_ROOT_PASSWORD: miniosecret
-    volumes:
-      - "minio_data:/data"
-    entrypoint: sh
-    # create the bucket on first boot, then run the server
-    command: -c 'mkdir -p /data/langfuse && minio server /data --console-address ":9001"'
+  # Langfuse (+ ClickHouse/Redis/MinIO it depends on) removed for now — the
+  # official ClickHouse image hits a first-boot bootstrap race on this
+  # machine (see docs/devlog/009). Tracing is optional by design (blank
+  # LANGFUSE_* keys already make the harness no-op it); this just stops
+  # `make up` from trying to start the analytics stack at all. Restore from
+  # git history when revisiting.
 
   # ollama:                      # runs natively on the host (menu-bar app);
   #   image: ollama/ollama:latest  # uncomment only if you prefer containerized
@@ -113,6 +54,4 @@ services:
 
 volumes:
   postgres_data:
-  clickhouse_data:
-  minio_data:
   # ollama_data:
