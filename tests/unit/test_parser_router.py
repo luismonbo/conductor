@@ -22,11 +22,26 @@ class _StubParser:
         return self._result
 
 
-# DOCLING_EXTENSIONS is currently empty (see router.py's docstring — docling's
-# PDF path segfaults on macOS), so both the docling route and the
-# fallback-on-exception path are unreachable through real file extensions
-# right now. test_docling_failure_falls_back_to_markitdown covered that
-# fallback; restore it alongside re-adding ".pdf" to DOCLING_EXTENSIONS.
+_DOCLING_SKIP_REASON = (
+    "DOCLING_EXTENSIONS is empty (router.py's docstring — docling's PDF path "
+    "segfaults on macOS), so the fallback-on-exception path is unreachable "
+    "through real file extensions right now. Un-skip alongside re-adding "
+    "'.pdf' to DOCLING_EXTENSIONS."
+)
+
+
+@pytest.mark.skip(reason=_DOCLING_SKIP_REASON)
+@pytest.mark.asyncio
+async def test_docling_failure_falls_back_to_markitdown():
+    docling = _StubParser(error=RuntimeError("docling blew up"))
+    markitdown = _StubParser(ParsedContent(text="fallback text", format="pdf", parser="markitdown"))
+    router = ParserRouter(docling=docling, markitdown=markitdown)
+
+    result = await router.parse(Path("weird.pdf"))
+
+    assert result.text == "fallback text"
+    assert docling.calls == [Path("weird.pdf")]
+    assert markitdown.calls == [Path("weird.pdf")]
 
 
 @pytest.mark.asyncio

@@ -56,6 +56,28 @@ async def client_with_fake(monkeypatch, tmp_path):
         await _main._run_store._conn.close()
 
 
+@pytest.fixture
+async def client_with_fake_azure_backend(monkeypatch, tmp_path):
+    """Same seam as client_with_fake, but HARNESS_LLM_BACKEND=azure — for
+    testing that direct-credentialed backends ignore a client-supplied model
+    override, without touching real Azure (build_llm is still faked)."""
+    monkeypatch.setenv("HARNESS_LLM_BACKEND", "azure")
+    monkeypatch.setenv("HARNESS_CHECKPOINTER", "sqlite")
+    monkeypatch.setenv("HARNESS_CHECKPOINTER_URL", str(tmp_path / "h.sqlite"))
+
+    fake = FakeLLMClient([LLMResponse(text="Hello from fake!")])
+    monkeypatch.setattr(build_module, "build_llm", lambda settings, parser: fake)
+
+    transport = httpx.ASGITransport(app=_main.app)
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://test"
+    ) as client:
+        yield client, fake
+
+    if _main._run_store is not None:
+        await _main._run_store._conn.close()
+
+
 def sse_frames(resp: httpx.Response) -> list[dict]:
     """All `data:` frames of a fully-buffered SSE response, parsed."""
     return [

@@ -73,6 +73,16 @@ app.add_middleware(
 _short_term = InMemoryShortTerm()
 _running: dict[str, asyncio.Task] = {}
 
+# Backends where a client-supplied ChatRequest.model is safe to honor:
+# openai_compatible routes per-model through a proxy by design; fake never
+# calls anything real. A direct-credentialed backend (azure) has one fixed
+# real deployment configured -- honoring an arbitrary override would
+# silently redirect requests to a different deployment under the same
+# credentials. Allowlist, not denylist, so a future direct-credentialed
+# backend is safe (ignored) by default rather than needing to remember to
+# add it here. See docs/devlog/010.
+_MODEL_OVERRIDE_SAFE_BACKENDS = {"openai_compatible", "fake"}
+
 # Lazy-initialized agent registry (shared checkpointer keeps state across requests)
 _registry: dict[str, object] | None = None
 
@@ -393,7 +403,7 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
         "messages": [Message(role=Role.USER, content=req.message)],
         "iteration": 0,
         "max_iterations": settings.max_iterations,
-        "model_override": req.model,
+        "model_override": req.model if settings.llm_backend in _MODEL_OVERRIDE_SAFE_BACKENDS else None,
     }
 
     run_store = await _get_run_store()

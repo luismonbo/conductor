@@ -1,2 +1,1 @@
 CREATE DATABASE litellm;
-CREATE DATABASE langfuse;
