@@ -87,9 +87,13 @@ def build_embedder(settings: Settings) -> Embedder:
             api_key=settings.embedding_api_key,
         )
     if settings.embedding_backend == "azure":
-        raise NotImplementedError(
-            "Azure embeddings are not wired yet — use HARNESS_EMBEDDING_BACKEND=openai_compatible "
-            "or fake. See the RAG design doc's Explicitly Out of Scope section."
+        from harness.adapters.embedding.azure_openai import AzureOpenAIEmbedder
+
+        return AzureOpenAIEmbedder(
+            deployment=settings.azure_embedding_deployment,
+            endpoint=settings.azure_endpoint,
+            api_version=settings.azure_api_version,
+            api_key=settings.azure_api_key or None,
         )
     if settings.embedding_backend == "fake":
         return FakeEmbedder(dimension=settings.embedding_dimension)
@@ -123,11 +127,22 @@ def build_vector_store(settings: Settings, backend: str) -> VectorStore:
 def build_parser_router():
     # Imported lazily: docling pulls torch + transformers, and this module is
     # imported by the API and most of the test suite, which never parse a document.
-    from harness.adapters.parsing.docling_parser import DoclingParser
     from harness.adapters.parsing.markitdown_parser import MarkitdownParser
-    from harness.adapters.parsing.router import ParserRouter
+    from harness.adapters.parsing.router import DOCLING_EXTENSIONS, ParserRouter
 
-    return ParserRouter(docling=DoclingParser(), markitdown=MarkitdownParser())
+    markitdown = MarkitdownParser()
+    if DOCLING_EXTENSIONS:
+        from harness.adapters.parsing.docling_parser import DoclingParser
+
+        docling = DoclingParser()
+    else:
+        # Skip importing docling/torch entirely while DOCLING_EXTENSIONS is
+        # empty — merely having torch in the process is enough to trigger the
+        # libomp crash it's disabled for (see router.py), so it's not enough
+        # to just avoid calling it. Never routed to either way; markitdown
+        # here is an inert placeholder for the unused slot.
+        docling = markitdown
+    return ParserRouter(docling=docling, markitdown=markitdown)
 
 
 def build_ingestion_pipeline(

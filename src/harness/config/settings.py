@@ -47,6 +47,10 @@ class Settings(BaseSettings):
     embedding_api_key: str = ""
     embedding_dimension: int = 768         # must match the store schema; changing this forces a reindex
 
+    # Azure embeddings deployment name (azure_endpoint/azure_api_version/azure_api_key
+    # above are shared with the chat backend — same Azure resource, different deployment).
+    azure_embedding_deployment: str = ""
+
     # RAG — retrieval. per_document_k > 0 enables a per-document quota, which
     # stops one large document monopolising top-k on a mixed-corpus query.
     # 0 disables it (plain flat top-k). Default 2 is measured, not guessed: on
