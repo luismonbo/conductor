@@ -38,7 +38,7 @@ export function ChatPage() {
       .then((r) => {
         setModels(r.models);
         const stored = localStorage.getItem('harness:model:last');
-        setSelectedModel(stored && r.models.includes(stored) ? stored : r.default);
+        setSelectedModel(stored && r.models.includes(stored) ? stored : (r.default ?? ''));
       })
       .catch(() => setModels([]));
   }, []);

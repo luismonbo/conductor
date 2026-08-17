@@ -114,7 +114,7 @@ export interface ChatRequest {
 
 export interface ModelsResponse {
   readonly models: string[];
-  readonly default: string;
+  readonly default: string | null;
 }
 
 export interface ThreadSummary {

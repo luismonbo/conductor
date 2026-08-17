@@ -128,11 +128,20 @@ async def _list_model_ids(client: Any) -> list[str]:
 
 @app.get("/models")
 async def list_models() -> dict:
-    """Model profiles the proxy serves; the UI picker feeds from this."""
+    """Model profiles the proxy serves; the UI picker feeds from this.
+
+    default=None (not settings.default_model/llm_model) whenever there's no
+    real picker: the frontend sends `default` straight back as a live
+    per-call model override (ChatRequest.model -> model_override), and a
+    direct backend (fake, azure) has no named profiles for that override to
+    mean anything — it would silently replace the real deployment/model
+    (e.g. an Azure deployment name) with whatever local-dev value happens to
+    sit in HARNESS_DEFAULT_MODEL/HARNESS_LLM_MODEL.
+    """
     settings = get_settings()
-    default = settings.default_model or settings.llm_model
     if settings.llm_backend != "openai_compatible":
-        return {"models": [], "default": default}
+        return {"models": [], "default": None}
+    default = settings.default_model or settings.llm_model
     from openai import AsyncOpenAI
 
     client = AsyncOpenAI(
