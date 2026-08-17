@@ -4,8 +4,19 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
+from docling.datamodel.base_models import InputFormat
 
 from harness.adapters.parsing.docling_parser import DoclingParseError, DoclingParser
+
+
+def test_ocr_disabled_by_default():
+    # RapidOCR (onnxruntime) and docling's layout model (torch) both bundle
+    # their own libomp; loading both segfaults on this machine (exit 139,
+    # right after model-weight loading — see docs/devlog/010). All three
+    # corpus PDFs are born-digital text anyway, so OCR buys nothing here.
+    parser = DoclingParser()
+    pdf_options = parser._converter.format_to_options[InputFormat.PDF]
+    assert pdf_options.pipeline_options.do_ocr is False
 
 
 def _fake_conversion_result(markdown: str, status_name: str = "SUCCESS", page_count: int = 3):

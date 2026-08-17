@@ -22,17 +22,24 @@ class _StubParser:
         return self._result
 
 
+# DOCLING_EXTENSIONS is currently empty (see router.py's docstring — docling's
+# PDF path segfaults on macOS), so both the docling route and the
+# fallback-on-exception path are unreachable through real file extensions
+# right now. test_docling_failure_falls_back_to_markitdown covered that
+# fallback; restore it alongside re-adding ".pdf" to DOCLING_EXTENSIONS.
+
+
 @pytest.mark.asyncio
-async def test_pdf_routes_to_docling():
+async def test_pdf_routes_to_markitdown():
     docling = _StubParser(ParsedContent(text="from docling", format="pdf", parser="docling"))
     markitdown = _StubParser(ParsedContent(text="from markitdown", format="pdf", parser="markitdown"))
     router = ParserRouter(docling=docling, markitdown=markitdown)
 
     result = await router.parse(Path("paper.pdf"))
 
-    assert result.text == "from docling"
-    assert docling.calls == [Path("paper.pdf")]
-    assert markitdown.calls == []
+    assert result.text == "from markitdown"
+    assert docling.calls == []
+    assert markitdown.calls == [Path("paper.pdf")]
 
 
 @pytest.mark.asyncio
@@ -45,16 +52,3 @@ async def test_non_pdf_routes_to_markitdown():
 
     assert result.text == "from markitdown"
     assert docling.calls == []
-
-
-@pytest.mark.asyncio
-async def test_docling_failure_falls_back_to_markitdown():
-    docling = _StubParser(error=RuntimeError("docling blew up"))
-    markitdown = _StubParser(ParsedContent(text="fallback text", format="pdf", parser="markitdown"))
-    router = ParserRouter(docling=docling, markitdown=markitdown)
-
-    result = await router.parse(Path("weird.pdf"))
-
-    assert result.text == "fallback text"
-    assert docling.calls == [Path("weird.pdf")]
-    assert markitdown.calls == [Path("weird.pdf")]

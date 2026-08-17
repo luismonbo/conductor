@@ -41,7 +41,7 @@ dependencies = [
     { name = "langfuse" },
     { name = "langgraph" },
     { name = "langgraph-checkpoint-sqlite" },
-    { name = "markitdown", extra = ["docx", "pptx", "xlsx"] },
+    { name = "markitdown", extra = ["docx", "pdf", "pptx", "xlsx"] },
     { name = "openai" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
@@ -89,7 +89,7 @@ requires-dist = [
     { name = "langfuse", specifier = ">=4.14.4" },
     { name = "langgraph", specifier = ">=1.2.2" },
     { name = "langgraph-checkpoint-sqlite", specifier = ">=3.1.0" },
-    { name = "markitdown", extras = ["docx", "pptx", "xlsx"], specifier = ">=0.1.6" },
+    { name = "markitdown", extras = ["docx", "pdf", "pptx", "xlsx"], specifier = ">=0.1.6" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.13" },
     { name = "openai", marker = "extra == 'azure'", specifier = ">=1.54" },
     { name = "openai", marker = "extra == 'local'", specifier = ">=1.54" },
@@ -1564,6 +1564,10 @@ docx = [
     { name = "lxml" },
     { name = "mammoth" },
 ]
+pdf = [
+    { name = "pdfminer-six" },
+    { name = "pdfplumber" },
+]
 pptx = [
     { name = "python-pptx" },
 ]
@@ -2271,6 +2275,33 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/5a/82/42f767fc1c1143d6fd36efb827202a2d997a375e160a71eb2888a925aac1/pathspec-1.1.1.tar.gz", hash = "sha256:17db5ecd524104a120e173814c90367a96a98d07c45b2e10c2f3919fff91bf5a", size = 135180 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/f1/d9/7fb5aa316bc299258e68c73ba3bddbc499654a07f151cba08f6153988714/pathspec-1.1.1-py3-none-any.whl", hash = "sha256:a00ce642f577bf7f473932318056212bc4f8bfdf53128c78bbd5af0b9b20b189", size = 57328 },
+]
+
+[[package]]
+name = "pdfminer-six"
+version = "20260107"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "charset-normalizer" },
+    { name = "cryptography" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/34/a4/5cec1112009f0439a5ca6afa8ace321f0ab2f48da3255b7a1c8953014670/pdfminer_six-20260107.tar.gz", hash = "sha256:96bfd431e3577a55a0efd25676968ca4ce8fd5b53f14565f85716ff363889602", size = 8512094 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/20/8b/28c4eaec9d6b036a52cb44720408f26b1a143ca9bce76cc19e8f5de00ab4/pdfminer_six-20260107-py3-none-any.whl", hash = "sha256:366585ba97e80dffa8f00cebe303d2f381884d8637af4ce422f1df3ef38111a9", size = 6592252 },
+]
+
+[[package]]
+name = "pdfplumber"
+version = "0.11.10"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pdfminer-six" },
+    { name = "pillow" },
+    { name = "pypdfium2" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/05/56/6f450312ba05a27d7713b73857c1a25100dbda04fbc1331b13fb227a607d/pdfplumber-0.11.10.tar.gz", hash = "sha256:b95b2d28c66efb0a794a83b88c6c6aea5987532a445d20a1cbcfa657022e6e57", size = 102892 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a2/9a/07d658e1e7fad860f1c541ab941348125dbdab773be3a0afaf32361866c7/pdfplumber-0.11.10-py3-none-any.whl", hash = "sha256:7741ea81bf165b474b153e6789d10d18e06b6ddcf3ec84289c3ef2fed6802580", size = 60047 },
 ]
 
 [[package]]

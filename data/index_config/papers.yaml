@@ -1,9 +1,8 @@
 collection: papers
-embedding_model: nomic-embed-text
-embedding_dimension: 768
+embedding_model: text-embedding-3-small
+embedding_dimension: 1536
 chunk_version: 1
 vector_stores:
 - pgvector
-- milvus
 documents_ingested: 3
 documents_failed: 0

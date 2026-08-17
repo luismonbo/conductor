@@ -48,6 +48,22 @@ def test_table_kind_is_carried_from_section_to_chunk():
     assert chunks[0].section_kind == "table"
 
 
+def test_section_with_no_whitespace_is_split_by_char_length():
+    # Simulates a pdfminer extraction failure where words run together with no
+    # spaces (see docs/devlog/010) — word-count splitting alone can't catch
+    # this, since len(text.split()) stays tiny (or 1) no matter how long the
+    # text actually is. The char cap is the safety net.
+    glued_text = "word" * 3000  # 12000 chars, but a single "word" per .split()
+    doc = _doc((DocumentSection(title="Broken", level=1, text=glued_text, order=0),))
+    chunker = StructureAwareChunker(max_chars=6000)
+
+    chunks = chunker.chunk(doc)
+
+    assert len(chunks) >= 2
+    assert all(len(c.text) <= 6000 for c in chunks)
+    assert "".join(c.text for c in chunks) == glued_text
+
+
 def test_multiple_sections_get_sequential_order_and_ids():
     doc = _doc((
         DocumentSection(title="Intro", level=1, text="intro text", order=0),

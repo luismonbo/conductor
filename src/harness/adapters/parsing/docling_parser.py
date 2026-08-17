@@ -1,13 +1,23 @@
 """docling-backed Parser — the layout-aware path for PDFs. Uses only
 export_to_markdown(): docling's reading-order reconstruction and table
 structure recognition are already reflected in that rendering, so this
-adapter doesn't depend on DoclingDocument's finer internal object graph."""
+adapter doesn't depend on DoclingDocument's finer internal object graph.
+
+OCR is off: RapidOCR (onnxruntime) and docling's layout model (torch) each
+bundle their own libomp, and loading both segfaults on macOS (exit 139, right
+after model-weight loading — KMP_DUPLICATE_LIB_OK=TRUE does NOT fix this, it
+only suppresses the *safe* abort and lets the *unsafe* crash through instead).
+Fine for this project's corpus (born-digital text PDFs get nothing from OCR
+anyway); revisit with real thread-isolation if scanned/image PDFs are ever
+needed."""
 from __future__ import annotations
 
 import asyncio
 from pathlib import Path
 
-from docling.document_converter import DocumentConverter
+from docling.datamodel.base_models import InputFormat
+from docling.datamodel.pipeline_options import PdfPipelineOptions
+from docling.document_converter import DocumentConverter, PdfFormatOption
 
 from harness.core.rag.document import ParsedContent
 
@@ -20,7 +30,11 @@ class DoclingParseError(Exception):
 
 class DoclingParser:
     def __init__(self) -> None:
-        self._converter = DocumentConverter()
+        pipeline_options = PdfPipelineOptions()
+        pipeline_options.do_ocr = False
+        self._converter = DocumentConverter(
+            format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)}
+        )
 
     async def parse(self, path: Path) -> ParsedContent:
         try:
