@@ -7,6 +7,10 @@ means editing this file and nothing in core/.
 """
 from __future__ import annotations
 
+from pathlib import Path
+
+import yaml
+
 from harness.adapters.chunking.structure_aware import StructureAwareChunker
 from harness.adapters.embedding.fake import FakeEmbedder
 from harness.adapters.llm.parsers import NativeToolCallParser, PromptedToolCallParser
@@ -122,6 +126,23 @@ def build_vector_store(settings: Settings, backend: str) -> VectorStore:
 
         return InMemoryVectorStore()
     raise ValueError(f"Unknown vector store backend: {backend}")
+
+
+def list_collections(index_config_dir: Path = Path("data/index_config")) -> list[str]:
+    """Discover ingested collection names from cli/ingest.py's manifest files.
+
+    No hand-maintained enum: cli/ingest.py already writes/updates
+    data/index_config/<collection>.yaml on every ingest run, so this stays
+    accurate as of the next process restart with zero extra bookkeeping.
+    """
+    if not index_config_dir.is_dir():
+        return []
+    names: list[str] = []
+    for manifest_path in sorted(index_config_dir.glob("*.yaml")):
+        manifest = yaml.safe_load(manifest_path.read_text())
+        if manifest and "collection" in manifest:
+            names.append(manifest["collection"])
+    return names
 
 
 def build_parser_router():
