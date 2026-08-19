@@ -232,7 +232,17 @@ def build_agent_registry(settings: Settings, checkpointer) -> dict[str, object]:
 
     llm = build_llm(settings, build_parser(settings))
     long_term = build_long_term(settings)
-    registry = build_registry(long_term)
+    vector_store = build_vector_store(settings, settings.rag_vector_store_backend)
+    retriever = build_retriever(settings, vector_store)
+    collections = list_collections()
+    registry = build_registry(
+        long_term=long_term,
+        retriever=retriever,
+        vector_store=vector_store,
+        default_collection=settings.rag_collection,
+        default_k=settings.rag_k,
+        collections=collections,
+    )
     return {
         "default": build_default_graph(llm, checkpointer, registry=registry),
     }
