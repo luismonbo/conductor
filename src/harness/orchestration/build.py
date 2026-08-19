@@ -128,6 +128,18 @@ def build_vector_store(settings: Settings, backend: str) -> VectorStore:
     raise ValueError(f"Unknown vector store backend: {backend}")
 
 
+def build_retriever(settings: Settings, vector_store: VectorStore) -> Retriever:
+    embedder = build_embedder(settings)
+    retriever = Retriever(embedder=embedder, vector_store=vector_store)
+    if settings.rag_per_document_k > 0:
+        retriever = DiversifiedRetriever(
+            retriever,
+            per_document_k=settings.rag_per_document_k,
+            overfetch=settings.rag_overfetch,
+        )
+    return retriever
+
+
 def list_collections(index_config_dir: Path = Path("data/index_config")) -> list[str]:
     """Discover ingested collection names from cli/ingest.py's manifest files.
 
@@ -182,15 +194,8 @@ def build_ingestion_pipeline(
 def build_rag_pipeline(
     settings: Settings, vector_store_backend: str, tracer=None
 ) -> RagPipeline:
-    embedder = build_embedder(settings)
     vector_store = build_vector_store(settings, vector_store_backend)
-    retriever = Retriever(embedder=embedder, vector_store=vector_store)
-    if settings.rag_per_document_k > 0:
-        retriever = DiversifiedRetriever(
-            retriever,
-            per_document_k=settings.rag_per_document_k,
-            overfetch=settings.rag_overfetch,
-        )
+    retriever = build_retriever(settings, vector_store)
     llm = build_llm(settings, build_parser(settings))
     return RagPipeline(retriever=retriever, llm=llm, tracer=tracer)
 
