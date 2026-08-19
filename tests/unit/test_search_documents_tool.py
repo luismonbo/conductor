@@ -47,17 +47,28 @@ async def test_empty_collection_returns_not_found_message_not_silent_empty():
     assert result == "No documents found in collection 'papers'."
 
 
+class _NoHitsRetriever:
+    """Stub Retriever that always reports zero hits, regardless of k.
+
+    SearchDocumentsTool.run() now clamps k to a minimum of 1 (see _MAX_K),
+    so k=0 can no longer be used to force a zero-hit response from a real
+    Retriever/InMemoryVectorStore pair — and InMemoryVectorStore has no
+    similarity threshold, so a real "semantic miss" can't otherwise produce
+    zero hits from a nonempty index. A stub retriever isolates this branch
+    (empty hits, nonempty collection) directly instead.
+    """
+
+    async def retrieve(self, query: str, k: int, collection: str | None = None):
+        return []
+
+
 @pytest.mark.asyncio
 async def test_zero_hits_in_nonempty_collection_reports_no_relevant_match():
     chunk = Chunk(chunk_id="c1", document_id="d1", collection="papers", text="text", section_path=())
-    store, retriever = await _seeded_store_and_retriever([chunk])
-    tool = SearchDocumentsTool(retriever, store, default_collection="papers")
+    store, _ = await _seeded_store_and_retriever([chunk])
+    tool = SearchDocumentsTool(_NoHitsRetriever(), store, default_collection="papers")
 
-    # k=0 forces zero hits from a nonempty collection, isolating this branch
-    # from the empty-collection one above — InMemoryVectorStore has no
-    # similarity threshold, so a real "semantic miss" can't otherwise
-    # produce zero hits from a nonempty index.
-    result = await tool.run({"query": "text", "k": 0})
+    result = await tool.run({"query": "text"})
 
     assert result == "No relevant documents found."
 

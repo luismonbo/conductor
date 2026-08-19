@@ -7,7 +7,9 @@ means editing this file and nothing in core/.
 """
 from __future__ import annotations
 
+import logging
 from pathlib import Path
+from typing import cast
 
 import yaml
 
@@ -24,7 +26,7 @@ from harness.core.llm.client import LLMClient
 from harness.core.llm.tool_parsing import ToolCallParser
 from harness.core.memory.store import LongTermMemory
 from harness.core.rag.ingest import IngestionPipeline
-from harness.core.rag.ports import Embedder, VectorStore
+from harness.core.rag.ports import Embedder, Retriever as RetrieverPort, VectorStore
 from harness.core.rag.serve import DiversifiedRetriever, RagPipeline, Retriever
 from harness.core.tools.registry import ToolRegistry
 
@@ -128,16 +130,16 @@ def build_vector_store(settings: Settings, backend: str) -> VectorStore:
     raise ValueError(f"Unknown vector store backend: {backend}")
 
 
-def build_retriever(settings: Settings, vector_store: VectorStore) -> Retriever:
+def build_retriever(settings: Settings, vector_store: VectorStore) -> RetrieverPort:
     embedder = build_embedder(settings)
-    retriever = Retriever(embedder=embedder, vector_store=vector_store)
+    plain = Retriever(embedder=embedder, vector_store=vector_store)
     if settings.rag_per_document_k > 0:
-        retriever = DiversifiedRetriever(
-            retriever,
+        return DiversifiedRetriever(
+            plain,
             per_document_k=settings.rag_per_document_k,
             overfetch=settings.rag_overfetch,
         )
-    return retriever
+    return plain
 
 
 def list_collections(index_config_dir: Path = Path("data/index_config")) -> list[str]:
@@ -154,7 +156,7 @@ def list_collections(index_config_dir: Path = Path("data/index_config")) -> list
         manifest = yaml.safe_load(manifest_path.read_text())
         if manifest and "collection" in manifest:
             names.append(manifest["collection"])
-    return names
+    return sorted(dict.fromkeys(names))
 
 
 def build_parser_router():
@@ -197,7 +199,12 @@ def build_rag_pipeline(
     vector_store = build_vector_store(settings, vector_store_backend)
     retriever = build_retriever(settings, vector_store)
     llm = build_llm(settings, build_parser(settings))
-    return RagPipeline(retriever=retriever, llm=llm, tracer=tracer)
+    # RagPipeline's constructor is nominally typed to the concrete Retriever
+    # (see harness.core.rag.serve); build_retriever's return type is the
+    # protocol (RetrieverPort) because it may also return a DiversifiedRetriever.
+    # Both concrete classes satisfy the protocol structurally at runtime — this
+    # cast only bridges the nominal/structural typing gap for mypy.
+    return RagPipeline(retriever=cast(Retriever, retriever), llm=llm, tracer=tracer)
 
 
 def build_agent(
@@ -232,9 +239,21 @@ def build_agent_registry(settings: Settings, checkpointer) -> dict[str, object]:
 
     llm = build_llm(settings, build_parser(settings))
     long_term = build_long_term(settings)
-    vector_store = build_vector_store(settings, settings.rag_vector_store_backend)
-    retriever = build_retriever(settings, vector_store)
-    collections = list_collections()
+
+    vector_store: VectorStore | None = None
+    retriever: RetrieverPort | None = None
+    collections: list[str] = []
+    try:
+        vector_store = build_vector_store(settings, settings.rag_vector_store_backend)
+        retriever = build_retriever(settings, vector_store)
+        collections = list_collections()
+    except Exception:
+        logging.getLogger(__name__).warning(
+            "RAG backend unavailable; search_documents tool disabled", exc_info=True
+        )
+        vector_store = None
+        retriever = None
+
     registry = build_registry(
         long_term=long_term,
         retriever=retriever,

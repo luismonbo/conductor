@@ -21,6 +21,8 @@ _DESCRIPTION = (
     "this first."
 )
 
+_MAX_K = 20
+
 
 class SearchDocumentsTool:
     def __init__(
@@ -45,6 +47,8 @@ class SearchDocumentsTool:
                 "type": "integer",
                 "description": "Max chunks to retrieve",
                 "default": self._default_k,
+                "minimum": 1,
+                "maximum": _MAX_K,
             },
         }
         if len(self._collections) > 1:
@@ -66,7 +70,7 @@ class SearchDocumentsTool:
 
     async def run(self, arguments: dict[str, Any]) -> str:
         query = arguments["query"]
-        k = int(arguments.get("k", self._default_k))
+        k = max(1, min(int(arguments.get("k", self._default_k)), _MAX_K))
         collection = arguments.get("collection", self._default_collection)
 
         hits = await self._retriever.retrieve(query, k=k, collection=collection)
