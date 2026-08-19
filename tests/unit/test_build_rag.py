@@ -29,7 +29,10 @@ def test_list_collections_missing_directory_returns_empty_list(tmp_path: Path):
 
 def test_build_retriever_returns_plain_retriever_when_quota_disabled():
     settings = Settings(
-        _env_file=None, embedding_backend="fake", rag_per_document_k=0,
+        _env_file=None,
+        embedding_backend="fake",
+        embedding_dimension=768,
+        rag_per_document_k=0,
     )
     store = InMemoryVectorStore()
 
@@ -40,7 +43,11 @@ def test_build_retriever_returns_plain_retriever_when_quota_disabled():
 
 def test_build_retriever_wraps_in_diversified_retriever_when_quota_enabled():
     settings = Settings(
-        _env_file=None, embedding_backend="fake", rag_per_document_k=2,
+        _env_file=None,
+        embedding_backend="fake",
+        embedding_dimension=768,
+        rag_per_document_k=2,
+        rag_overfetch=5,
     )
     store = InMemoryVectorStore()
 
