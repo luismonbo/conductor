@@ -228,17 +228,22 @@ def build_agent(
     )
 
 
-def build_agent_registry(settings: Settings, checkpointer) -> dict[str, object]:
+def build_agent_registry(
+    settings: Settings, checkpointer, long_term: LongTermMemory | None = None,
+) -> dict[str, object]:
     """Build and return all compiled agent graphs keyed by name.
 
     The API routes to the agent named in ChatRequest.agent (default: settings.agent).
-    Adding a new agent means adding it here and in agents/<name>/.
+    Adding a new agent means adding it here and in agents/<name>/. `long_term` lets a
+    caller (the eval harness) pre-seed memory before building — mirrors the override
+    `build_agent()` used to accept.
     """
     from harness.agents.default.graph import build_graph as build_default_graph
     from harness.agents.default.tools import build_registry
 
     llm = build_llm(settings, build_parser(settings))
-    long_term = build_long_term(settings)
+    if long_term is None:
+        long_term = build_long_term(settings)
 
     vector_store: VectorStore | None = None
     retriever: RetrieverPort | None = None

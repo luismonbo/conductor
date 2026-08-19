@@ -73,3 +73,25 @@ def test_registry_degrades_gracefully_when_rag_backend_unavailable():
     # Should not raise — falls back to a registry with no search_documents tool.
     registry = build_agent_registry(s, MemorySaver())
     assert "default" in registry
+
+
+@pytest.mark.unit
+def test_registry_uses_the_passed_in_long_term_when_given():
+    s = Settings(
+        _env_file=None,
+        llm_backend="fake",
+        checkpointer="memory",
+        embedding_backend="fake",
+        rag_vector_store_backend="in_memory",
+    )
+    from harness.adapters.memory.in_memory import InMemoryLongTerm
+    memory = InMemoryLongTerm()
+
+    with mock.patch(
+        "harness.agents.default.tools.build_registry",
+        wraps=default_tools.build_registry,
+    ) as spy:
+        build_agent_registry(s, MemorySaver(), long_term=memory)
+
+    _, kwargs = spy.call_args
+    assert kwargs.get("long_term") is memory
