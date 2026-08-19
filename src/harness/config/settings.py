@@ -62,6 +62,7 @@ class Settings(BaseSettings):
 
     # RAG — vector stores (distinct from HARNESS_MEMORY_BACKEND / HARNESS_MEMORY_URL)
     rag_collection: str = "papers"
+    rag_vector_store_backend: str = "pgvector"  # pgvector | milvus | in_memory
     pgvector_url: str = ""                 # Postgres DSN; may equal checkpointer/memory DSN
     pgvector_table: str = "rag_chunks"
     milvus_uri: str = "./data/milvus_papers.db"
