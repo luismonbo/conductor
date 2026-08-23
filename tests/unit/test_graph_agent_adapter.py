@@ -83,6 +83,16 @@ async def test_tool_then_answer_reports_correct_trace():
     }
     assert called_args == {"calculator": {"expression": "2+2"}}
 
+    # result.state must reflect the real post-run transcript, not the
+    # pre-run input state (a single user message, iteration 0).
+    assert result.state.iteration == 2
+    roles = [m.role for m in result.state.messages]
+    assert roles == [Role.USER, Role.ASSISTANT, Role.TOOL, Role.ASSISTANT]
+    assert result.state.messages[0].content == "what is 2+2?"
+    assert result.state.messages[1].tool_calls[0].name == "calculator"
+    assert result.state.messages[2].content == "4"
+    assert result.state.messages[3].content == "The answer is 4."
+
 
 @pytest.mark.asyncio
 async def test_max_iterations_reports_stopped_reason():

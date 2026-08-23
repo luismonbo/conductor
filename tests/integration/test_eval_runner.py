@@ -1,8 +1,8 @@
-"""Integration smoke test: EvalRunner with FakeLLMClient.
+"""Integration smoke test: EvalRunner against a scripted Agent-protocol double.
 
-Scripts the fake client to call the calculator tool and produce "108",
-then asserts all three metrics pass for the calc_mul_001 case.
-No network, no real LLM — fully deterministic.
+Scripts _ScriptedAgent to call the calculator tool and produce "108", then
+asserts all three metrics pass for the calc_mul_001 case. No network, no real
+LLM or agent implementation — fully deterministic.
 """
 
 from dataclasses import dataclass, field

@@ -17,7 +17,6 @@ async def clean_app_state(monkeypatch):
     """Reset all module-level state and force memory checkpointer before each test."""
     monkeypatch.setenv("HARNESS_CHECKPOINTER", "memory")
     _main._running.clear()
-    _main._short_term._store.clear()
     _main._registry = None
     _main._run_store = None
     _main._run_store_lock = None
@@ -26,7 +25,6 @@ async def clean_app_state(monkeypatch):
         if not task.done():
             task.cancel()
     _main._running.clear()
-    _main._short_term._store.clear()
     _main._registry = None
     _main._run_store = None
     _main._run_store_lock = None

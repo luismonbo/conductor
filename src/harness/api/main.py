@@ -24,7 +24,6 @@ from langgraph.types import Command
 
 import aiosqlite
 
-from harness.adapters.memory.in_memory import InMemoryShortTerm
 from harness.api.schemas import ChatRequest, ResumeRequest
 from harness.config.settings import get_settings
 from harness.core.types import AgentEvent, Message, Role
@@ -68,7 +67,6 @@ app.add_middleware(
     allow_credentials=False,
 )
 
-_short_term = InMemoryShortTerm()
 _running: dict[str, asyncio.Task] = {}
 
 # Backends where a client-supplied ChatRequest.model is safe to honor:

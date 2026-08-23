@@ -63,8 +63,18 @@ class GraphAgentAdapter:
 
         final = next((e for e in reversed(events) if e.type in ("final", "error")), None)
         output = final.text if final else ""
+
+        # Build the real post-run state from what ainvoke() actually returned,
+        # not the pre-run input — GraphState's messages/iteration are directly
+        # compatible with AgentState's own fields.
+        result = result or {}
+        final_state = AgentState(
+            messages=list(result.get("messages", state.messages)),
+            max_iterations=state.max_iterations,
+            iteration=result.get("iteration", 0),
+        )
         return AgentResult(
-            output=output, state=state, stopped_reason=stopped_reason_holder[0],
+            output=output, state=final_state, stopped_reason=stopped_reason_holder[0],
         )
 
     async def _emit_trace(self, events: list[AgentEvent]) -> None:
