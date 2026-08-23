@@ -2,7 +2,7 @@
 
 The ONE place that knows about concrete adapters. It reads config, builds the
 selected LLM client, memory store, and tools, registers them, and returns a
-ready ReActAgent. Everything else depends only on protocols. Adding a backend
+ready agent graph. Everything else depends only on protocols. Adding a backend
 means editing this file and nothing in core/.
 """
 from __future__ import annotations
@@ -18,10 +18,7 @@ from harness.adapters.embedding.fake import FakeEmbedder
 from harness.adapters.llm.parsers import NativeToolCallParser, PromptedToolCallParser
 from harness.adapters.memory.in_memory import InMemoryLongTerm
 from harness.adapters.normalization.llm_normalizer import LlmNormalizer
-from harness.adapters.tools.calculator import CalculatorTool
-from harness.adapters.tools.recall import RecallTool
 from harness.config.settings import Settings
-from harness.core.agents.react import ReActAgent
 from harness.core.llm.client import LLMClient
 from harness.core.llm.tool_parsing import ToolCallParser
 from harness.core.memory.store import LongTermMemory
@@ -205,27 +202,6 @@ def build_rag_pipeline(
     # Both concrete classes satisfy the protocol structurally at runtime — this
     # cast only bridges the nominal/structural typing gap for mypy.
     return RagPipeline(retriever=cast(Retriever, retriever), llm=llm, tracer=tracer)
-
-
-def build_agent(
-    settings: Settings,
-    tracer=None,
-    long_term: LongTermMemory | None = None,
-) -> ReActAgent:
-    parser = build_parser(settings)
-    llm = build_llm(settings, parser)
-    memory = long_term if long_term is not None else build_long_term(settings)
-
-    registry = ToolRegistry()
-    registry.register(CalculatorTool())
-    registry.register(RecallTool(memory))
-
-    return ReActAgent(
-        llm=llm,
-        tools=registry,
-        system_prompt=settings.system_prompt,
-        tracer=tracer,
-    )
 
 
 def build_agent_registry(
