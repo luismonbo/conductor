@@ -97,22 +97,6 @@ async def test_cancel_unknown_thread_returns_not_found(monkeypatch):
     assert body["thread_id"] == "nonexistent-id-xyz"
 
 
-@pytest.mark.asyncio
-async def test_blocking_chat_endpoint_still_works(monkeypatch):
-    """POST /chat must remain functional alongside the streaming endpoint."""
-    monkeypatch.setenv("HARNESS_LLM_BACKEND", "fake")
-
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        response = await client.post("/chat", json={"message": "hello"})
-
-    assert response.status_code == 200
-    body = response.json()
-    assert "output" in body
-    assert "conversation_id" in body
-    assert "stopped_reason" in body
-
-
 # ---------------------------------------------------------------------------
 # Token streaming
 # ---------------------------------------------------------------------------

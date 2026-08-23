@@ -1,6 +1,5 @@
 """FastAPI entry point.
 
-POST /chat         — legacy blocking endpoint (unchanged; uses ReActAgent).
 POST /chat/stream  — LangGraph streaming endpoint; emits SSE AgentEvents.
 POST /resume/{thread_id} — resume a paused (interrupted) graph run.
 POST /cancel/{thread_id} — cancel a running streaming task.
@@ -26,13 +25,12 @@ from langgraph.types import Command
 import aiosqlite
 
 from harness.adapters.memory.in_memory import InMemoryShortTerm
-from harness.api.schemas import ChatRequest, ChatResponse, ResumeRequest
+from harness.api.schemas import ChatRequest, ResumeRequest
 from harness.config.settings import get_settings
-from harness.core.types import AgentEvent, AgentState, Message, Role
+from harness.core.types import AgentEvent, Message, Role
 from harness.observability.run_store import RunStore
 from harness.observability.token_accumulator import TokenAccumulator
-from harness.observability.tracer import TraceCollector
-from harness.orchestration.build import build_agent, build_agent_registry
+from harness.orchestration.build import build_agent_registry
 from harness.orchestration.checkpointer import build_checkpointer
 
 # Settings() reads HARNESS_-prefixed vars straight from .env itself, but this
@@ -228,37 +226,6 @@ async def thread_messages(thread_id: str) -> dict:
         if m.role != Role.SYSTEM
     ]
     return {"thread_id": thread_id, "messages": out}
-
-
-# ---------------------------------------------------------------------------
-# Legacy blocking endpoint — untouched
-# ---------------------------------------------------------------------------
-
-@app.post("/chat", response_model=ChatResponse)
-async def chat(req: ChatRequest) -> ChatResponse:
-    settings = get_settings()
-    conversation_id = req.thread_id or str(uuid.uuid4())
-
-    user_msg = Message(role=Role.USER, content=req.message)
-    await _short_term.append(conversation_id, user_msg)
-    history = await _short_term.history(conversation_id)
-
-    tracer = TraceCollector()
-    agent = build_agent(settings, tracer=tracer)
-
-    state = AgentState(messages=list(history), max_iterations=settings.max_iterations)
-    result = await agent.run(state)
-
-    await _short_term.append(
-        conversation_id, Message(role=Role.ASSISTANT, content=result.output)
-    )
-
-    return ChatResponse(
-        output=result.output,
-        conversation_id=conversation_id,
-        stopped_reason=result.stopped_reason,
-        trace_summary=tracer.summary(),
-    )
 
 
 # ---------------------------------------------------------------------------
