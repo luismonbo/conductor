@@ -25,7 +25,6 @@ from harness.core.memory.store import LongTermMemory
 from harness.core.rag.ingest import IngestionPipeline
 from harness.core.rag.ports import Embedder, Retriever as RetrieverPort, VectorStore
 from harness.core.rag.serve import DiversifiedRetriever, RagPipeline, Retriever
-from harness.core.tools.registry import ToolRegistry
 
 
 def build_parser(settings: Settings) -> ToolCallParser:
@@ -211,8 +210,8 @@ def build_agent_registry(
 
     The API routes to the agent named in ChatRequest.agent (default: settings.agent).
     Adding a new agent means adding it here and in agents/<name>/. `long_term` lets a
-    caller (the eval harness) pre-seed memory before building — mirrors the override
-    `build_agent()` used to accept.
+    caller (the eval harness) pre-seed memory before building, enabling external memory
+    initialization.
     """
     from harness.agents.default.graph import build_graph as build_default_graph
     from harness.agents.default.tools import build_registry
