@@ -1,7 +1,8 @@
 """Normalized document and chunk schema for the RAG pipeline.
 
-One consistent internal representation regardless of which parser (docling /
-markitdown) produced the source content — see
+One consistent internal representation regardless of which parser produced
+the source content (currently markitdown only; docling was removed as dead
+weight, see harness.adapters.parsing.router) — see
 docs/superpowers/specs/2026-07-25-rag-ingestion-retrieval-design.md for the
 full rationale. Frozen dataclasses, matching harness.core.types style.
 """
@@ -47,7 +48,7 @@ class NormalizedDocument:
     collection: str
     title: str
     format: str                # "pdf" | "docx" | "html" | ...
-    parser: str                # "docling" | "markitdown"
+    parser: str                # "markitdown" (docling removed; may return as another value later)
     content_hash: str          # hash_bytes(raw source bytes)
     sections: tuple[DocumentSection, ...]
     ingested_at: str           # ISO timestamp

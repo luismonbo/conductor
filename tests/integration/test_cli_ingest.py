@@ -46,7 +46,7 @@ async def test_run_ingest_processes_directory_and_writes_manifest(tmp_path, monk
     index_config_dir = tmp_path / "index_config"
     settings = Settings(embedding_backend="fake", embedding_dimension=4)
 
-    # Inject a fully faked pipeline: no network, no docling model download.
+    # Inject a fully faked pipeline: no network calls, no model downloads.
     def _fake_pipeline(_settings, _backends, tracer=None):
         return IngestionPipeline(
             parser=MarkitdownParser(),

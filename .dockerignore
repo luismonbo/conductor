@@ -1,0 +1,61 @@
+# Local venv is platform-specific — never send it to the build context.
+.venv/
+venv/
+env/
+
+.git/
+.gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Test / lint / type caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+tests/
+
+# Secrets — never bake these into an image layer.
+.env
+.env.local
+.env.*.local
+*.pem
+
+# config/targets/*.yaml is intentionally NOT excluded here. Those are the
+# real, gitignored per-deployment configs (see .gitignore); the Dockerfile's
+# TARGET_NAME build arg selects exactly one to actually copy into the image.
+
+# Production reads Postgres/pgvector or Milvus over the network — no local
+# data files belong in the image.
+*.sqlite
+*.sqlite3
+*.db
+harness.sqlite*
+data/raw/
+data/processed/
+evaluation/reports/
+
+# Local working context, not shipped (see CLAUDE.md)
+docs/
+.claude/
+CLAUDE.md
+.superpowers/
+
+# This image is the API only
+frontend/
+node_modules/
+scripts/
+
+# Logs, OS/editor cruft
+*.log
+.DS_Store
+.idea/
+.vscode/

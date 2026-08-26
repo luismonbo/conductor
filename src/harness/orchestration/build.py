@@ -156,24 +156,12 @@ def list_collections(index_config_dir: Path = Path("data/index_config")) -> list
 
 
 def build_parser_router():
-    # Imported lazily: docling pulls torch + transformers, and this module is
-    # imported by the API and most of the test suite, which never parse a document.
+    # Deferred: most callers (the API, most of the test suite) never parse a
+    # document, so there's no reason to pay markitdown's import cost for them.
     from harness.adapters.parsing.markitdown_parser import MarkitdownParser
-    from harness.adapters.parsing.router import DOCLING_EXTENSIONS, ParserRouter
+    from harness.adapters.parsing.router import ParserRouter
 
-    markitdown = MarkitdownParser()
-    if DOCLING_EXTENSIONS:
-        from harness.adapters.parsing.docling_parser import DoclingParser
-
-        docling = DoclingParser()
-    else:
-        # Skip importing docling/torch entirely while DOCLING_EXTENSIONS is
-        # empty — merely having torch in the process is enough to trigger the
-        # libomp crash it's disabled for (see router.py), so it's not enough
-        # to just avoid calling it. Never routed to either way; markitdown
-        # here is an inert placeholder for the unused slot.
-        docling = markitdown
-    return ParserRouter(docling=docling, markitdown=markitdown)
+    return ParserRouter(markitdown=MarkitdownParser())
 
 
 def build_ingestion_pipeline(

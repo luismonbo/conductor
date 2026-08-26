@@ -1,6 +1,6 @@
-"""markitdown-backed Parser — the broad-format, lighter-weight path (docx,
-pptx, xlsx, html, and the docling-failure fallback for PDFs). See
-docs/superpowers/specs/2026-07-25-rag-ingestion-retrieval-design.md."""
+"""markitdown-backed Parser — handles every format (docx, pptx, xlsx, html,
+pdf, ...). Sole parser since docling was removed as dead weight (see
+router.py). See docs/superpowers/specs/2026-07-25-rag-ingestion-retrieval-design.md."""
 from __future__ import annotations
 
 import asyncio
