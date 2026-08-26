@@ -9,6 +9,7 @@ import pytest
 import harness.api.main as _main
 import harness.orchestration.build as build_module
 from harness.adapters.llm.fake import FakeLLMClient
+from harness.api.rate_limit import limiter
 from harness.core.types import LLMResponse
 
 
@@ -16,6 +17,7 @@ from harness.core.types import LLMResponse
 async def clean_app_state(monkeypatch):
     """Reset all module-level state and force memory checkpointer before each test."""
     monkeypatch.setenv("HARNESS_CHECKPOINTER", "memory")
+    limiter.reset()
     _main._running.clear()
     _main._registry = None
     _main._run_store = None
