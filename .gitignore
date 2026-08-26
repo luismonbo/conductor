@@ -34,6 +34,10 @@ htmlcov/
 .env.*.local
 *.pem
 
+# Deployment target configs (real per-deployment configs; example.yaml stays tracked as the template)
+config/targets/*.yaml
+!config/targets/example.yaml
+
 # Eval reports (on-demand run outputs; commit selectively as benchmark snapshots)
 evaluation/reports/
 

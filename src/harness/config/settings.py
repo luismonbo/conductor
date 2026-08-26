@@ -1,13 +1,18 @@
 """Settings + backend selection.
 
 Backend choice (fake | openai_compatible | azure) and memory choice
-(in_memory | pgvector) are config, not code. Profiles in config/profiles/ override these for
-dev-azure vs edge-pi. This is where the 'swap is a config change, not a
-rewrite' promise is actually cashed in.
+(in_memory | pgvector) are config, not code. Deployment targets in
+config/targets/ (selected via HARNESS_TARGET) override these per-deployment
+— e.g. the daily driver vs. a production site. This is where the 'swap is a
+config change, not a rewrite' promise is actually cashed in.
 """
 from __future__ import annotations
 
+import os
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from harness.config.targets import resolve_target_overrides
 
 
 class Settings(BaseSettings):
@@ -87,4 +92,28 @@ class Settings(BaseSettings):
 
 
 def get_settings() -> Settings:
-    return Settings()
+    target_name = os.environ.get("HARNESS_TARGET", "")
+    if not target_name:
+        return Settings()
+
+    overrides = resolve_target_overrides(target_name)
+    unknown_fields = overrides.keys() - Settings.model_fields.keys()
+    if unknown_fields:
+        raise ValueError(
+            f"Target {target_name!r} sets unknown field(s): {sorted(unknown_fields)}"
+        )
+
+    base = Settings()
+    field_defaults = {name: field.default for name, field in Settings.model_fields.items()}
+    merged = base.model_dump()
+    for key, value in overrides.items():
+        # A real env var already beat the class default here (base's value
+        # differs from the field default) — that value must keep winning
+        # over the target file. Trade-off: this can't distinguish
+        # "explicitly set to the default value" from "never set at all," so
+        # an env var pinned to a field's own default loses to the target
+        # file in that one narrow case.
+        if merged[key] == field_defaults[key]:
+            merged[key] = value
+
+    return Settings(_env_file=None, **merged)
