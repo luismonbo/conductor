@@ -90,6 +90,13 @@ class Settings(BaseSettings):
         "For world knowledge questions (facts, history, science), answer directly."
     )
 
+    # Rate limiting — see docs/superpowers/specs/2026-08-27-rate-limiting-design.md.
+    # Strict tier covers the LLM-invoking endpoints (the cost driver if abused);
+    # default tier covers everything else except /health, which is never limited.
+    rate_limit_enabled: bool = True
+    rate_limit_strict: str = "15/minute"
+    rate_limit_default: str = "60/minute"
+
 
 def get_settings() -> Settings:
     target_name = os.environ.get("HARNESS_TARGET", "")
