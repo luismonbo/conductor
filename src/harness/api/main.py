@@ -17,13 +17,15 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from langgraph.types import Command
+from slowapi.errors import RateLimitExceeded
 
 import aiosqlite
 
+from harness.api.rate_limit import default_limit, limiter, strict_limit
 from harness.api.schemas import ChatRequest, ResumeRequest
 from harness.config.settings import get_settings
 from harness.core.types import AgentEvent, Message, Role
@@ -64,8 +66,31 @@ app.add_middleware(
     allow_origins=_cors_origins,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["Retry-After"],
     allow_credentials=False,
 )
+
+app.state.limiter = limiter
+
+
+async def _rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:
+    """429 body reshaped to this API's {"detail": ...} convention (matching the
+    404 on GET /threads/{id} and other existing error responses), rather than
+    slowapi's own default body shape.
+
+    Retry-After is hardcoded to 60s: both configured tiers (rate_limit_strict,
+    rate_limit_default) are per-minute by design -- see
+    docs/superpowers/specs/2026-08-27-rate-limiting-design.md. Revisit if a
+    non-minute granularity is ever introduced.
+    """
+    return JSONResponse(
+        status_code=429,
+        content={"detail": "Rate limit exceeded. Please slow down and try again shortly."},
+        headers={"Retry-After": "60"},
+    )
+
+
+app.add_exception_handler(RateLimitExceeded, _rate_limit_handler)
 
 _running: dict[str, asyncio.Task] = {}
 
@@ -133,7 +158,8 @@ async def _list_model_ids(client: Any) -> list[str]:
 
 
 @app.get("/models")
-async def list_models() -> dict:
+@limiter.limit(default_limit)
+async def list_models(request: Request) -> dict:
     """Model profiles the proxy serves; the UI picker feeds from this.
 
     default=None (not settings.default_model/llm_model) whenever there's no
@@ -180,7 +206,8 @@ def _title_from(messages: list[Message]) -> str:
 
 
 @app.get("/threads")
-async def list_threads() -> dict:
+@limiter.limit(default_limit)
+async def list_threads(request: Request) -> dict:
     run_store = await _get_run_store()
     if run_store is None:
         return {"threads": []}
@@ -202,7 +229,8 @@ async def list_threads() -> dict:
 
 
 @app.get("/threads/{thread_id}")
-async def thread_messages(thread_id: str) -> dict:
+@limiter.limit(default_limit)
+async def thread_messages(request: Request, thread_id: str) -> dict:
     settings = get_settings()
     registry = await _get_registry()
     graph = registry[settings.agent]
@@ -335,7 +363,8 @@ async def _run_graph(
 # ---------------------------------------------------------------------------
 
 @app.post("/chat/stream")
-async def chat_stream(req: ChatRequest) -> StreamingResponse:
+@limiter.limit(strict_limit)
+async def chat_stream(request: Request, req: ChatRequest) -> StreamingResponse:
     """Stream agent events as Server-Sent Events.
 
     First SSE frame: ``{"thread_id": "<uuid>"}``
@@ -393,7 +422,8 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
 # ---------------------------------------------------------------------------
 
 @app.post("/resume/{thread_id}")
-async def resume_run(thread_id: str, req: ResumeRequest) -> StreamingResponse:
+@limiter.limit(strict_limit)
+async def resume_run(request: Request, thread_id: str, req: ResumeRequest) -> StreamingResponse:
     """Resume a paused graph run (after an interrupt).
 
     Response: same SSE stream as /chat/stream (starts with thread_id frame).
@@ -440,7 +470,8 @@ async def resume_run(thread_id: str, req: ResumeRequest) -> StreamingResponse:
 # ---------------------------------------------------------------------------
 
 @app.post("/cancel/{thread_id}")
-async def cancel_run(thread_id: str) -> dict:
+@limiter.limit(default_limit)
+async def cancel_run(request: Request, thread_id: str) -> dict:
     """Cancel a running streaming agent task by thread_id."""
     task = _running.get(thread_id)
     if task and not task.done():
