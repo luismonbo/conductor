@@ -129,6 +129,9 @@ uv run pytest -q   # 301 tests
 | `HARNESS_AGENT` | `default` | agent name from registry |
 | `HARNESS_TOOL_PARSER` | `native` | `native` · `prompted` |
 | `HARNESS_MAX_ITERATIONS` | `8` | integer |
+| `HARNESS_RATE_LIMIT_ENABLED` | `true` | `true` · `false` |
+| `HARNESS_RATE_LIMIT_STRICT` | `15/minute` | slowapi rate string; applies to LLM-invoking endpoints |
+| `HARNESS_RATE_LIMIT_DEFAULT` | `60/minute` | slowapi rate string; applies to all other rate-limited endpoints |
 | `HARNESS_EMBEDDING_BACKEND` | `fake` | `fake` · `openai_compatible` · `azure` (azure not yet wired) |
 | `HARNESS_EMBEDDING_MODEL` | `nomic-embed-text-v1.5` | any model your embedding endpoint serves |
 | `HARNESS_EMBEDDING_DIMENSION` | `768` | must match the vector store schema; changing it forces a reindex |
