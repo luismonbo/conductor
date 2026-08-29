@@ -17,7 +17,7 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from langgraph.types import Command
@@ -25,6 +25,7 @@ from slowapi.errors import RateLimitExceeded
 
 import aiosqlite
 
+from harness.api.auth import require_api_key
 from harness.api.rate_limit import default_limit, limiter, strict_limit
 from harness.api.schemas import ChatRequest, ResumeRequest
 from harness.config.settings import get_settings
@@ -159,7 +160,7 @@ async def _list_model_ids(client: Any) -> list[str]:
 
 @app.get("/models")
 @limiter.limit(default_limit)
-async def list_models(request: Request) -> dict:
+async def list_models(request: Request, _auth: None = Depends(require_api_key)) -> dict:
     """Model profiles the proxy serves; the UI picker feeds from this.
 
     default=None (not settings.default_model/llm_model) whenever there's no
@@ -207,7 +208,7 @@ def _title_from(messages: list[Message]) -> str:
 
 @app.get("/threads")
 @limiter.limit(default_limit)
-async def list_threads(request: Request) -> dict:
+async def list_threads(request: Request, _auth: None = Depends(require_api_key)) -> dict:
     run_store = await _get_run_store()
     if run_store is None:
         return {"threads": []}
@@ -230,7 +231,7 @@ async def list_threads(request: Request) -> dict:
 
 @app.get("/threads/{thread_id}")
 @limiter.limit(default_limit)
-async def thread_messages(request: Request, thread_id: str) -> dict:
+async def thread_messages(request: Request, thread_id: str, _auth: None = Depends(require_api_key)) -> dict:
     settings = get_settings()
     registry = await _get_registry()
     graph = registry[settings.agent]
@@ -364,7 +365,7 @@ async def _run_graph(
 
 @app.post("/chat/stream")
 @limiter.limit(strict_limit)
-async def chat_stream(request: Request, req: ChatRequest) -> StreamingResponse:
+async def chat_stream(request: Request, req: ChatRequest, _auth: None = Depends(require_api_key)) -> StreamingResponse:
     """Stream agent events as Server-Sent Events.
 
     First SSE frame: ``{"thread_id": "<uuid>"}``
@@ -423,7 +424,7 @@ async def chat_stream(request: Request, req: ChatRequest) -> StreamingResponse:
 
 @app.post("/resume/{thread_id}")
 @limiter.limit(strict_limit)
-async def resume_run(request: Request, thread_id: str, req: ResumeRequest) -> StreamingResponse:
+async def resume_run(request: Request, thread_id: str, req: ResumeRequest, _auth: None = Depends(require_api_key)) -> StreamingResponse:
     """Resume a paused graph run (after an interrupt).
 
     Response: same SSE stream as /chat/stream (starts with thread_id frame).
@@ -471,7 +472,7 @@ async def resume_run(request: Request, thread_id: str, req: ResumeRequest) -> St
 
 @app.post("/cancel/{thread_id}")
 @limiter.limit(default_limit)
-async def cancel_run(request: Request, thread_id: str) -> dict:
+async def cancel_run(request: Request, thread_id: str, _auth: None = Depends(require_api_key)) -> dict:
     """Cancel a running streaming agent task by thread_id."""
     task = _running.get(thread_id)
     if task and not task.done():

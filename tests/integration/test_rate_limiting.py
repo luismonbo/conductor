@@ -13,6 +13,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from harness.api.main import app
+from harness.config.settings import get_settings
 
 
 def _sse_frames(response) -> list[dict]:
@@ -29,7 +30,11 @@ async def test_strict_tier_limits_chat_stream(monkeypatch):
     monkeypatch.setenv("HARNESS_LLM_BACKEND", "fake")
 
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+        headers={"Authorization": f"Bearer {get_settings().api_key}"},
+    ) as client:
         for _ in range(15):
             response = await client.post(
                 "/chat/stream", json={"message": "hi"}, timeout=10.0,
@@ -48,7 +53,11 @@ async def test_strict_tier_limits_chat_stream(monkeypatch):
 async def test_default_tier_limits_threads():
     """60 /threads calls succeed; the 61st is rejected with 429."""
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+        headers={"Authorization": f"Bearer {get_settings().api_key}"},
+    ) as client:
         for _ in range(60):
             response = await client.get("/threads")
             assert response.status_code == 200
@@ -63,7 +72,11 @@ async def test_default_tier_limits_threads():
 async def test_health_never_rate_limited():
     """/health stays exempt even after far more than either tier's threshold."""
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+        headers={"Authorization": f"Bearer {get_settings().api_key}"},
+    ) as client:
         for _ in range(70):
             response = await client.get("/health")
             assert response.status_code == 200
@@ -75,7 +88,11 @@ async def test_tiers_are_independent(monkeypatch):
     monkeypatch.setenv("HARNESS_LLM_BACKEND", "fake")
 
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+        headers={"Authorization": f"Bearer {get_settings().api_key}"},
+    ) as client:
         for _ in range(15):
             response = await client.post(
                 "/chat/stream", json={"message": "hi"}, timeout=10.0,
@@ -97,7 +114,11 @@ async def test_rate_limit_disabled_via_setting(monkeypatch):
     monkeypatch.setenv("HARNESS_RATE_LIMIT_ENABLED", "false")
 
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+        headers={"Authorization": f"Bearer {get_settings().api_key}"},
+    ) as client:
         for _ in range(20):  # well past the normal 15/minute strict threshold
             response = await client.post(
                 "/chat/stream", json={"message": "hi"}, timeout=10.0,
