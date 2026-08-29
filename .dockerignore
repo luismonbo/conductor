@@ -49,8 +49,10 @@ docs/
 CLAUDE.md
 .superpowers/
 
-# This image is the API only
-frontend/
+# node_modules/ and dist/ above already exclude frontend's deps and build
+# output at any depth — frontend/ itself stays available for the Caddy
+# image's build (Dockerfile.caddy), the only build that needs it. The API
+# Dockerfile never copies it either way.
 node_modules/
 scripts/
 

@@ -1,9 +1,14 @@
 services:
   api:
     build: { context: ., dockerfile: src/harness/api/Dockerfile }
+    env_file: .env
+    command: ["uvicorn", "harness.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--app-dir", "src", "--proxy-headers", "--forwarded-allow-ips=172.28.0.0/24"]
+    depends_on: [postgres]
+  caddy:
+    build: { context: ., dockerfile: Dockerfile.caddy }
     ports: ["8000:8000"]
     env_file: .env
-    depends_on: [postgres]
+    depends_on: [api]
   postgres:
     image: pgvector/pgvector:pg16
     environment:
@@ -56,3 +61,13 @@ services:
 volumes:
   postgres_data:
   # ollama_data:
+
+# Fixed subnet so api's --forwarded-allow-ips can trust caddy's address
+# without depending on Compose's auto-assigned default subnet. Trusting the
+# whole subnet is safe specifically because api no longer publishes a host
+# port — only fellow containers on this network can reach it at all.
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 172.28.0.0/24
