@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from harness.config.targets import resolve_target_overrides
@@ -96,6 +97,21 @@ class Settings(BaseSettings):
     rate_limit_enabled: bool = True
     rate_limit_strict: str = "15/minute"
     rate_limit_default: str = "60/minute"
+
+    # Authentication — see docs/superpowers/specs/2026-08-28-authentication-design.md.
+    # A single shared key gates every route except /health (and FastAPI's own
+    # /docs, /openapi.json, /redoc).
+    auth_enabled: bool = True
+    api_key: str = ""
+
+    @model_validator(mode="after")
+    def _require_api_key_when_auth_enabled(self) -> "Settings":
+        if self.auth_enabled and not self.api_key:
+            raise ValueError(
+                "HARNESS_AUTH_ENABLED is true but HARNESS_API_KEY is empty. "
+                "Set HARNESS_API_KEY, or set HARNESS_AUTH_ENABLED=false."
+            )
+        return self
 
 
 def get_settings() -> Settings:

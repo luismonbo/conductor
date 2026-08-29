@@ -19,6 +19,7 @@ def test_registry_contains_default_key():
         checkpointer="memory",
         embedding_backend="fake",
         rag_vector_store_backend="in_memory",
+        api_key="test-key",
     )
     registry = build_agent_registry(s, MemorySaver())
     assert "default" in registry
@@ -33,6 +34,7 @@ def test_registry_default_is_compiled_graph():
         checkpointer="memory",
         embedding_backend="fake",
         rag_vector_store_backend="in_memory",
+        api_key="test-key",
     )
     registry = build_agent_registry(s, MemorySaver())
     graph = registry["default"]
@@ -47,6 +49,7 @@ def test_registry_wires_search_documents_when_rag_backend_available():
         checkpointer="memory",
         embedding_backend="fake",
         rag_vector_store_backend="in_memory",
+        api_key="test-key",
     )
 
     with mock.patch(
@@ -68,6 +71,7 @@ def test_registry_degrades_gracefully_when_rag_backend_unavailable():
         checkpointer="memory",
         embedding_backend="fake",
         rag_vector_store_backend="not_a_real_backend",
+        api_key="test-key",
     )
 
     # Should not raise — falls back to a registry with no search_documents tool.
@@ -83,6 +87,7 @@ def test_registry_uses_the_passed_in_long_term_when_given():
         checkpointer="memory",
         embedding_backend="fake",
         rag_vector_store_backend="in_memory",
+        api_key="test-key",
     )
     from harness.adapters.memory.in_memory import InMemoryLongTerm
     memory = InMemoryLongTerm()

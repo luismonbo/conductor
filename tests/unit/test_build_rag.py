@@ -32,6 +32,7 @@ def test_build_retriever_returns_plain_retriever_when_quota_disabled():
         embedding_backend="fake",
         embedding_dimension=768,
         rag_per_document_k=0,
+        api_key="test-key",
     )
     store = InMemoryVectorStore()
 
@@ -47,6 +48,7 @@ def test_build_retriever_wraps_in_diversified_retriever_when_quota_enabled():
         embedding_dimension=768,
         rag_per_document_k=2,
         rag_overfetch=5,
+        api_key="test-key",
     )
     store = InMemoryVectorStore()
 
