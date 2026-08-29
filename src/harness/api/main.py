@@ -49,6 +49,8 @@ _run_store_lock: asyncio.Lock | None = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Validate settings at boot: fail fast here, not on the first request.
+    get_settings()
     yield
     global _run_store
     if _run_store is not None:

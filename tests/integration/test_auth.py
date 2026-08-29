@@ -18,8 +18,25 @@ async def client():
         yield c
 
 
-async def test_protected_route_without_key_returns_401(client):
-    resp = await client.get("/models")
+# The six routes the auth spec requires to be protected. Placeholder path
+# segments (e.g. "does-not-matter") are fine for the two {thread_id} routes:
+# the auth dependency must reject the request before the route body ever
+# looks up whether the thread exists.
+_PROTECTED_ROUTES = [
+    pytest.param("GET", "/models", None, id="get-models"),
+    pytest.param("GET", "/threads", None, id="get-threads"),
+    pytest.param("GET", "/threads/does-not-matter", None, id="get-thread-by-id"),
+    pytest.param("POST", "/chat/stream", {"message": "hi"}, id="post-chat-stream"),
+    pytest.param(
+        "POST", "/resume/does-not-matter", {"decision": {"approved": True}}, id="post-resume"
+    ),
+    pytest.param("POST", "/cancel/does-not-matter", None, id="post-cancel"),
+]
+
+
+@pytest.mark.parametrize("method, path, json_body", _PROTECTED_ROUTES)
+async def test_protected_route_without_key_returns_401(client, method, path, json_body):
+    resp = await client.request(method, path, json=json_body)
 
     assert resp.status_code == 401
     assert resp.headers["www-authenticate"] == "Bearer"

@@ -7,7 +7,8 @@ services:
   caddy:
     build: { context: ., dockerfile: Dockerfile.caddy }
     ports: ["8000:8000"]
-    env_file: .env
+    environment:
+      HARNESS_API_KEY: "${HARNESS_API_KEY:?HARNESS_API_KEY must be set}"
     depends_on: [api]
   postgres:
     image: pgvector/pgvector:pg16

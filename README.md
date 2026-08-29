@@ -85,6 +85,7 @@ their own terminal:
 ```bash
 uv sync
 cp .env.example .env   # fill in provider keys for the profiles you'll use
+echo "HARNESS_API_KEY=$(openssl rand -hex 32)" >> .env   # required: auth fails closed with no key
 
 make up     # infra: postgres, litellm, langfuse
 make api    # FastAPI, reload
@@ -96,7 +97,7 @@ in a model profile fails fast instead of surfacing as an opaque proxy 400.
 
 Fallback — raw commands, no proxy/tracing, fake LLM, zero credentials:
 ```bash
-uv run uvicorn harness.api.main:app --reload --app-dir src
+HARNESS_API_KEY=$(openssl rand -hex 32) uv run uvicorn harness.api.main:app --reload --app-dir src
 
 # health check
 curl localhost:8000/health
