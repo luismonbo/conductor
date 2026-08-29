@@ -32,6 +32,20 @@ async def test_protected_route_with_wrong_key_returns_401(client):
     assert resp.status_code == 401
 
 
+async def test_protected_route_with_non_ascii_token_returns_401(client):
+    """A raw non-ASCII header byte must not crash hmac.compare_digest into a 500.
+
+    The value is sent as bytes (not str) to bypass httpx's own client-side
+    ascii-encode guard on str header values -- a non-Python caller has no such
+    guard, so the server must handle this on its own. Starlette decodes header
+    bytes as latin-1 (never raises), so the app sees a str with a non-ASCII
+    character by the time it reaches require_api_key.
+    """
+    resp = await client.get("/models", headers={"Authorization": b"Bearer caf\xe9"})
+
+    assert resp.status_code == 401
+
+
 async def test_protected_route_with_correct_key_succeeds(client):
     key = get_settings().api_key
     resp = await client.get("/models", headers={"Authorization": f"Bearer {key}"})

@@ -23,7 +23,7 @@ def require_api_key(request: Request) -> None:
     authorization = request.headers.get("Authorization", "")
     scheme, _, token = authorization.partition(" ")
 
-    if scheme != "Bearer" or not token or not hmac.compare_digest(token, settings.api_key):
+    if scheme != "Bearer" or not token or not hmac.compare_digest(token.encode(), settings.api_key.encode()):
         raise HTTPException(
             status_code=401,
             detail="Invalid or missing API key.",
