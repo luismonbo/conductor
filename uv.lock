@@ -17,6 +17,8 @@ name = "agent-harness"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "azure-identity" },
+    { name = "cryptography" },
     { name = "fastapi" },
     { name = "langchain" },
     { name = "langfuse" },
@@ -26,6 +28,8 @@ dependencies = [
     { name = "markitdown", extra = ["docx", "pdf", "pptx", "xlsx"] },
     { name = "msgpack" },
     { name = "openai" },
+    { name = "pgvector" },
+    { name = "psycopg", extra = ["binary"] },
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "pymilvus", extra = ["milvus-lite"] },
@@ -38,24 +42,12 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
-azure = [
-    { name = "azure-identity" },
-    { name = "cryptography" },
-    { name = "openai" },
-]
 dev = [
     { name = "fpdf2" },
     { name = "mypy" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "ruff" },
-]
-local = [
-    { name = "openai" },
-]
-pgvector = [
-    { name = "pgvector" },
-    { name = "psycopg", extra = ["binary"] },
 ]
 
 [package.dev-dependencies]
@@ -68,8 +60,8 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "azure-identity", marker = "extra == 'azure'", specifier = ">=1.19" },
-    { name = "cryptography", marker = "extra == 'azure'", specifier = ">=50.0.0" },
+    { name = "azure-identity", specifier = ">=1.19" },
+    { name = "cryptography", specifier = ">=50.0.0" },
     { name = "fastapi" },
     { name = "fpdf2", marker = "extra == 'dev'", specifier = ">=2.8.7" },
     { name = "langchain", specifier = ">=1.3.15" },
@@ -80,11 +72,9 @@ requires-dist = [
     { name = "markitdown", extras = ["docx", "pdf", "pptx", "xlsx"], specifier = ">=0.1.6" },
     { name = "msgpack", specifier = ">=1.2.1" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.13" },
-    { name = "openai", marker = "extra == 'azure'", specifier = ">=1.54" },
-    { name = "openai", marker = "extra == 'local'", specifier = ">=1.54" },
-    { name = "openai", extras = ["local"] },
-    { name = "pgvector", marker = "extra == 'pgvector'", specifier = ">=0.3" },
-    { name = "psycopg", extras = ["binary"], marker = "extra == 'pgvector'", specifier = ">=3.2" },
+    { name = "openai", extras = ["local"], specifier = ">=1.54" },
+    { name = "pgvector", specifier = ">=0.3" },
+    { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "pymilvus", extras = ["milvus-lite"], specifier = ">=3.0.0" },
