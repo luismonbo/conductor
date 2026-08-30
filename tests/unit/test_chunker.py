@@ -72,3 +72,22 @@ def test_multiple_sections_get_sequential_order_and_ids():
     chunks = StructureAwareChunker().chunk(doc)
     assert [c.order for c in chunks] == [0, 1]
     assert [c.chunk_id for c in chunks] == [f"{doc.document_id}:0", f"{doc.document_id}:1"]
+
+
+def test_section_path_is_full_ancestor_breadcrumb():
+    doc = _doc((
+        DocumentSection(title="Attention Is All You Need", level=1, text="a", order=0),
+        DocumentSection(title="3 Model Architecture", level=2, text="b", order=1),
+        DocumentSection(title="3.2 Attention", level=3, text="c", order=2),
+        DocumentSection(title="4 Training", level=2, text="d", order=3),
+    ))
+    paths = [c.section_path for c in StructureAwareChunker().chunk(doc)]
+    assert paths[0] == ("Attention Is All You Need",)
+    assert paths[1] == ("Attention Is All You Need", "3 Model Architecture")
+    assert paths[2] == ("Attention Is All You Need", "3 Model Architecture", "3.2 Attention")
+    assert paths[3] == ("Attention Is All You Need", "4 Training")
+
+
+def test_untitled_leading_section_has_empty_breadcrumb():
+    doc = _doc((DocumentSection(title="", level=0, text="lead", order=0),))
+    assert StructureAwareChunker().chunk(doc)[0].section_path == ()

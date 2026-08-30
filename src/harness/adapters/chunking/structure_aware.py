@@ -26,7 +26,13 @@ class StructureAwareChunker:
     def chunk(self, document: NormalizedDocument) -> list[Chunk]:
         chunks: list[Chunk] = []
         index = 0
+        stack: list[tuple[int, str]] = []  # (level, title) of current ancestors
         for section in sorted(document.sections, key=lambda s: s.order):
+            if section.title:
+                while stack and stack[-1][0] >= section.level:
+                    stack.pop()
+                stack.append((section.level, section.title))
+            section_path = tuple(title for _, title in stack)
             for text in self._split_section(section):
                 chunks.append(
                     Chunk(
@@ -34,7 +40,7 @@ class StructureAwareChunker:
                         document_id=document.document_id,
                         collection=document.collection,
                         text=text,
-                        section_path=(section.title,) if section.title else (),
+                        section_path=section_path,
                         section_kind=section.kind,
                         order=index,
                         page_start=section.page_start,
