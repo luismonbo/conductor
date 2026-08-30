@@ -38,10 +38,10 @@ api / agents ──► orchestration ──► adapters ──► core
 | **SSE streaming** | Real-time `thinking`, `tool_call`, `tool_result`, `interrupt`, `final`, `error` events |
 | **React frontend** | Interrupt state UI: amber dot, "Waiting for approval", Reject button |
 | **RAG** | docling/markitdown ingestion → LLM-normalized sections → structure-aware chunks → pgvector + Milvus Lite; retrieval, grounded generation, and a RAG eval harness |
-| **Multi-provider models** | LiteLLM proxy fans one adapter out to Ollama/Anthropic/OpenAI/Gemini by model name; `resolve_model()` precedence: tool pin > agent pin > UI picker > default |
-| **Self-hosted tracing** | Langfuse captures trace trees via LangChain callbacks — fire-and-forget, chat is unaffected if it's down |
+| **Multi-provider models** | LiteLLM proxy fans one adapter out to Ollama/Anthropic/OpenAI/Gemini/DeepSeek by model name; `resolve_model()` precedence: tool pin > agent pin > UI picker > default |
+| **Langfuse Cloud tracing** | Trace grouping via LangChain callbacks, per-call `generation`/`tool` observations via `langfuse.openai` + explicit spans (neither the LLM call nor tool dispatch goes through LangChain itself) — a dead/misconfigured Langfuse never blocks chat |
 | **Threaded chat UI** | Model picker, thread sidebar with transcript reload (`GET /models`, `GET /threads`) |
-| **301 tests** | Unit, integration, contract, graph scenarios — all pass with zero credentials |
+| **354 tests** | Unit, integration, contract, graph scenarios — all pass with zero credentials |
 
 ---
 
@@ -79,15 +79,15 @@ frontend/src/
 
 ## Quick start
 
-Full stack (LiteLLM proxy + Langfuse + Postgres), then API and frontend each in
-their own terminal:
+Full local stack (LiteLLM proxy + Postgres — Langfuse is cloud-hosted, see
+Configuration below), then API and frontend each in their own terminal:
 
 ```bash
 uv sync
 cp .env.example .env   # fill in provider keys for the profiles you'll use
 echo "HARNESS_API_KEY=$(openssl rand -hex 32)" >> .env   # required: auth fails closed with no key
 
-make up     # infra: postgres, litellm, langfuse
+make up     # infra: postgres, litellm
 make api    # FastAPI, reload
 make web    # Vite dev server
 ```
@@ -97,13 +97,15 @@ in a model profile fails fast instead of surfacing as an opaque proxy 400.
 
 Fallback — raw commands, no proxy/tracing, fake LLM, zero credentials:
 ```bash
-HARNESS_API_KEY=$(openssl rand -hex 32) uv run uvicorn harness.api.main:app --reload --app-dir src
+export HARNESS_API_KEY=$(openssl rand -hex 32)
+uv run uvicorn harness.api.main:app --reload --app-dir src
 
-# health check
+# health check (the one route auth never gates)
 curl localhost:8000/health
 
-# stream a response (fake LLM, no credentials needed)
+# stream a response (fake LLM, no credentials needed beyond the shared key)
 curl -N -X POST localhost:8000/chat/stream \
+  -H "Authorization: Bearer $HARNESS_API_KEY" \
   -H 'content-type: application/json' \
   -d '{"message": "what is 12 * 9?"}'
 ```
@@ -115,7 +117,7 @@ cd frontend && pnpm install && pnpm dev
 
 Tests (no network, no credentials):
 ```bash
-uv run pytest -q   # 301 tests
+uv run pytest -q   # 354 tests
 # the pgvector contract cases skip cleanly unless `docker compose up -d postgres` is running
 ```
 
@@ -147,7 +149,7 @@ uv run pytest -q   # 301 tests
 | `HARNESS_DEFAULT_MODEL` | — | LiteLLM profile name sent when no pin/override applies; supersedes `HARNESS_LLM_MODEL` when set |
 | `LITELLM_MASTER_KEY` | — | proxy auth; must equal `HARNESS_LLM_API_KEY` |
 | `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` | — | empty = tracing disabled, chat unaffected |
-| `LANGFUSE_HOST` | `http://localhost:3000` | self-hosted Langfuse UI |
+| `LANGFUSE_HOST` | `https://cloud.langfuse.com` | Langfuse Cloud project (EU region; US: `https://us.cloud.langfuse.com`) |
 
 Azure example:
 ```bash
@@ -162,7 +164,7 @@ Local model / any provider, via the LiteLLM proxy (default; see "Model routing" 
 export HARNESS_LLM_BACKEND=openai_compatible
 export HARNESS_LLM_BASE_URL=http://localhost:4000/v1
 export HARNESS_LLM_API_KEY=$LITELLM_MASTER_KEY
-export HARNESS_DEFAULT_MODEL=local-gemma
+export HARNESS_DEFAULT_MODEL=ollama-gemma
 ```
 
 ---
@@ -182,6 +184,7 @@ The graph pauses, emits an `interrupt` SSE event, and closes the stream. State i
 
 ```bash
 curl -X POST localhost:8000/resume/<thread_id> \
+  -H "Authorization: Bearer $HARNESS_API_KEY" \
   -H 'content-type: application/json' \
   -d '{"decision": {"approved": true}}'
 ```
@@ -193,15 +196,20 @@ Rejection (`approved: false`) routes to the `error` node.
 ## Model routing
 
 The harness keeps exactly one LLM adapter in the hot path — `OpenAICompatibleClient`
-— pointed at a LiteLLM proxy container that fans out to Ollama/Anthropic/OpenAI/Gemini
-by model name. Four profiles ship by default (`litellm_config.yaml`):
+— pointed at a LiteLLM proxy container that fans out to Ollama/Anthropic/OpenAI/Gemini/DeepSeek
+by model name. Six profiles ship by default (`litellm_config.yaml`); the `ollama-*` ones
+are pinned to specific pulled tags rather than auto-discovered — LiteLLM's wildcard
+routing doesn't reliably enumerate Ollama models, so each one you want in the picker
+gets its own entry, same as every cloud profile below:
 
 | Profile | Provider |
 |---------|----------|
-| `local-gemma` | Ollama, on the host |
+| `ollama-gemma` | Ollama, on the host (`gemma4:e2b`) |
+| `ollama-gemma-12b` | Ollama, on the host (`gemma4:12b-mlx`) |
 | `claude` | Anthropic |
 | `gpt` | OpenAI |
 | `gemini-flash` | Gemini |
+| `deepseek-flash` | DeepSeek |
 
 Every call site resolves its model by precedence — **tool pin > agent pin > UI
 picker > default** — via `resolve_model()`
@@ -211,21 +219,16 @@ was pinned for cost or capability reasons.
 
 ### Troubleshooting `make up`
 
-- **`local-gemma` fails or 404s**: `litellm_config.yaml`'s default points at
-  `ollama_chat/gemma3`, a placeholder — run `ollama list` and edit that line to
-  match a model you've actually pulled.
+- **An `ollama-*` profile fails or 404s**: `litellm_config.yaml`'s Ollama entries
+  point at specific pulled tags (`gemma4:e2b`, `gemma4:12b-mlx`) — run `ollama list`
+  and edit those lines to match what you've actually pulled.
 - **Reusing a `postgres_data` volume from before this Makefile existed**: the
-  `litellm`/`langfuse` databases only get created by `create-databases.sql` on a
-  *fresh* volume. Run `make init-dbs` once.
-- **`clickhouse` container stuck `unhealthy` (blocks `langfuse-web`/`langfuse-worker`)**:
-  the official image has a first-boot race — setting `CLICKHOUSE_USER`/`PASSWORD`
-  makes its entrypoint start a temporary server to create that user, and on some
-  hosts the temp instance doesn't release its ports before the real one starts.
-  The real process logs "Ready for connections" anyway but never actually binds
-  HTTP/TCP. `docker compose restart clickhouse` sometimes clears it; if not,
-  remember tracing is optional (blank `LANGFUSE_PUBLIC_KEY`/`SECRET_KEY` = chat
-  works, tracing just no-ops) — `docker compose up -d postgres litellm` alone is
-  enough to use every model profile without Langfuse at all.
+  `litellm` database only gets created by `create-databases.sql` on a *fresh*
+  volume. Run `make init-dbs` once.
+- **Langfuse tracing not showing up**: it's Langfuse Cloud now (see Configuration),
+  not part of `make up` — `docker compose up -d postgres litellm` never touches it.
+  Blank `LANGFUSE_PUBLIC_KEY`/`SECRET_KEY` just no-ops tracing either way; chat
+  itself is unaffected.
 
 ---
 
@@ -273,7 +276,7 @@ exists. The eval runs clean against an empty index and reports a baseline.
       faithfulness, answer relevancy)
 - [x] Token streaming (`LLMClient.stream()`)
 - [x] **Multi-provider models** — LiteLLM proxy, `resolve_model()` precedence hierarchy
-- [x] **Self-hosted Langfuse tracing** — LangChain callbacks, fire-and-forget
+- [x] **Langfuse Cloud tracing** — LangChain callbacks + `langfuse.openai` generation tracing + explicit tool spans, fire-and-forget
 - [x] **Model picker + thread sidebar** — `GET /models`, `GET /threads`, transcript reload
 - [ ] Full HITL UI (approve button, editable args)
 - [ ] Postgres checkpointer

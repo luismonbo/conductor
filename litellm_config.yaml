@@ -3,9 +3,13 @@
 ## The provider model ids below are sensible defaults; adjust them to the
 ## models your keys can access without touching anything else.
 model_list:
-  - model_name: local-gemma
+  - model_name: ollama-gemma
     litellm_params:
       model: ollama_chat/gemma4:e2b
+      api_base: http://host.docker.internal:11434
+  - model_name: ollama-gemma-12b
+    litellm_params:
+      model: ollama_chat/gemma4:12b-mlx
       api_base: http://host.docker.internal:11434
   - model_name: claude
     litellm_params:
@@ -19,6 +23,10 @@ model_list:
     litellm_params:
       model: gemini/gemini-2.5-flash
       api_key: os.environ/GEMINI_API_KEY
+  - model_name: deepseek-flash
+    litellm_params:
+      model: deepseek/deepseek-v4-flash
+      api_key: os.environ/DEEPSEEK_API_KEY
 
 litellm_settings:
   drop_params: true          # tolerate provider-specific params gracefully

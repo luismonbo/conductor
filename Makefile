@@ -1,7 +1,7 @@
 .PHONY: up down infra proxy api web dev test init-dbs logs
 
 # Bring up infra (postgres, litellm) and print next steps.
-# Langfuse/ClickHouse/Redis/MinIO removed for now — see docker-compose.yml.
+# Langfuse runs against Langfuse Cloud, not local infra — see .env.example.
 up:
 	uv run python scripts/validate_litellm_config.py litellm_config.yaml
 	docker compose up -d postgres litellm
@@ -29,7 +29,6 @@ web:
 # One-time for postgres volumes created before the init SQL existed.
 init-dbs:
 	docker compose exec postgres psql -U harness -c 'CREATE DATABASE litellm;' || true
-	docker compose exec postgres psql -U harness -c 'CREATE DATABASE langfuse;' || true
 
 test:
 	uv run pytest -q && pnpm -C frontend test

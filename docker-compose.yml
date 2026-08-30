@@ -47,12 +47,13 @@ services:
       timeout: 5s
       retries: 20
 
-  # Langfuse (+ ClickHouse/Redis/MinIO it depends on) removed for now — the
-  # official ClickHouse image hits a first-boot bootstrap race on this
-  # machine (see docs/devlog/009). Tracing is optional by design (blank
-  # LANGFUSE_* keys already make the harness no-op it); this just stops
-  # `make up` from trying to start the analytics stack at all. Restore from
-  # git history when revisiting.
+  # Langfuse tracing runs against Langfuse Cloud (see .env.example), not a
+  # local container. Self-hosting would pull in ClickHouse/Redis/MinIO for a
+  # tool only one person (or a few site visitors) uses, and the official
+  # ClickHouse image also hit an unresolved first-boot bootstrap race on this
+  # machine (see docs/devlog/009). Tracing stays optional either way (blank
+  # LANGFUSE_* keys = no-op); self-host config is recoverable from git
+  # history if data residency ever requires it.
 
   # ollama:                      # runs natively on the host (menu-bar app);
   #   image: ollama/ollama:latest  # uncomment only if you prefer containerized
