@@ -38,18 +38,28 @@ class IngestionPipeline:
         self._vector_stores = vector_stores
         self._tracer = tracer
 
+    async def _stage(self, stage: str, source_path: str, count: int) -> None:
+        if self._tracer is not None:
+            await self._tracer("ingest_stage", {"stage": stage, "source_path": source_path, "count": count})
+
     async def ingest_file(self, path: Path, collection: str) -> IngestResult:
         source_path = str(path)
         try:
             parsed = await self._parser.parse(path)
+            await self._stage("parse", source_path, 1)
+
             documents = await self._normalizer.normalize(parsed, source_path, collection)
+            await self._stage("normalize", source_path, len(documents))
 
             all_chunks: list[Chunk] = []
             for document in documents:
                 all_chunks.extend(self._chunker.chunk(document))
+            await self._stage("chunk", source_path, len(all_chunks))
 
             if all_chunks:
                 embeddings = await self._embedder.embed([c.text for c in all_chunks])
+                await self._stage("embed", source_path, len(embeddings))
+
                 stamped = [
                     dataclasses.replace(
                         chunk,
@@ -63,6 +73,7 @@ class IngestionPipeline:
                     for document_id in document_ids:
                         await store.delete(document_id)
                     await store.upsert(stamped, embeddings)
+                await self._stage("upsert", source_path, len(stamped))
 
             result = IngestResult(
                 source_path=source_path,

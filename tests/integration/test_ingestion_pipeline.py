@@ -185,3 +185,17 @@ async def test_reingest_of_edited_file_leaves_no_orphans(tmp_path):
         chunker=StructureAwareChunker(), embedder=FakeEmbedder(dimension=4), vector_stores=[store])
     await one.ingest_file(source, collection="docs")   # same source_path -> same document_id
     assert await store.count(collection="docs") == 1   # orphaned S1/S2 chunks deleted, not left behind
+
+
+@pytest.mark.asyncio
+async def test_ingest_file_emits_stage_events(tmp_path):
+    from harness.observability.tracer import TraceCollector
+    tracer = TraceCollector()
+    pipeline = IngestionPipeline(
+        parser=_StubParser(), normalizer=_StubNormalizer(), chunker=_StubChunker(),
+        embedder=FakeEmbedder(dimension=4), vector_stores=[InMemoryVectorStore()], tracer=tracer,
+    )
+    source = tmp_path / "n.html"; source.write_text("<h1>Intro</h1><p>Hello.</p>")
+    await pipeline.ingest_file(source, collection="papers")
+    stages = [d["stage"] for _, e, d in tracer.events if e == "ingest_stage"]
+    assert stages == ["parse", "normalize", "chunk", "embed", "upsert"]
