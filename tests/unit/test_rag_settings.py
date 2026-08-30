@@ -24,6 +24,7 @@ def test_rag_settings_have_sensible_defaults(monkeypatch):
     # test passes or fails depending on what happens to be in .env.
     for key in _RAG_ENV_KEYS:
         monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("HARNESS_API_KEY", "test-key")
 
     settings = Settings(_env_file=None)
 
@@ -40,6 +41,7 @@ def test_rag_settings_have_sensible_defaults(monkeypatch):
 def test_rag_settings_are_overridable_via_env(monkeypatch):
     monkeypatch.setenv("HARNESS_EMBEDDING_BACKEND", "openai_compatible")
     monkeypatch.setenv("HARNESS_EMBEDDING_MODEL", "bge-small-en-v1.5")
+    monkeypatch.setenv("HARNESS_API_KEY", "test-key")
 
     settings = Settings(_env_file=None)
 

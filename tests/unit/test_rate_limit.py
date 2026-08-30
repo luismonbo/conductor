@@ -11,6 +11,7 @@ from harness.api.rate_limit import default_limit, limiter, strict_limit
 
 
 def test_strict_limit_reflects_current_settings(monkeypatch):
+    monkeypatch.setenv("HARNESS_API_KEY", "test-key")
     monkeypatch.setenv("HARNESS_RATE_LIMIT_STRICT", "7/minute")
     assert strict_limit() == "7/minute"
 
@@ -19,6 +20,7 @@ def test_strict_limit_reflects_current_settings(monkeypatch):
 
 
 def test_default_limit_reflects_current_settings(monkeypatch):
+    monkeypatch.setenv("HARNESS_API_KEY", "test-key")
     monkeypatch.setenv("HARNESS_RATE_LIMIT_DEFAULT", "20/minute")
     assert default_limit() == "20/minute"
 
@@ -27,6 +29,7 @@ def test_default_limit_reflects_current_settings(monkeypatch):
 
 
 def test_disabled_flag_overrides_strict_limit(monkeypatch):
+    monkeypatch.setenv("HARNESS_API_KEY", "test-key")
     monkeypatch.setenv("HARNESS_RATE_LIMIT_STRICT", "7/minute")
     monkeypatch.setenv("HARNESS_RATE_LIMIT_ENABLED", "false")
 
@@ -34,6 +37,7 @@ def test_disabled_flag_overrides_strict_limit(monkeypatch):
 
 
 def test_disabled_flag_overrides_default_limit(monkeypatch):
+    monkeypatch.setenv("HARNESS_API_KEY", "test-key")
     monkeypatch.setenv("HARNESS_RATE_LIMIT_DEFAULT", "20/minute")
     monkeypatch.setenv("HARNESS_RATE_LIMIT_ENABLED", "false")
 

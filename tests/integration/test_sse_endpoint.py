@@ -12,6 +12,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from harness.api.main import app
+from harness.config.settings import get_settings
 
 
 @pytest.mark.asyncio
@@ -20,7 +21,11 @@ async def test_chat_stream_starts_with_thread_id(monkeypatch):
     monkeypatch.setenv("HARNESS_LLM_BACKEND", "fake")
 
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+        headers={"Authorization": f"Bearer {get_settings().api_key}"},
+    ) as client:
         events = []
         async with client.stream(
             "POST", "/chat/stream", json={"message": "hello"}, timeout=10.0,
@@ -43,7 +48,11 @@ async def test_chat_stream_ends_with_final_or_error(monkeypatch):
     monkeypatch.setenv("HARNESS_LLM_BACKEND", "fake")
 
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+        headers={"Authorization": f"Bearer {get_settings().api_key}"},
+    ) as client:
         events = []
         async with client.stream(
             "POST", "/chat/stream", json={"message": "ping"}, timeout=10.0,
@@ -65,7 +74,11 @@ async def test_chat_stream_propagates_explicit_thread_id(monkeypatch):
     tid = "my-test-thread-123"
 
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+        headers={"Authorization": f"Bearer {get_settings().api_key}"},
+    ) as client:
         events = []
         async with client.stream(
             "POST",
@@ -88,7 +101,11 @@ async def test_cancel_unknown_thread_returns_not_found(monkeypatch):
     monkeypatch.setenv("HARNESS_LLM_BACKEND", "fake")
 
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+        headers={"Authorization": f"Bearer {get_settings().api_key}"},
+    ) as client:
         response = await client.post("/cancel/nonexistent-id-xyz")
 
     assert response.status_code == 200
@@ -107,7 +124,11 @@ async def test_token_events_appear_in_stream(monkeypatch):
     monkeypatch.setenv("HARNESS_LLM_BACKEND", "fake")
 
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+        headers={"Authorization": f"Bearer {get_settings().api_key}"},
+    ) as client:
         events = []
         async with client.stream(
             "POST", "/chat/stream", json={"message": "hello"}, timeout=10.0,
@@ -168,7 +189,11 @@ async def test_hitl_resume_approved_produces_final(monkeypatch):
 
     thread_id = "hitl-approve-test"
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+        headers={"Authorization": f"Bearer {get_settings().api_key}"},
+    ) as client:
         events1 = []
         async with client.stream(
             "POST", "/chat/stream",
@@ -221,7 +246,11 @@ async def test_hitl_resume_rejected_agent_recovers(monkeypatch):
 
     thread_id = "hitl-reject-test"
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+        headers={"Authorization": f"Bearer {get_settings().api_key}"},
+    ) as client:
         events1 = []
         async with client.stream(
             "POST", "/chat/stream",

@@ -23,6 +23,9 @@ importers:
       react-dom:
         specifier: ^19.2.6
         version: 19.2.6(react@19.2.6)
+      tailwindcss:
+        specifier: ^4.3.0
+        version: 4.3.0
     devDependencies:
       '@eslint/js':
         specifier: ^10.0.1

@@ -13,6 +13,7 @@ _ENV_KEYS = [
 def test_rate_limit_defaults(monkeypatch):
     for key in _ENV_KEYS:
         monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("HARNESS_API_KEY", "test-key")
 
     settings = Settings(_env_file=None)
 
@@ -25,6 +26,7 @@ def test_rate_limit_env_overrides(monkeypatch):
     monkeypatch.setenv("HARNESS_RATE_LIMIT_ENABLED", "false")
     monkeypatch.setenv("HARNESS_RATE_LIMIT_STRICT", "5/minute")
     monkeypatch.setenv("HARNESS_RATE_LIMIT_DEFAULT", "30/minute")
+    monkeypatch.setenv("HARNESS_API_KEY", "test-key")
 
     settings = Settings(_env_file=None)
 
