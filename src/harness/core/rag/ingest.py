@@ -58,7 +58,10 @@ class IngestionPipeline:
                     )
                     for chunk in all_chunks
                 ]
+                document_ids = [d.document_id for d in documents]
                 for store in self._vector_stores:
+                    for document_id in document_ids:
+                        await store.delete(document_id)
                     await store.upsert(stamped, embeddings)
 
             result = IngestResult(

@@ -45,6 +45,26 @@ class _StubChunker:
         ]
 
 
+class _NSectionNormalizer:
+    """Same (source-path-stable) document_id every call, but a configurable
+    number of sections — simulates editing a file down to fewer sections. The
+    real chunker then emits chunk ids docid:0..N-1, so a shrink orphans the
+    higher-indexed chunks unless the pipeline deletes first."""
+    def __init__(self, n: int) -> None:
+        self._n = n
+
+    async def normalize(self, parsed, source_path, collection):
+        from harness.core.rag.document import DocumentSection, NormalizedDocument, make_document_id
+        return [NormalizedDocument(
+            document_id=make_document_id(collection, source_path),
+            source_path=source_path, collection=collection, title="T",
+            format=parsed.format, parser=parsed.parser, content_hash="h",
+            sections=tuple(DocumentSection(title=f"S{i}", level=1, text=f"t{i}", order=i)
+                           for i in range(self._n)),
+            ingested_at="2026-08-31T00:00:00Z",
+        )]
+
+
 class _FailingParser:
     async def parse(self, path):
         raise RuntimeError("simulated parse failure")
@@ -147,3 +167,21 @@ async def test_ingest_file_records_trace_event_on_failure(tmp_path):
     events = _events_named(tracer, "ingest_file_failed")
     assert len(events) == 1
     assert "simulated parse failure" in events[0]["error"]
+
+
+@pytest.mark.asyncio
+async def test_reingest_of_edited_file_leaves_no_orphans(tmp_path):
+    from harness.adapters.chunking.structure_aware import StructureAwareChunker
+    store = InMemoryVectorStore()
+    source = tmp_path / "note.md"
+    source.write_text("x")
+
+    three = IngestionPipeline(parser=_StubParser(), normalizer=_NSectionNormalizer(3),
+        chunker=StructureAwareChunker(), embedder=FakeEmbedder(dimension=4), vector_stores=[store])
+    await three.ingest_file(source, collection="docs")
+    assert await store.count(collection="docs") == 3
+
+    one = IngestionPipeline(parser=_StubParser(), normalizer=_NSectionNormalizer(1),
+        chunker=StructureAwareChunker(), embedder=FakeEmbedder(dimension=4), vector_stores=[store])
+    await one.ingest_file(source, collection="docs")   # same source_path -> same document_id
+    assert await store.count(collection="docs") == 1   # orphaned S1/S2 chunks deleted, not left behind
