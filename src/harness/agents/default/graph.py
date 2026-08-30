@@ -22,6 +22,7 @@ in its _run() finally block to close the SSE stream.
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Annotated, Any, NotRequired
 import operator
 
@@ -37,6 +38,7 @@ from harness.core.llm.client import LLMClient
 from harness.core.llm.model_resolution import resolve_model
 from harness.core.tools.registry import ToolRegistry
 from harness.core.types import AgentEvent, LLMResponse, Message, Role
+from harness.observability.langfuse_tracing import langfuse_configured
 
 
 class GraphState(TypedDict):
@@ -205,7 +207,23 @@ def build_graph(
         new_msgs: list[Message] = []
 
         for tc in last.tool_calls:
+            # Dispatch first, unconditionally — tool execution must never
+            # depend on Langfuse succeeding. registry.dispatch() calls our own
+            # Tool protocol directly, not a LangChain BaseTool, so the graph's
+            # CallbackHandler has no visibility into it (same reason the LLM
+            # call needs langfuse.openai's patch); the span below is a
+            # best-effort add-on, not a gate on execution.
             result = await registry.dispatch(tc)
+            if langfuse_configured():
+                try:
+                    from langfuse import get_client
+
+                    with get_client().start_as_current_observation(
+                        as_type="tool", name=tc.name
+                    ) as obs:
+                        obs.update(input=tc.arguments, output=result.content)
+                except Exception:
+                    logging.getLogger(__name__).exception("langfuse tool span failed")
             await queue.put(AgentEvent(
                 type="tool_result",
                 name=result.name,

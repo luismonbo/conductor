@@ -30,6 +30,7 @@ from harness.api.rate_limit import default_limit, limiter, strict_limit
 from harness.api.schemas import ChatRequest, ResumeRequest
 from harness.config.settings import get_settings
 from harness.core.types import AgentEvent, Message, Role
+from harness.observability.langfuse_tracing import langfuse_configured
 from harness.observability.run_store import RunStore
 from harness.observability.token_accumulator import TokenAccumulator
 from harness.orchestration.build import build_agent_registry
@@ -274,7 +275,7 @@ def _build_callbacks(thread_id: str, agent_name: str) -> tuple[list, dict]:
     The SDK reads LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY / LANGFUSE_HOST
     from the environment itself; we only gate on their presence.
     """
-    if not (os.environ.get("LANGFUSE_PUBLIC_KEY") and os.environ.get("LANGFUSE_SECRET_KEY")):
+    if not langfuse_configured():
         return [], {}
     try:
         handler = _make_langfuse_handler()
@@ -395,6 +396,7 @@ async def chat_stream(request: Request, req: ChatRequest, _auth: None = Depends(
         },
         "callbacks": callbacks,
         "metadata": lf_metadata,
+        "run_name": "chat-response",
     }
     input_state = {
         "messages": [Message(role=Role.USER, content=req.message)],
@@ -449,6 +451,7 @@ async def resume_run(request: Request, thread_id: str, req: ResumeRequest, _auth
         },
         "callbacks": callbacks,
         "metadata": lf_metadata,
+        "run_name": "chat-resume",
     }
 
     run_store = await _get_run_store()

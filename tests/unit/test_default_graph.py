@@ -342,3 +342,38 @@ async def test_token_accumulator_error_path_stopped_reason():
     assert accumulator.iterations == 2
     assert accumulator.input_tokens == 20
     assert accumulator.output_tokens == 10
+
+
+@pytest.mark.asyncio
+async def test_tool_execution_survives_a_broken_langfuse_span(monkeypatch):
+    """A Langfuse-side failure while tracing a tool call must not fail the tool call.
+
+    registry.dispatch() runs unconditionally, before the tracing span is even
+    opened — this asserts that invariant holds even when Langfuse itself is
+    configured and blows up, not just when it's absent.
+    """
+    monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "pk-test")
+    monkeypatch.setenv("LANGFUSE_SECRET_KEY", "sk-test")
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("langfuse is down")
+
+    monkeypatch.setattr("langfuse.get_client", _boom)
+
+    graph = _make_graph([
+        LLMResponse(
+            text="",
+            tool_calls=(ToolCall(id="c1", name="calculator", arguments={"expression": "6*7"}),),
+        ),
+        LLMResponse(text="The result is 42."),
+    ])
+    queue: asyncio.Queue = asyncio.Queue()
+    config = {"configurable": {"thread_id": "t-lf-broken", "event_queue": queue}}
+    events = await _invoke_with_sentinel(graph, _base_state(), config)
+
+    types = [e.type for e in events]
+    assert "tool_result" in types
+    assert "final" in types
+    tool_result = next(e for e in events if e.type == "tool_result")
+    assert tool_result.text == "42"
+    assert tool_result.is_error is False

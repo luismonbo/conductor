@@ -19,6 +19,15 @@ from harness.core.llm.client import LLMClient
 from harness.core.llm.tool_parsing import ToolCallParser
 from harness.core.types import LLMResponse, Message, Role, ToolCall, ToolSpec
 
+# The graph's LangChain CallbackHandler only sees LangGraph's own node-level
+# spans — it has no visibility into a plain async function's raw SDK call.
+# `langfuse.openai` closes that gap by patching AsyncOpenAI/AsyncAzureOpenAI
+# in place so `chat.completions.create()` itself becomes a `generation`
+# observation (model, tokens, cost), nested under the active trace. The
+# patch is process-wide and permanent once imported, so callers below only
+# use `langfuse_configured()` to decide whether to import it at all —
+# keeping credential-free test runs from ever touching langfuse.
+
 
 def message_to_wire(msg: Message) -> dict[str, Any]:
     """Translate a core Message into the OpenAI chat wire format."""
