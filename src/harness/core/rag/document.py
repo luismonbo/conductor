@@ -46,7 +46,7 @@ class DocumentSection:
 
 @dataclass(frozen=True)
 class NormalizedDocument:
-    document_id: str           # make_document_id(collection, content_hash)
+    document_id: str           # make_document_id(collection, source_path)
     source_path: str           # relative to data/raw/
     collection: str
     title: str
