@@ -157,11 +157,19 @@ def list_collections(index_config_dir: Path = Path("data/index_config")) -> list
 
 def build_parser_router():
     # Deferred: most callers (the API, most of the test suite) never parse a
-    # document, so there's no reason to pay markitdown's import cost for them.
+    # document, so there's no reason to pay markitdown's (or docling's) import
+    # cost for them. DoclingParser() itself imports docling lazily inside
+    # _convert, so constructing it here stays import-free too.
+    from harness.adapters.parsing.docling_parser import DoclingParser
+    from harness.adapters.parsing.markdown_passthrough import MarkdownPassthroughParser
     from harness.adapters.parsing.markitdown_parser import MarkitdownParser
     from harness.adapters.parsing.router import ParserRouter
 
-    return ParserRouter(markitdown=MarkitdownParser())
+    return ParserRouter(
+        markitdown=MarkitdownParser(),
+        markdown=MarkdownPassthroughParser(),
+        docling=DoclingParser(),
+    )
 
 
 def build_ingestion_pipeline(
