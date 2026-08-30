@@ -7,7 +7,7 @@ from harness.core.rag.document import DocumentSection, NormalizedDocument, hash_
 def _doc(sections: tuple[DocumentSection, ...]) -> NormalizedDocument:
     content_hash = hash_bytes(b"fixture")
     return NormalizedDocument(
-        document_id=make_document_id("papers", content_hash),
+        document_id=make_document_id("papers", "papers/x.pdf"),
         source_path="papers/x.pdf",
         collection="papers",
         title="A Paper",

@@ -16,8 +16,11 @@ def hash_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def make_document_id(collection: str, content_hash: str) -> str:
-    return f"{collection}/{content_hash[:16]}"
+def make_document_id(collection: str, source_path: str) -> str:
+    """Stable id keyed on source path, so re-ingesting an edited file keeps its
+    id (enabling delete-then-upsert idempotency). Content changes are tracked
+    separately via NormalizedDocument.content_hash."""
+    return f"{collection}/{hash_bytes(source_path.encode())[:16]}"
 
 
 @dataclass(frozen=True)

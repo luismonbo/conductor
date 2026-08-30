@@ -70,3 +70,15 @@ def test_parsed_content_defaults():
     parsed = ParsedContent(text="# Title\n\nbody", format="pdf", parser="docling")
     assert parsed.page_count is None
     assert parsed.structure_hints == {}
+
+
+def test_document_id_is_stable_for_same_source_path():
+    a = make_document_id("papers", "data/raw/papers/x.pdf")
+    b = make_document_id("papers", "data/raw/papers/x.pdf")
+    assert a == b
+    assert a.startswith("papers/")
+
+
+def test_document_id_differs_by_source_path_and_collection():
+    assert make_document_id("papers", "a.pdf") != make_document_id("papers", "b.pdf")
+    assert make_document_id("papers", "a.pdf") != make_document_id("docs", "a.pdf")

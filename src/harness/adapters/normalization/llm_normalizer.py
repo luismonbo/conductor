@@ -160,7 +160,7 @@ class LlmNormalizer:
         content_hash = hash_bytes(parsed.text.encode())
         return [
             NormalizedDocument(
-                document_id=make_document_id(collection, content_hash),
+                document_id=make_document_id(collection, source_path),
                 source_path=source_path,
                 collection=collection,
                 title=title,
