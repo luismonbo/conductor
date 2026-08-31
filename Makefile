@@ -1,4 +1,4 @@
-.PHONY: up down infra proxy api web dev test init-dbs logs
+.PHONY: up down infra proxy api web dev test init-dbs logs ingest
 
 # Bring up infra (postgres, litellm) and print next steps.
 # Langfuse runs against Langfuse Cloud, not local infra — see .env.example.
@@ -35,3 +35,8 @@ test:
 
 logs:
 	docker compose logs -f litellm
+
+# Offline RAG ingestion, containerized (docling needs Linux; never run on the
+# macOS host). COLLECTION selects data/raw/<name>/ — e.g. papers or docs.
+ingest:
+	docker compose --profile ingest run --rm ingest --collection $(COLLECTION)
