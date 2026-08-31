@@ -17,8 +17,8 @@ class LLMClient(Protocol):
 
     Two call styles:
       generate() — blocking, returns one LLMResponse. Used by non-streaming
-                   callers (RagPipeline, LlmNormalizer, the RAG judge
-                   metrics) and as a convenience in tests.
+                   callers (RagPipeline, the RAG judge metrics) and as a
+                   convenience in tests.
       stream()   — async generator; yields str tokens as they arrive, then
                    yields a single LLMResponse as the final item carrying
                    tool_calls, usage, and finish_reason.

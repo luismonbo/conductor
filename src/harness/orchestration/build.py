@@ -17,7 +17,6 @@ from harness.adapters.chunking.structure_aware import StructureAwareChunker
 from harness.adapters.embedding.fake import FakeEmbedder
 from harness.adapters.llm.parsers import NativeToolCallParser, PromptedToolCallParser
 from harness.adapters.memory.in_memory import InMemoryLongTerm
-from harness.adapters.normalization.llm_normalizer import LlmNormalizer
 from harness.config.settings import Settings
 from harness.core.llm.client import LLMClient
 from harness.core.llm.tool_parsing import ToolCallParser
@@ -175,9 +174,13 @@ def build_parser_router():
 def build_ingestion_pipeline(
     settings: Settings, vector_store_backends: list[str], tracer=None
 ) -> IngestionPipeline:
+    from harness.adapters.normalization.docling_normalizer import DoclingNormalizer
+    from harness.adapters.normalization.markdown_normalizer import MarkdownNormalizer
+    from harness.adapters.normalization.routing_normalizer import RoutingNormalizer
+
     return IngestionPipeline(
         parser=build_parser_router(),
-        normalizer=LlmNormalizer(build_llm(settings, build_parser(settings))),
+        normalizer=RoutingNormalizer(markdown=MarkdownNormalizer(), docling=DoclingNormalizer()),
         chunker=StructureAwareChunker(),
         embedder=build_embedder(settings),
         vector_stores=[build_vector_store(settings, backend) for backend in vector_store_backends],

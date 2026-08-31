@@ -1,5 +1,5 @@
 """Deterministic markdown normalizer: split parsed markdown on ATX headings
-into ordered DocumentSections. No LLM, no network — replaces LlmNormalizer for
+into ordered DocumentSections. No LLM, no network — the normalization path for
 self-structuring input (native .md and MarkItDown office output)."""
 from __future__ import annotations
 

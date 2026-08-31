@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import logging
 import sys
 from pathlib import Path
 
@@ -16,6 +17,7 @@ import yaml
 from harness.adapters.chunking.structure_aware import CHUNK_VERSION
 from harness.config.settings import Settings, get_settings
 from harness.core.rag.ingest import IngestionPipeline, IngestResult
+from harness.observability.logging_tracer import LoggingTracer
 from harness.orchestration.build import build_ingestion_pipeline
 
 _ALL_BACKENDS = ["pgvector", "milvus"]
@@ -28,7 +30,9 @@ async def run_ingest(
     index_config_dir: Path,
     vector_store_backends: list[str],
 ) -> list[IngestResult]:
-    pipeline: IngestionPipeline = build_ingestion_pipeline(settings, vector_store_backends)
+    pipeline: IngestionPipeline = build_ingestion_pipeline(
+        settings, vector_store_backends, tracer=LoggingTracer()
+    )
     results = await pipeline.ingest_collection(raw_dir, collection)
 
     index_config_dir.mkdir(parents=True, exist_ok=True)
@@ -52,11 +56,15 @@ def _parse_args() -> argparse.Namespace:
         "--vector-store", default="all",
         help="pgvector | milvus | all (comma-separated for a subset, e.g. pgvector,milvus)",
     )
+    parser.add_argument(
+        "--verbose", action="store_true", help="Enable debug-level logging",
+    )
     return parser.parse_args()
 
 
 def main() -> int:
     args = _parse_args()
+    logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO)
     settings = get_settings()
     backends = _ALL_BACKENDS if args.vector_store == "all" else args.vector_store.split(",")
 
