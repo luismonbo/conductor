@@ -86,6 +86,11 @@ class _FailingParser:
         raise RuntimeError("simulated parse failure")
 
 
+class _FailingEmbedder:
+    async def embed(self, texts):
+        raise RuntimeError("embed down")
+
+
 def _events_named(tracer, name: str) -> list[dict]:
     """tracer.events holds (elapsed, event_name, data) tuples — return the data dicts."""
     return [data for _, event, data in tracer.events if event == name]
@@ -271,6 +276,46 @@ async def test_reingest_to_zero_chunks_deletes_old_chunks(tmp_path):
     assert (
         await store.count(collection="docs") == 0
     )  # old chunks deleted despite the zero-chunk yield
+
+
+@pytest.mark.asyncio
+async def test_reingest_fails_safe_when_embed_errors(tmp_path):
+    """A transient embed failure (e.g. a transient Azure error) must not orphan
+    the index: the old chunks must survive until a new embed actually succeeds.
+    Regression test for the unconditional pre-embed delete: that version deleted
+    from every store before embedding, so an embed failure left the document
+    absent from the index instead of merely stale."""
+    from harness.adapters.chunking.structure_aware import StructureAwareChunker
+
+    store = InMemoryVectorStore()
+    source = tmp_path / "note.md"
+    source.write_text("x")
+
+    three = IngestionPipeline(
+        parser=_StubParser(),
+        normalizer=_NSectionNormalizer(3),
+        chunker=StructureAwareChunker(),
+        embedder=FakeEmbedder(dimension=4),
+        vector_stores=[store],
+    )
+    await three.ingest_file(source, collection="docs")
+    assert await store.count(collection="docs") == 3
+
+    failing = IngestionPipeline(
+        parser=_StubParser(),
+        normalizer=_NSectionNormalizer(3),
+        chunker=StructureAwareChunker(),
+        embedder=_FailingEmbedder(),
+        vector_stores=[store],
+    )
+    result = await failing.ingest_file(
+        source, collection="docs"
+    )  # same source_path -> same document_id, embed() raises
+
+    assert result.error is not None  # per-file isolation caught the failure
+    assert (
+        await store.count(collection="docs") == 3
+    )  # old chunks survive: delete never ran because embed failed first
 
 
 @pytest.mark.asyncio

@@ -60,14 +60,14 @@ class IngestionPipeline:
                 all_chunks.extend(self._chunker.chunk(document))
             await self._stage("chunk", source_path, len(all_chunks))
 
-            # Delete-then-upsert must run unconditionally: a file edited down to
-            # zero chunks still needs its old chunks purged, or re-ingesting it
-            # leaves permanent orphans behind (idempotency guarantee).
+            # Delete must happen only after a successful embed, or a transient
+            # embed failure (e.g. a transient Azure error) leaves the document
+            # deleted-but-not-replaced — absent from the index instead of
+            # merely stale. A file edited down to zero chunks has no embed
+            # step to gate on, so it still deletes unconditionally: otherwise
+            # re-ingesting it to empty would leave its old chunks behind
+            # forever (idempotency guarantee).
             document_ids = [d.document_id for d in documents]
-            for store in self._vector_stores:
-                for document_id in document_ids:
-                    await store.delete(document_id)
-
             if all_chunks:
                 embeddings = await self._embedder.embed([c.text for c in all_chunks])
                 await self._stage("embed", source_path, len(embeddings))
@@ -83,8 +83,16 @@ class IngestionPipeline:
                     for chunk in all_chunks
                 ]
                 for store in self._vector_stores:
+                    for document_id in document_ids:
+                        await store.delete(document_id)
                     await store.upsert(stamped, embeddings)
                 await self._stage("upsert", source_path, len(stamped))
+            else:
+                # Zero chunks: still delete old chunks so an edit-to-empty
+                # leaves no orphans behind.
+                for store in self._vector_stores:
+                    for document_id in document_ids:
+                        await store.delete(document_id)
 
             result = IngestResult(
                 source_path=source_path,
