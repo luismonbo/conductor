@@ -1,5 +1,27 @@
 # RAG eval datasets
 
+## STALE LABELS WARNING — 2026-08-31
+
+**`papers_v1.json`'s labels are invalidated by the `feat/rag-ingestion-v2` branch.**
+Re-labelling is pending as its own follow-up cycle.
+
+They were verified against the OLD pipeline (MarkItDown-only parsing +
+`LlmNormalizer`, nomic-embed-text-v1.5 — see the "papers_v1.json" section
+below). `rag-ingestion-v2` replaces the parser (PDF -> Docling, `.md` ->
+markdown-passthrough, everything else -> MarkItDown, routed by
+`ParserRouter`) and the normalizer (`RoutingNormalizer`, deterministic —
+`LlmNormalizer` is deleted). That changes chunk boundaries, chunk text, and
+every `chunk_id` in the index. The embedding model itself is unchanged
+(still nomic-embed-text-v1.5, 768-dim) — the invalidation comes from
+re-chunking, not re-embedding.
+
+**A run against this dataset now reports false failures, not real retrieval
+regressions.** Do not trust a recall/MRR number from `papers_v1.json` until
+it has been re-verified against the new pipeline's chunks (see "Chunk ids
+are not stable across re-ingestion" below for how to re-check them).
+
+---
+
 ## Labeling convention
 
 `recall_at_k` scores **fractional** recall — `|retrieved ∩ expected| / |expected|` — so the
