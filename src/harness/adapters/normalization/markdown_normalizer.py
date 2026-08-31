@@ -1,6 +1,7 @@
 """Deterministic markdown normalizer: split parsed markdown on ATX headings
 into ordered DocumentSections. No LLM, no network — the normalization path for
 self-structuring input (native .md and MarkItDown office output)."""
+
 from __future__ import annotations
 
 import re
@@ -30,8 +31,11 @@ class MarkdownNormalizer:
             if text or cur_title:
                 sections.append(
                     DocumentSection(
-                        title=cur_title, level=cur_level, kind="prose",
-                        text=text, order=len(sections),
+                        title=cur_title,
+                        level=cur_level,
+                        kind="prose",
+                        text=text,
+                        order=len(sections),
                     )
                 )
 
@@ -49,7 +53,9 @@ class MarkdownNormalizer:
         flush()
 
         if not sections:  # empty input
-            sections = [DocumentSection(title="", level=0, kind="prose", text="", order=0)]
+            sections = [
+                DocumentSection(title="", level=0, kind="prose", text="", order=0)
+            ]
 
         content_hash = hash_bytes(parsed.text.encode())
         return [

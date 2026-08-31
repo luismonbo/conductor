@@ -19,7 +19,10 @@ async def test_run_ingest_processes_directory_and_writes_manifest(tmp_path):
 
     index_config_dir = tmp_path / "index_config"
     settings = Settings(
-        _env_file=None, embedding_backend="fake", embedding_dimension=4, api_key="test-key",
+        _env_file=None,
+        embedding_backend="fake",
+        embedding_dimension=4,
+        api_key="test-key",
     )
 
     results = await run_ingest(

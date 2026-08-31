@@ -4,6 +4,7 @@ docling_attention.json — docling==2.123.1 on data/raw/papers/
 attention-is-all-you-need.pdf, captured in the Task 9 ingest container; see
 task-9-report.md). Docling-free: only exercises the pure dict->dict transform,
 so this runs on the host like any other unit test."""
+
 from __future__ import annotations
 
 import json
@@ -16,7 +17,7 @@ _FIXTURE = json.loads(Path("tests/fixtures/docling_attention.json").read_text())
 
 def test_sections_from_real_docling_dict_have_hierarchy_and_a_table():
     sections = _sections_from_docling_dict(_FIXTURE)
-    assert any(s["level"] == 1 for s in sections)      # a top-level heading
+    assert any(s["level"] == 1 for s in sections)  # a top-level heading
     assert any(s["kind"] == "table" for s in sections)  # TableFormer output preserved
     assert all(set(s) == {"title", "level", "kind", "text"} for s in sections)
 

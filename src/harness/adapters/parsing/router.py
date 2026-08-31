@@ -3,6 +3,7 @@ table-aware PDF structure; only actually importable in the Linux ingest
 container, see docling_parser.py), .md/.markdown -> markdown passthrough,
 everything else -> markitdown. See "Parser routing" in
 docs/superpowers/specs/2026-07-25-rag-ingestion-retrieval-design.md."""
+
 from __future__ import annotations
 
 from pathlib import Path

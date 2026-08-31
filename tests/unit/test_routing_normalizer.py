@@ -18,7 +18,9 @@ class _Spy:
 async def test_routes_docling_parser_to_docling_normalizer():
     md, dl = _Spy("md"), _Spy("dl")
     r = RoutingNormalizer(markdown=md, docling=dl)
-    out = await r.normalize(ParsedContent(text="{}", format="pdf", parser="docling"), "a.pdf", "papers")
+    out = await r.normalize(
+        ParsedContent(text="{}", format="pdf", parser="docling"), "a.pdf", "papers"
+    )
     assert out == ["dl"] and dl.called and not md.called
 
 
@@ -26,5 +28,7 @@ async def test_routes_docling_parser_to_docling_normalizer():
 async def test_routes_everything_else_to_markdown_normalizer():
     md, dl = _Spy("md"), _Spy("dl")
     r = RoutingNormalizer(markdown=md, docling=dl)
-    out = await r.normalize(ParsedContent(text="# H", format="md", parser="markdown"), "a.md", "docs")
+    out = await r.normalize(
+        ParsedContent(text="# H", format="md", parser="markdown"), "a.md", "docs"
+    )
     assert out == ["md"] and md.called and not dl.called

@@ -52,7 +52,10 @@ def test_chunk_defaults_are_prose_and_empty_metadata():
 
 def test_scored_chunk_pairs_chunk_with_score():
     chunk = Chunk(
-        chunk_id="c1", document_id="d1", collection="papers", text="t",
+        chunk_id="c1",
+        document_id="d1",
+        collection="papers",
+        text="t",
         section_path=(),
     )
     scored = ScoredChunk(chunk=chunk, score=0.87)

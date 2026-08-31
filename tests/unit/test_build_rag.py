@@ -1,4 +1,5 @@
 """Unit tests for RAG-related factory functions in orchestration/build.py."""
+
 from __future__ import annotations
 
 from pathlib import Path

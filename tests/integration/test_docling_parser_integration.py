@@ -14,21 +14,26 @@ successful import claims 'test_docling_parser' first (or second), and
 collecting the other file then raises "import file mismatch" and aborts the
 entire pytest session. See task-9-report.md, fix round 1.
 """
+
 from __future__ import annotations
 
 import pytest
 
-pytest.importorskip("docling")  # skips cleanly where docling isn't installed (macOS host / CI base)
+pytest.importorskip(
+    "docling"
+)  # skips cleanly where docling isn't installed (macOS host / CI base)
 
 
 @pytest.mark.asyncio
 async def test_docling_parses_real_pdf(tmp_path):
     from pathlib import Path
     from harness.adapters.parsing.docling_parser import DoclingParser
+
     pdf = Path("data/raw/papers/attention-is-all-you-need.pdf")
     if not pdf.exists():
         pytest.skip("sample PDF not present")
     parsed = await DoclingParser().parse(pdf)
     import json
+
     payload = json.loads(parsed.text)
     assert parsed.parser == "docling" and len(payload["sections"]) > 5

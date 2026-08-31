@@ -6,6 +6,7 @@ payload (tests/fixtures/docling_attention.json, from data/raw/papers/
 attention-is-all-you-need.pdf) in the Task 9 ingest container run and correcting
 _sections_from_docling_dict's mapping against it — see task-9-report.md for what
 the original best-effort mapping got wrong and why."""
+
 from __future__ import annotations
 
 import json
@@ -22,6 +23,7 @@ _NUMBERED_HEADING_RE = re.compile(r"^(\d+(?:\.\d+)*)(?:[.\s]|$)")
 class DoclingParser:
     async def parse(self, path: Path) -> ParsedContent:
         import asyncio
+
         text = await asyncio.to_thread(self._convert, path)
         return ParsedContent(text=text, format="pdf", parser="docling")
 
@@ -29,8 +31,11 @@ class DoclingParser:
         from docling.datamodel.base_models import InputFormat
         from docling.datamodel.pipeline_options import PdfPipelineOptions
         from docling.document_converter import DocumentConverter, PdfFormatOption
+
         opts = PdfPipelineOptions(do_ocr=False, do_table_structure=True)
-        conv = DocumentConverter(format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=opts)})
+        conv = DocumentConverter(
+            format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=opts)}
+        )
         doc = conv.convert(str(path)).document
         # export_to_dict() carries structured items with heading levels + tables.
         payload = doc.export_to_dict()
@@ -104,14 +109,25 @@ def _sections_from_docling_dict(payload: dict) -> list[dict]:
         label = item.get("label", "")
         text = item.get("text", "")
         if label in ("section_header", "title"):
-            sections.append({"title": text, "level": _heading_level(item),
-                             "kind": "prose", "text": ""})
+            sections.append(
+                {
+                    "title": text,
+                    "level": _heading_level(item),
+                    "kind": "prose",
+                    "text": "",
+                }
+            )
         elif sections:
             sections[-1]["text"] = (sections[-1]["text"] + "\n" + text).strip()
         else:
             sections.append({"title": "", "level": 0, "kind": "prose", "text": text})
     for table in payload.get("tables", []):
-        sections.append({"title": _table_title(payload, table),
-                         "level": 3, "kind": "table",
-                         "text": _table_text(table)})
+        sections.append(
+            {
+                "title": _table_title(payload, table),
+                "level": 3,
+                "kind": "table",
+                "text": _table_text(table),
+            }
+        )
     return sections

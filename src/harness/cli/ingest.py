@@ -4,6 +4,7 @@ Usage:
     uv run python -m harness.cli.ingest --collection papers
     uv run python -m harness.cli.ingest --collection papers --vector-store pgvector
 """
+
 from __future__ import annotations
 
 import argparse
@@ -45,19 +46,26 @@ async def run_ingest(
         "documents_ingested": sum(1 for r in results if r.error is None),
         "documents_failed": sum(1 for r in results if r.error is not None),
     }
-    (index_config_dir / f"{collection}.yaml").write_text(yaml.safe_dump(manifest, sort_keys=False))
+    (index_config_dir / f"{collection}.yaml").write_text(
+        yaml.safe_dump(manifest, sort_keys=False)
+    )
     return results
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Ingest documents into the RAG vector stores")
+    parser = argparse.ArgumentParser(
+        description="Ingest documents into the RAG vector stores"
+    )
     parser.add_argument("--collection", default="papers")
     parser.add_argument(
-        "--vector-store", default="all",
+        "--vector-store",
+        default="all",
         help="pgvector | milvus | all (comma-separated for a subset, e.g. pgvector,milvus)",
     )
     parser.add_argument(
-        "--verbose", action="store_true", help="Enable debug-level logging",
+        "--verbose",
+        action="store_true",
+        help="Enable debug-level logging",
     )
     return parser.parse_args()
 
@@ -66,7 +74,9 @@ def main() -> int:
     args = _parse_args()
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO)
     settings = get_settings()
-    backends = _ALL_BACKENDS if args.vector_store == "all" else args.vector_store.split(",")
+    backends = (
+        _ALL_BACKENDS if args.vector_store == "all" else args.vector_store.split(",")
+    )
 
     raw_dir = Path("data/raw") / args.collection
     if not raw_dir.exists():
@@ -75,8 +85,11 @@ def main() -> int:
 
     results = asyncio.run(
         run_ingest(
-            settings=settings, collection=args.collection, raw_dir=raw_dir,
-            index_config_dir=Path("data/index_config"), vector_store_backends=backends,
+            settings=settings,
+            collection=args.collection,
+            raw_dir=raw_dir,
+            index_config_dir=Path("data/index_config"),
+            vector_store_backends=backends,
         )
     )
 

@@ -4,6 +4,7 @@ This is the seam that lets you develop against Azure OpenAI and later swap in
 Gemma-4 on a Pi without touching the agent loop. The agent depends only on
 these Protocols; concrete clients live in adapters/llm/.
 """
+
 from __future__ import annotations
 
 from typing import AsyncGenerator, Protocol, runtime_checkable

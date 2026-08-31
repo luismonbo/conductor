@@ -27,7 +27,9 @@ async def test_router_dispatches_by_suffix(tmp_path):
 
     from harness.adapters.parsing.router import ParserRouter
 
-    router = ParserRouter(markitdown=_P("markitdown"), markdown=_P("markdown"), docling=_P("docling"))
+    router = ParserRouter(
+        markitdown=_P("markitdown"), markdown=_P("markdown"), docling=_P("docling")
+    )
     assert (await router.parse(Path("a.pdf"))).parser == "docling"
     assert (await router.parse(Path("a.md"))).parser == "markdown"
     assert (await router.parse(Path("a.docx"))).parser == "markitdown"

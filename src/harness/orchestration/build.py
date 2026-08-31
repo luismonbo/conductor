@@ -5,6 +5,7 @@ selected LLM client, memory store, and tools, registers them, and returns a
 ready agent graph. Everything else depends only on protocols. Adding a backend
 means editing this file and nothing in core/.
 """
+
 from __future__ import annotations
 
 import logging
@@ -180,10 +181,14 @@ def build_ingestion_pipeline(
 
     return IngestionPipeline(
         parser=build_parser_router(),
-        normalizer=RoutingNormalizer(markdown=MarkdownNormalizer(), docling=DoclingNormalizer()),
+        normalizer=RoutingNormalizer(
+            markdown=MarkdownNormalizer(), docling=DoclingNormalizer()
+        ),
         chunker=StructureAwareChunker(),
         embedder=build_embedder(settings),
-        vector_stores=[build_vector_store(settings, backend) for backend in vector_store_backends],
+        vector_stores=[
+            build_vector_store(settings, backend) for backend in vector_store_backends
+        ],
         tracer=tracer,
     )
 
@@ -203,7 +208,9 @@ def build_rag_pipeline(
 
 
 def build_agent_registry(
-    settings: Settings, checkpointer, long_term: LongTermMemory | None = None,
+    settings: Settings,
+    checkpointer,
+    long_term: LongTermMemory | None = None,
 ) -> dict[str, object]:
     """Build and return all compiled agent graphs keyed by name.
 
