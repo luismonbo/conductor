@@ -23,8 +23,9 @@ services:
       # Test code isn't baked into the image (tests/ is .dockerignored so
       # code-only changes don't bust the dependency-install layer cache) —
       # bind-mounted only so the container-gated integration test
-      # (tests/integration/test_docling_parser.py) can run against this same
-      # image via `--entrypoint pytest` without a second test-only image.
+      # (tests/integration/test_docling_parser_integration.py) can run
+      # against this same image via `--entrypoint pytest` without a second
+      # test-only image.
       - "./tests:/app/tests"
     depends_on: [postgres]
 
