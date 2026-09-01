@@ -39,6 +39,30 @@ dev = [
  "mypy>=1.13",
  "fpdf2>=2.8.7",
 ]
+# Docling runs ONLY inside the Linux ingest container (Dockerfile.ingest) —
+# torch + onnxruntime crash via libomp on macOS. See
+# harness/adapters/parsing/docling_parser.py.
+# torch/torchvision are listed explicitly here (docling would pull them in
+# transitively anyway) because uv's [tool.uv.sources] index override below
+# only takes effect for a package that is a DIRECT dependency somewhere in
+# this project's own pyproject.toml — a purely transitive requirement (as
+# docling->torch would otherwise be) silently ignores the source pin and
+# resolves the default PyPI wheel (which drags in ~2GB of CUDA packages on
+# Linux). Verified empirically: see task-9-report.md.
+docling = ["docling>=2.123,<3", "torch", "torchvision"]
+
+[tool.uv.sources]
+# CPU-only torch/torchvision: docling's PDF pipeline never needs CUDA, and the
+# default GPU wheels add ~2GB to the ingest image for nothing. Secondary
+# optimization only — see Dockerfile.ingest / task-9-report.md if this needs
+# to fall back to the default index for a given build architecture.
+torch = [{ index = "pytorch-cpu" }]
+torchvision = [{ index = "pytorch-cpu" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
