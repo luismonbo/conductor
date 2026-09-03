@@ -40,7 +40,7 @@ export function AssistantMessage({
   );
 
   return (
-    <div style={{ padding: '4px 16px', maxWidth: '80%' }}>
+    <div className="max-w-[80%] px-4 py-1">
       {blocks.map((block, i) => {
         switch (block.kind) {
           case 'thinking':
@@ -71,8 +71,7 @@ export function AssistantMessage({
       })}
       {finalText && (
         <div
-          className="final-prose"
-          style={{ marginTop: blocks.length > 0 ? '8px' : '0' }}
+          className={`final-prose ${blocks.length > 0 ? 'mt-2' : ''}`}
           dangerouslySetInnerHTML={{ __html: finalHtml }}
         />
       )}
@@ -93,14 +92,7 @@ export function AssistantMessage({
         />
       )}
       {isStreaming && blocks.length === 0 && !interruptPayload && (
-        <span
-          style={{
-            fontFamily: 'var(--mono)',
-            fontSize: 'var(--text-xs)',
-            color: 'var(--text-muted)',
-            animation: 'pulse 1.5s ease-in-out infinite',
-          }}
-        >
+        <span className="animate-[pulse_1.5s_ease-in-out_infinite] font-mono text-xs text-fg-muted">
           ...
         </span>
       )}

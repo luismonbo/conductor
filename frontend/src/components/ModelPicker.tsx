@@ -13,17 +13,7 @@ export function ModelPicker({ models, value, onChange, disabled }: ModelPickerPr
       value={value}
       onChange={(e) => onChange(e.target.value)}
       disabled={disabled}
-      style={{
-        fontFamily: 'var(--mono)',
-        fontSize: 'var(--text-xs)',
-        color: 'var(--text-muted)',
-        background: 'transparent',
-        border: '1px solid var(--border)',
-        borderRadius: '4px',
-        padding: '4px 8px',
-        letterSpacing: '0.06em',
-        cursor: disabled ? 'default' : 'pointer',
-      }}
+      className="rounded-sm border border-border bg-transparent px-2 py-1 font-mono text-xs tracking-wide text-fg-muted disabled:cursor-default enabled:cursor-pointer"
     >
       {models.map((m) => (
         <option key={m} value={m}>{m}</option>

@@ -7,12 +7,12 @@ interface ThinkingBlockProps {
 }
 
 export function ThinkingBlock({ text }: ThinkingBlockProps) {
-  if (!text) return null;
-
   const html = useMemo(
-    () => DOMPurify.sanitize(marked.parse(text, { async: false }) as string),
+    () => (text ? DOMPurify.sanitize(marked.parse(text, { async: false }) as string) : ''),
     [text]
   );
+
+  if (!text) return null;
 
   return (
     <div

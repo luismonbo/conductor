@@ -1,167 +1,179 @@
 @import "tailwindcss";
+@import "@fontsource/geist-sans/400.css";
+@import "@fontsource/geist-sans/500.css";
+@import "@fontsource/geist-sans/600.css";
+@import "@fontsource/geist-mono/400.css";
+@import "@fontsource/geist-mono/500.css";
 
-:root {
-  --bg:           #0a0a0a;
-  --surface:      #111111;
-  --surface-raised: #161616;
-  --border:       #222222;
-  --text:         #e8e8e8;
-  --text-muted:   #666666;
-  --text-code:    #a3e4b0;
-  --accent:       #4ade80;
-  --accent-alpha: rgba(74, 222, 128, 0.18);
-  --mono:         'JetBrains Mono', 'Fira Code', 'Cascadia Code', ui-monospace, monospace;
-  --sans:         'Inter', system-ui, -apple-system, sans-serif;
+@theme {
+  --color-canvas:        #0a0a0a;
+  --color-surface:       #111111;
+  --color-surface-raised: #161616;
+  --color-border:        #222222;
+  --color-fg:            #e8e8e8;
+  --color-fg-muted:      #8a8a8a;
+  --color-fg-code:       #a3e4b0;
+  --color-accent:        #4ade80;
+  --color-error:         #f87171;
+  --color-warning:       #f59e0b;
 
-  /* type scale */
+  --font-sans: 'Geist Sans', system-ui, -apple-system, sans-serif;
+  --font-mono: 'Geist Mono', ui-monospace, 'SFMono-Regular', monospace;
+
+  /* dense, deliberately compact type scale for a chat-dense UI */
   --text-xs:   0.6875rem;
   --text-sm:   0.8125rem;
   --text-base: 0.9375rem;
   --text-lg:   1.0625rem;
 
-  /* semantic colors */
-  --color-error: #f87171;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
 
-  /* layout */
   --shadow-card: 0 8px 40px rgba(0, 0, 0, 0.5), 0 2px 12px rgba(0, 0, 0, 0.35);
 }
 
-body {
-  background-color: var(--bg);
-  color: var(--text);
-  font-family: var(--sans);
-  font-size: var(--text-base);
-  line-height: 1.6;
-  -webkit-font-smoothing: antialiased;
+/*
+ * Base/reset rules live in Tailwind's own `base` layer so that utility
+ * classes (which live in the later `utilities` layer) can still override
+ * them. Unlayered CSS always beats layered CSS regardless of specificity,
+ * so a plain `* { margin: 0 }` here would silently defeat every `m-*`/`p-*`
+ * utility in the app.
+ */
+@layer base {
+  body {
+    background-color: var(--color-canvas);
+    color: var(--color-fg);
+    font-family: var(--font-sans);
+    font-size: var(--text-base);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  *, *::before, *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+
+  html, body, #root {
+    height: 100%;
+  }
+
+  /* scrollbar styling */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: var(--color-canvas); }
+  ::-webkit-scrollbar-thumb { background: var(--color-border); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #333; }
+
+  * { scrollbar-width: thin; scrollbar-color: var(--color-border) var(--color-canvas); }
+
+  ::selection {
+    background: color-mix(in srgb, var(--color-accent) 18%, transparent);
+    color: var(--color-fg);
+  }
+
+  /* Details/summary disclosure marker */
+  details summary { list-style: none; cursor: pointer; }
+  details summary::-webkit-details-marker { display: none; }
+  details summary::before {
+    content: '▶';
+    color: var(--color-accent);
+    font-size: 8px;
+    margin-right: 6px;
+    display: inline-block;
+    transition: transform 0.15s;
+  }
+  details[open] summary::before { transform: rotate(90deg); }
+  details.error-result summary::before { color: var(--color-error); }
+
+  details > :not(summary) {
+    animation: expand 0.15s ease;
+  }
+
+  details pre {
+    max-width: 100%;
+  }
+
+  .thinking-prose, .final-prose {
+    font-family: var(--font-sans);
+    color: var(--color-fg);
+    line-height: 1.7;
+    overflow-wrap: break-word;
+  }
+  .thinking-prose { font-size: var(--text-sm); }
+  .final-prose { font-size: var(--text-base); }
+  .thinking-prose p, .final-prose p { margin-bottom: 0.75em; }
+  .thinking-prose p:last-child, .final-prose p:last-child { margin-bottom: 0; }
+  .thinking-prose code, .final-prose code {
+    font-family: var(--font-mono);
+    font-size: 0.9em;
+    color: var(--color-fg-code);
+    background: var(--color-surface-raised);
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+  .thinking-prose pre, .final-prose pre {
+    background: var(--color-surface-raised);
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+    padding: 12px;
+    overflow-x: auto;
+    margin: 0.75em 0;
+    word-break: break-word;
+  }
+  .thinking-prose pre code, .final-prose pre code {
+    background: none;
+    padding: 0;
+    color: var(--color-fg-code);
+  }
+  .thinking-prose ul, .thinking-prose ol, .final-prose ul, .final-prose ol {
+    padding-left: 1.5em;
+    margin-bottom: 0.75em;
+  }
+  .thinking-prose li, .final-prose li { margin-bottom: 0.25em; }
+  .thinking-prose h1, .thinking-prose h2, .thinking-prose h3,
+  .final-prose h1, .final-prose h2, .final-prose h3 {
+    color: var(--color-fg);
+    margin: 1em 0 0.5em;
+    font-weight: 600;
+  }
 }
-
-*, *::before, *::after {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
-}
-
-html, body, #root {
-  height: 100%;
-}
-
-/* scrollbar styling */
-::-webkit-scrollbar { width: 6px; }
-::-webkit-scrollbar-track { background: var(--bg); }
-::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: #333; }
-
-/* Standard scrollbar (Firefox) */
-* { scrollbar-width: thin; scrollbar-color: var(--border) var(--bg); }
-
-/* selection */
-::selection { background: var(--accent-alpha); color: var(--text); }
 
 @keyframes pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.3; }
 }
 
-/* Details/summary disclosure marker */
-details summary { list-style: none; cursor: pointer; }
-details summary::-webkit-details-marker { display: none; }
-details summary::before {
-  content: '▶';
-  color: var(--accent);
-  font-size: 8px;
-  margin-right: 6px;
-  display: inline-block;
-  transition: transform 0.15s;
-}
-details[open] summary::before { transform: rotate(90deg); }
-details.error-result summary::before { color: var(--color-error); }
-
-.thinking-prose {
-  font-family: var(--sans);
-  font-size: var(--text-sm);
-  color: var(--text);
-  line-height: 1.7;
-  overflow-wrap: break-word;
-}
-.final-prose {
-  font-family: var(--sans);
-  font-size: var(--text-base);
-  color: var(--text);
-  line-height: 1.7;
-  overflow-wrap: break-word;
-}
-.thinking-prose p, .final-prose p { margin-bottom: 0.75em; }
-.thinking-prose p:last-child, .final-prose p:last-child { margin-bottom: 0; }
-.thinking-prose code, .final-prose code {
-  font-family: var(--mono);
-  font-size: 0.9em;
-  color: var(--text-code);
-  background: var(--surface-raised);
-  padding: 1px 5px;
-  border-radius: 3px;
-}
-.thinking-prose pre, .final-prose pre {
-  background: var(--surface-raised);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 12px;
-  overflow-x: auto;
-  margin: 0.75em 0;
-  word-break: break-word;
-}
-.thinking-prose pre code, .final-prose pre code {
-  background: none;
-  padding: 0;
-  color: var(--text-code);
-}
-.thinking-prose ul, .thinking-prose ol, .final-prose ul, .final-prose ol {
-  padding-left: 1.5em;
-  margin-bottom: 0.75em;
-}
-.thinking-prose li, .final-prose li { margin-bottom: 0.25em; }
-.thinking-prose h1, .thinking-prose h2, .thinking-prose h3,
-.final-prose h1, .final-prose h2, .final-prose h3 {
-  color: var(--text);
-  margin: 1em 0 0.5em;
-  font-weight: 600;
-}
-
-/* Textarea placeholder */
-textarea::placeholder {
-  color: var(--text-muted);
-  opacity: 0.5;
-}
-
-textarea:focus {
-  border-color: var(--accent);
-}
-
-/* Focus-visible ring using CSS (for better browser support) */
-:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-
-/* Remove focus ring for mouse (applied by ChatInput event handlers) */
-textarea:focus:not(:focus-visible) {
-  outline: none;
-}
-
-/* Header wordmark subtle animation on load */
-header span {
-  transition: opacity 0.3s;
-}
-
-/* Details expand/collapse smooth height (best-effort; not all browsers support it) */
-details > :not(summary) {
-  animation: expand 0.15s ease;
-}
 @keyframes expand {
   from { opacity: 0; transform: translateY(-4px); }
   to   { opacity: 1; transform: translateY(0); }
 }
 
-/* Ensure <pre> inside tool pills doesn't break the layout */
-details pre {
-  max-width: 100%;
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/*
+ * Deliberately unlayered so this always wins over a component's
+ * `outline-none` utility when navigating by keyboard.
+ */
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.skip-link {
+  position: fixed;
+  left: 12px;
+  top: -48px;
+  z-index: 100;
+  transition: top 0.15s;
+}
+.skip-link:focus {
+  top: 12px;
 }
