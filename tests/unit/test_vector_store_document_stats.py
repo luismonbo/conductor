@@ -10,8 +10,11 @@ from harness.core.rag.document import Chunk
 
 def _chunk(chunk_id: str, document_id: str, collection: str = "papers") -> Chunk:
     return Chunk(
-        chunk_id=chunk_id, document_id=document_id, collection=collection,
-        text="x", section_path=(),
+        chunk_id=chunk_id,
+        document_id=document_id,
+        collection=collection,
+        text="x",
+        section_path=(),
     )
 
 

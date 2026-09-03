@@ -1,12 +1,18 @@
 """Protocols the ingestion pipeline (and, later, the serving pipeline) depend
 on. Concrete implementations live in adapters/; core/ imports nothing outward.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
-from harness.core.rag.document import Chunk, NormalizedDocument, ParsedContent, ScoredChunk
+from harness.core.rag.document import (
+    Chunk,
+    NormalizedDocument,
+    ParsedContent,
+    ScoredChunk,
+)
 
 
 class Parser(Protocol):
@@ -30,7 +36,9 @@ class Embedder(Protocol):
 
 @runtime_checkable
 class VectorStore(Protocol):
-    async def upsert(self, chunks: list[Chunk], embeddings: list[list[float]]) -> None: ...
+    async def upsert(
+        self, chunks: list[Chunk], embeddings: list[list[float]]
+    ) -> None: ...
 
     async def search(
         self,

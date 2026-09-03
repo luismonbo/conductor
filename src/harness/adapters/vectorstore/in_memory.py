@@ -1,5 +1,6 @@
 """In-memory VectorStore — test double and zero-infra local fallback, same
 role as adapters/memory/in_memory.py."""
+
 from __future__ import annotations
 
 from harness.core.rag.document import Chunk, ScoredChunk
@@ -34,8 +35,11 @@ class InMemoryVectorStore:
             candidates = [row for row in candidates if row[0].collection == collection]
         if filters:
             candidates = [
-                row for row in candidates
-                if all(row[0].metadata.get(key) == value for key, value in filters.items())
+                row
+                for row in candidates
+                if all(
+                    row[0].metadata.get(key) == value for key, value in filters.items()
+                )
             ]
         scored = [
             ScoredChunk(chunk=chunk, score=_cosine(query_embedding, embedding))
@@ -46,14 +50,17 @@ class InMemoryVectorStore:
 
     async def delete(self, document_id: str) -> None:
         self._rows = {
-            chunk_id: row for chunk_id, row in self._rows.items()
+            chunk_id: row
+            for chunk_id, row in self._rows.items()
             if row[0].document_id != document_id
         }
 
     async def count(self, collection: str | None = None) -> int:
         if collection is None:
             return len(self._rows)
-        return sum(1 for chunk, _ in self._rows.values() if chunk.collection == collection)
+        return sum(
+            1 for chunk, _ in self._rows.values() if chunk.collection == collection
+        )
 
     async def document_stats(self, collection: str | None = None) -> dict[str, int]:
         stats: dict[str, int] = {}

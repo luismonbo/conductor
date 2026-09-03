@@ -7,6 +7,7 @@ same reason as the pgvector adapter: a retrieved Chunk must be
 indistinguishable from the stored one. `metadata_json` stays separate — it is
 what search filters query.
 """
+
 from __future__ import annotations
 
 import json
@@ -57,7 +58,9 @@ def _chunk_from_entity(chunk_id: str, entity: dict) -> Chunk:
 
 
 class MilvusStore:
-    def __init__(self, uri: str, collection: str = "rag_chunks", vector_size: int = 768) -> None:
+    def __init__(
+        self, uri: str, collection: str = "rag_chunks", vector_size: int = 768
+    ) -> None:
         self._collection = collection
         self._vector_size = vector_size
         self._client = MilvusClient(uri=uri)
@@ -74,19 +77,36 @@ class MilvusStore:
             self._client.load_collection(collection_name=self._collection)
         else:
             schema = self._client.create_schema(auto_id=False, enable_dynamic_field=False)
-            schema.add_field("chunk_id", DataType.VARCHAR, is_primary=True, max_length=_ID_FIELD_MAX_LEN)
+            schema.add_field(
+                "chunk_id",
+                DataType.VARCHAR,
+                is_primary=True,
+                max_length=_ID_FIELD_MAX_LEN,
+            )
             schema.add_field("vector", DataType.FLOAT_VECTOR, dim=self._vector_size)
-            schema.add_field("document_id", DataType.VARCHAR, max_length=_ID_FIELD_MAX_LEN)
-            schema.add_field("collection_name", DataType.VARCHAR, max_length=_ID_FIELD_MAX_LEN)
+            schema.add_field(
+                "document_id", DataType.VARCHAR, max_length=_ID_FIELD_MAX_LEN
+            )
+            schema.add_field(
+                "collection_name", DataType.VARCHAR, max_length=_ID_FIELD_MAX_LEN
+            )
             schema.add_field("text", DataType.VARCHAR, max_length=_TEXT_FIELD_MAX_LEN)
-            schema.add_field("metadata_json", DataType.VARCHAR, max_length=_METADATA_FIELD_MAX_LEN)
-            schema.add_field("chunk_json", DataType.VARCHAR, max_length=_CHUNK_JSON_FIELD_MAX_LEN)
+            schema.add_field(
+                "metadata_json", DataType.VARCHAR, max_length=_METADATA_FIELD_MAX_LEN
+            )
+            schema.add_field(
+                "chunk_json", DataType.VARCHAR, max_length=_CHUNK_JSON_FIELD_MAX_LEN
+            )
 
             index_params = self._client.prepare_index_params()
-            index_params.add_index(field_name="vector", index_type="AUTOINDEX", metric_type="COSINE")
+            index_params.add_index(
+                field_name="vector", index_type="AUTOINDEX", metric_type="COSINE"
+            )
 
             self._client.create_collection(
-                collection_name=self._collection, schema=schema, index_params=index_params,
+                collection_name=self._collection,
+                schema=schema,
+                index_params=index_params,
             )
         self._ready = True
 
@@ -127,7 +147,13 @@ class MilvusStore:
             data=[query_embedding],
             limit=k if not filters else max(k * 4, k),
             filter=filter_expr,
-            output_fields=["document_id", "collection_name", "text", "metadata_json", "chunk_json"],
+            output_fields=[
+                "document_id",
+                "collection_name",
+                "text",
+                "metadata_json",
+                "chunk_json",
+            ],
             search_params={"metric_type": "COSINE", "params": {}},
         )
 
@@ -137,7 +163,9 @@ class MilvusStore:
             # pymilvus 3.x keys a Hit by the primary-key field name, not "id";
             # the .id attribute is the version-stable accessor.
             chunk = _chunk_from_entity(hit.id, entity)
-            if filters and not all(chunk.metadata.get(key) == value for key, value in filters.items()):
+            if filters and not all(
+                chunk.metadata.get(key) == value for key, value in filters.items()
+            ):
                 continue
             results.append(ScoredChunk(chunk=chunk, score=float(hit["distance"])))
             if len(results) == k:
@@ -146,7 +174,9 @@ class MilvusStore:
 
     async def delete(self, document_id: str) -> None:
         self._ensure_ready()
-        self._client.delete(collection_name=self._collection, filter=f'document_id == "{document_id}"')
+        self._client.delete(
+            collection_name=self._collection, filter=f'document_id == "{document_id}"'
+        )
 
     async def count(self, collection: str | None = None) -> int:
         self._ensure_ready()
@@ -167,7 +197,8 @@ class MilvusStore:
         # unfiltered path needs an always-true predicate rather than "".
         # chunk_id is the VARCHAR primary key — never empty for a stored row.
         expr = (
-            "chunk_id != ''" if collection is None
+            "chunk_id != ''"
+            if collection is None
             else f'collection_name == "{collection}"'
         )
         rows = self._client.query(
