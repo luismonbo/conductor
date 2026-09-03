@@ -3,9 +3,11 @@ Mirrors evaluation/harness/runner.py's EvalRunner shape and reuses
 EvalReport/CaseReport directly (both already generic — no changes needed).
 The metric loop is awaited, unlike EvalRunner's, because RagMetric.score is
 async (LLM-judge metrics need to await a judge call)."""
+
 from __future__ import annotations
 
 import asyncio
+import time
 
 from harness.observability.tracer import TraceCollector
 
@@ -37,18 +39,34 @@ class RagRunner:
 
     async def _run_case(self, case: RagEvalCase, metrics: list[RagMetric]) -> CaseReport:
         tracer = TraceCollector()
+        started = time.perf_counter()
         try:
             pipeline_or_coro = self._factory(tracer)
             pipeline = (
-                await pipeline_or_coro if asyncio.iscoroutine(pipeline_or_coro) else pipeline_or_coro
+                await pipeline_or_coro
+                if asyncio.iscoroutine(pipeline_or_coro)
+                else pipeline_or_coro
             )
             result = await pipeline.answer(case.query, k=self._k)
         except Exception as exc:
-            return CaseReport(case_id=case.id, input=case.query, passed=False, error=str(exc))
+            return CaseReport(
+                case_id=case.id,
+                input=case.query,
+                passed=False,
+                error=str(exc),
+                query_type=case.query_type,
+                latency_ms=(time.perf_counter() - started) * 1000,
+            )
+        latency_ms = (time.perf_counter() - started) * 1000
 
         metric_results = [await m.score(case, result, tracer) for m in metrics]
         passed = all(mr.passed for mr in metric_results)
         return CaseReport(
-            case_id=case.id, input=case.query, output=result.answer,
-            passed=passed, metric_results=metric_results,
+            case_id=case.id,
+            input=case.query,
+            output=result.answer,
+            passed=passed,
+            metric_results=metric_results,
+            query_type=case.query_type,
+            latency_ms=latency_ms,
         )
