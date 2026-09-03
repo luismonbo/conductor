@@ -74,6 +74,22 @@ async def test_mrr_scores_reciprocal_of_first_relevant_rank():
 
 
 @pytest.mark.asyncio
+async def test_mrr_falls_back_to_documents_when_no_graded_chunks():
+    # First chunk is from an unlabelled document (d1); the labelled document
+    # (d2) only shows up at rank 2, so a correct document-id match must score
+    # 1/2 here -- not 1.0, which chunk-id matching or presence-only checks
+    # would both produce by accident (neither "x" nor "y" is a labelled id).
+    case = _case(docs=["d2"])
+
+    mr = await MRRMetric().score(
+        case, [_sc("x", document_id="d1"), _sc("y", document_id="d2")]
+    )
+
+    assert mr.score == pytest.approx(0.5)
+    assert mr.granularity == "document"
+
+
+@pytest.mark.asyncio
 async def test_mrr_ignores_grade_one_chunks():
     # 'a' is graded 1, below the relevance threshold, so it is not a hit
     case = _case({"a": 1, "b": 3})
