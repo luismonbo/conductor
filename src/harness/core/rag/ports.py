@@ -44,6 +44,11 @@ class VectorStore(Protocol):
 
     async def count(self, collection: str | None = None) -> int: ...
 
+    async def document_stats(self, collection: str | None = None) -> dict[str, int]:
+        """document_id -> chunk count. Used to fingerprint the index so an
+        eval dataset can detect that a re-ingest invalidated its labels."""
+        ...
+
 
 @runtime_checkable
 class Retriever(Protocol):

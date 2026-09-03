@@ -159,3 +159,24 @@ class MilvusStore:
             output_fields=["chunk_id"],
         )
         return len(rows)
+
+    async def document_stats(self, collection: str | None = None) -> dict[str, int]:
+        self._ensure_ready()
+        # pymilvus rejects an empty filter expression unless `limit` is also
+        # given ("empty expression should be used with limit"), so the
+        # unfiltered path needs an always-true predicate rather than "".
+        # chunk_id is the VARCHAR primary key — never empty for a stored row.
+        expr = (
+            "chunk_id != ''" if collection is None
+            else f'collection_name == "{collection}"'
+        )
+        rows = self._client.query(
+            collection_name=self._collection,
+            filter=expr,
+            output_fields=["document_id"],
+        )
+        stats: dict[str, int] = {}
+        for row in rows:
+            document_id = row["document_id"]
+            stats[document_id] = stats.get(document_id, 0) + 1
+        return stats

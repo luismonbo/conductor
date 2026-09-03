@@ -183,6 +183,25 @@ class PgVectorStore:
                     (n,) = await cur.fetchone()
         return int(n)
 
+    async def document_stats(self, collection: str | None = None) -> dict[str, int]:
+        conn = await self._connect()
+        async with conn:
+            if collection is None:
+                stmt = SQL(
+                    "SELECT document_id, count(*) FROM {table} GROUP BY document_id"
+                ).format(table=Identifier(self._table))
+                params: tuple = ()
+            else:
+                stmt = SQL(
+                    "SELECT document_id, count(*) FROM {table} "
+                    "WHERE collection = %s GROUP BY document_id"
+                ).format(table=Identifier(self._table))
+                params = (collection,)
+            async with conn.cursor() as cur:
+                await cur.execute(stmt, params)
+                rows = await cur.fetchall()
+        return {document_id: int(n) for document_id, n in rows}
+
     async def drop(self) -> None:
         """Test-only cleanup — not part of the VectorStore protocol."""
         conn = await psycopg.AsyncConnection.connect(self._dsn, autocommit=True)

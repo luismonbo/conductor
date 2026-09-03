@@ -54,3 +54,11 @@ class InMemoryVectorStore:
         if collection is None:
             return len(self._rows)
         return sum(1 for chunk, _ in self._rows.values() if chunk.collection == collection)
+
+    async def document_stats(self, collection: str | None = None) -> dict[str, int]:
+        stats: dict[str, int] = {}
+        for chunk, _ in self._rows.values():
+            if collection is not None and chunk.collection != collection:
+                continue
+            stats[chunk.document_id] = stats.get(chunk.document_id, 0) + 1
+        return stats
