@@ -29,6 +29,7 @@ if str(_root) not in sys.path:
     sys.path.append(str(_root))
 
 from harness.config.settings import get_settings  # noqa: E402
+from harness.core.rag.document import ScoredChunk  # noqa: E402
 from harness.orchestration.build import build_retriever, build_vector_store  # noqa: E402
 
 _DATASETS_DIR = _root / "evaluation" / "rag" / "datasets"
@@ -56,7 +57,7 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _prompt_grade(rank: int, scored) -> int:
+def _prompt_grade(rank: int, scored: ScoredChunk) -> int:
     chunk = scored.chunk
     section = " > ".join(chunk.section_path) or "n/a"
     print(f"\n{'-' * 72}")
@@ -78,7 +79,7 @@ def _prompt_grade(rank: int, scored) -> int:
         print("  Enter 0, 1, 2 or 3.")
 
 
-async def _pool(args) -> list:
+async def _pool(args: argparse.Namespace) -> list[ScoredChunk]:
     # Quota off while pooling: the pool should be the retriever's raw top-N so
     # grading is not biased by a per-document cap. build_retriever reads the
     # quota from settings, so it is overridden here rather than passed.
