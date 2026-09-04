@@ -11,10 +11,13 @@ therefore ignored, which is worse than no gate because it looks like coverage.
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
+
+from evaluation.harness.report import EvalReport
 
 
 @dataclass(frozen=True)
@@ -68,3 +71,14 @@ def evaluate_gates(gates: list[Gate], report) -> list[str]:
                 f"below threshold {gate.min_mean} over n={row['n']} — {gate.rationale}"
             )
     return failures
+
+
+def gate_or_fail(report: EvalReport, thresholds_path: Path) -> int:
+    """Evaluate thresholds.yaml gates against report; print failures; return the exit code."""
+    failures = evaluate_gates(load_gates(thresholds_path), report)
+    if failures:
+        print("\nGATE FAILURES:", file=sys.stderr)
+        for failure in failures:
+            print(f"  - {failure}", file=sys.stderr)
+        return 1
+    return 0

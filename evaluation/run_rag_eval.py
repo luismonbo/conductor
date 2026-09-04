@@ -2,7 +2,7 @@
 
 Usage:
     uv run python evaluation/run_rag_eval.py
-    uv run python evaluation/run_rag_eval.py --tags smoke
+    uv run python evaluation/run_rag_eval.py --suite smoke
     uv run python evaluation/run_rag_eval.py --vector-store milvus
 """
 
@@ -27,7 +27,7 @@ from evaluation.rag.dataset import RagDataset  # noqa: E402
 from evaluation.rag.metrics.answer_relevancy import AnswerRelevancyMetric  # noqa: E402
 from evaluation.rag.metrics.faithfulness import FaithfulnessMetric  # noqa: E402
 from evaluation.rag.runner import RagRunner  # noqa: E402
-from evaluation.rag.thresholds import evaluate_gates, load_gates  # noqa: E402
+from evaluation.rag.thresholds import gate_or_fail  # noqa: E402
 
 _EVAL_DIR = Path(__file__).parent
 _DATASETS_DIR = _EVAL_DIR / "rag" / "datasets"
@@ -113,13 +113,7 @@ def main() -> int:
     report.print_summary()
     print(f"Report saved -> {out_path}")
 
-    failures = evaluate_gates(load_gates(_EVAL_DIR / "rag" / "thresholds.yaml"), report)
-    if failures:
-        print("\nGATE FAILURES:", file=sys.stderr)
-        for failure in failures:
-            print(f"  - {failure}", file=sys.stderr)
-        return 1
-    return 0
+    return gate_or_fail(report, _EVAL_DIR / "rag" / "thresholds.yaml")
 
 
 if __name__ == "__main__":
