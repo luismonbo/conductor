@@ -27,6 +27,7 @@ from evaluation.rag.dataset import RagDataset  # noqa: E402
 from evaluation.rag.metrics.answer_relevancy import AnswerRelevancyMetric  # noqa: E402
 from evaluation.rag.metrics.faithfulness import FaithfulnessMetric  # noqa: E402
 from evaluation.rag.runner import RagRunner  # noqa: E402
+from evaluation.rag.thresholds import evaluate_gates, load_gates  # noqa: E402
 
 _EVAL_DIR = Path(__file__).parent
 _DATASETS_DIR = _EVAL_DIR / "rag" / "datasets"
@@ -35,8 +36,8 @@ _REPORTS_DIR = _EVAL_DIR / "reports"
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the RAG eval harness")
-    parser.add_argument("--dataset", default="papers_v1.json")
-    parser.add_argument("--tags", nargs="*", default=[])
+    parser.add_argument("--dataset", default="papers_v2.json")
+    parser.add_argument("--suite", default=None, help="Only cases declaring this suite")
     parser.add_argument(
         "--vector-store", default="pgvector", choices=["pgvector", "milvus", "in_memory"]
     )
@@ -75,7 +76,7 @@ def main() -> int:
     if overrides:
         settings = settings.model_copy(update=overrides)
 
-    dataset = RagDataset.load(dataset_path).filter_by_tags(args.tags)
+    dataset = RagDataset.load(dataset_path).filter_by_suite(args.suite)
     if not dataset.cases:
         print(
             "No cases to run (dataset is empty or filters matched nothing). "
@@ -111,7 +112,14 @@ def main() -> int:
     out_path = report.save(_REPORTS_DIR)
     report.print_summary()
     print(f"Report saved -> {out_path}")
-    return 0 if report.pass_rate == 1.0 else 1
+
+    failures = evaluate_gates(load_gates(_EVAL_DIR / "rag" / "thresholds.yaml"), report)
+    if failures:
+        print("\nGATE FAILURES:", file=sys.stderr)
+        for failure in failures:
+            print(f"  - {failure}", file=sys.stderr)
+        return 1
+    return 0
 
 
 if __name__ == "__main__":
