@@ -35,7 +35,7 @@
       "query_type": "factual",
       "difficulty": "medium",
       "expected_behaviour": "grounded_answer",
-      "suites": [],
+      "suites": ["smoke"],
       "excluded_from": []
     },
     {
