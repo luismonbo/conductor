@@ -35,7 +35,9 @@
       "query_type": "factual",
       "difficulty": "medium",
       "expected_behaviour": "grounded_answer",
-      "suites": ["smoke"],
+      "suites": [
+        "smoke"
+      ],
       "excluded_from": []
     },
     {
@@ -310,10 +312,16 @@
       "query": "Does the paper report BLEU scores for English-to-German and English-to-French translation?",
       "expected": {
         "graded_chunks": {},
-        "relevant_document_ids": ["papers/50455611c3ed8b48"],
+        "relevant_document_ids": [
+          "papers/50455611c3ed8b48"
+        ],
         "reference_answer": "Yes, the paper reports BLEU scores for both the WMT 2014 English-to-German and English-to-French translation tasks, alongside the estimated training cost in FLOPs for each model compared."
       },
-      "provenance": {"source": "human", "verified_by": "luis", "verified_at": "2026-09-04"},
+      "provenance": {
+        "source": "synthetic",
+        "verified_by": "luis",
+        "verified_at": "2026-09-04"
+      },
       "query_type": "factual",
       "difficulty": "easy",
       "expected_behaviour": "grounded_answer",
@@ -325,10 +333,16 @@
       "query": "What role does multi-head attention play in the Transformer's decoder?",
       "expected": {
         "graded_chunks": {},
-        "relevant_document_ids": ["papers/50455611c3ed8b48"],
+        "relevant_document_ids": [
+          "papers/50455611c3ed8b48"
+        ],
         "reference_answer": "The decoder uses multi-head self-attention over its own previous outputs (masked to prevent attending to future positions) and a second multi-head attention layer that attends over the encoder's output."
       },
-      "provenance": {"source": "human", "verified_by": "luis", "verified_at": "2026-09-04"},
+      "provenance": {
+        "source": "synthetic",
+        "verified_by": "luis",
+        "verified_at": "2026-09-04"
+      },
       "query_type": "reasoning",
       "difficulty": "medium",
       "expected_behaviour": "grounded_answer",
@@ -340,10 +354,16 @@
       "query": "What values of N, d_model, and number of attention heads define the base Transformer configuration?",
       "expected": {
         "graded_chunks": {},
-        "relevant_document_ids": ["papers/50455611c3ed8b48"],
+        "relevant_document_ids": [
+          "papers/50455611c3ed8b48"
+        ],
         "reference_answer": "The base model configuration uses N = 6 layers, d_model = 512, and h = 8 attention heads, per the hyperparameter settings table."
       },
-      "provenance": {"source": "human", "verified_by": "luis", "verified_at": "2026-09-04"},
+      "provenance": {
+        "source": "synthetic",
+        "verified_by": "luis",
+        "verified_at": "2026-09-04"
+      },
       "query_type": "factual",
       "difficulty": "medium",
       "expected_behaviour": "grounded_answer",
@@ -355,10 +375,16 @@
       "query": "Who do the authors thank in the acknowledgments section?",
       "expected": {
         "graded_chunks": {},
-        "relevant_document_ids": ["papers/50455611c3ed8b48"],
+        "relevant_document_ids": [
+          "papers/50455611c3ed8b48"
+        ],
         "reference_answer": "The authors thank Nal Kalchbrenner and Stephan Gouws for their comments, corrections, and inspiration."
       },
-      "provenance": {"source": "human", "verified_by": "luis", "verified_at": "2026-09-04"},
+      "provenance": {
+        "source": "synthetic",
+        "verified_by": "luis",
+        "verified_at": "2026-09-04"
+      },
       "query_type": "factual",
       "difficulty": "easy",
       "expected_behaviour": "grounded_answer",
@@ -370,10 +396,16 @@
       "query": "What tool-use capabilities does the meta-prompting framework integrate for tackling algorithmic problems?",
       "expected": {
         "graded_chunks": {},
-        "relevant_document_ids": ["papers/75c2c05bec38ceb9"],
+        "relevant_document_ids": [
+          "papers/75c2c05bec38ceb9"
+        ],
         "reference_answer": "Meta-prompting integrates external tool execution, such as a Python expert that generates and runs code, to handle algorithmic and computational tasks more reliably than pure language-only reasoning."
       },
-      "provenance": {"source": "human", "verified_by": "luis", "verified_at": "2026-09-04"},
+      "provenance": {
+        "source": "synthetic",
+        "verified_by": "luis",
+        "verified_at": "2026-09-04"
+      },
       "query_type": "factual",
       "difficulty": "medium",
       "expected_behaviour": "grounded_answer",
@@ -385,10 +417,16 @@
       "query": "Which multi-agent or debate-based approaches does the related work section cite?",
       "expected": {
         "graded_chunks": {},
-        "relevant_document_ids": ["papers/75c2c05bec38ceb9"],
+        "relevant_document_ids": [
+          "papers/75c2c05bec38ceb9"
+        ],
         "reference_answer": "The related work cites approaches such as improving factuality and reasoning through multiagent debate, and AutoGen, a framework for multi-agent conversation-driven LLM applications."
       },
-      "provenance": {"source": "human", "verified_by": "luis", "verified_at": "2026-09-04"},
+      "provenance": {
+        "source": "synthetic",
+        "verified_by": "luis",
+        "verified_at": "2026-09-04"
+      },
       "query_type": "factual",
       "difficulty": "medium",
       "expected_behaviour": "grounded_answer",
@@ -400,10 +438,16 @@
       "query": "What programming puzzle benchmark is used to evaluate meta-prompting's coding performance?",
       "expected": {
         "graded_chunks": {},
-        "relevant_document_ids": ["papers/75c2c05bec38ceb9"],
+        "relevant_document_ids": [
+          "papers/75c2c05bec38ceb9"
+        ],
         "reference_answer": "Python Programming Puzzles is used to evaluate meta-prompting's coding performance, alongside other tasks like Checkmate-in-One and the Game of 24."
       },
-      "provenance": {"source": "human", "verified_by": "luis", "verified_at": "2026-09-04"},
+      "provenance": {
+        "source": "synthetic",
+        "verified_by": "luis",
+        "verified_at": "2026-09-04"
+      },
       "query_type": "factual",
       "difficulty": "easy",
       "expected_behaviour": "grounded_answer",
@@ -415,10 +459,16 @@
       "query": "How does meta-prompting's performance compare to standard zero-shot prompting across the evaluated benchmarks?",
       "expected": {
         "graded_chunks": {},
-        "relevant_document_ids": ["papers/75c2c05bec38ceb9"],
+        "relevant_document_ids": [
+          "papers/75c2c05bec38ceb9"
+        ],
         "reference_answer": "Meta-prompting consistently outperforms task-agnostic zero-shot baselines across the evaluated benchmarks, including notable gains on tasks like Checkmate-in-One."
       },
-      "provenance": {"source": "human", "verified_by": "luis", "verified_at": "2026-09-04"},
+      "provenance": {
+        "source": "synthetic",
+        "verified_by": "luis",
+        "verified_at": "2026-09-04"
+      },
       "query_type": "reasoning",
       "difficulty": "medium",
       "expected_behaviour": "grounded_answer",
@@ -430,10 +480,16 @@
       "query": "What role does self-reflection or dynamic decision-making play in the meta-prompting framework?",
       "expected": {
         "graded_chunks": {},
-        "relevant_document_ids": ["papers/75c2c05bec38ceb9"],
+        "relevant_document_ids": [
+          "papers/75c2c05bec38ceb9"
+        ],
         "reference_answer": "Meta-prompting's conductor model uses self-reflection and dynamic decision-making to evaluate expert outputs, decide when a sub-task needs to be redone, and manage the flow of information between experts before producing a final answer."
       },
-      "provenance": {"source": "human", "verified_by": "luis", "verified_at": "2026-09-04"},
+      "provenance": {
+        "source": "synthetic",
+        "verified_by": "luis",
+        "verified_at": "2026-09-04"
+      },
       "query_type": "reasoning",
       "difficulty": "medium",
       "expected_behaviour": "grounded_answer",
@@ -445,10 +501,16 @@
       "query": "What is the 'lottery of birth' concept used for in the paper's fairness argument?",
       "expected": {
         "graded_chunks": {},
-        "relevant_document_ids": ["papers/5e80f8764192bbf0"],
+        "relevant_document_ids": [
+          "papers/5e80f8764192bbf0"
+        ],
         "reference_answer": "The 'lottery of birth' refers to the unchosen circumstances of where and to whom a person is born, which the paper uses to argue that unequal access to the benefits of technology compounds an already-arbitrary distribution of life chances, strengthening the case for broader redistribution."
       },
-      "provenance": {"source": "human", "verified_by": "luis", "verified_at": "2026-09-04"},
+      "provenance": {
+        "source": "synthetic",
+        "verified_by": "luis",
+        "verified_at": "2026-09-04"
+      },
       "query_type": "reasoning",
       "difficulty": "medium",
       "expected_behaviour": "grounded_answer",
@@ -460,10 +522,16 @@
       "query": "How does the paper characterize the ethical responsibility of technologists in a global age?",
       "expected": {
         "graded_chunks": {},
-        "relevant_document_ids": ["papers/5e80f8764192bbf0"],
+        "relevant_document_ids": [
+          "papers/5e80f8764192bbf0"
+        ],
         "reference_answer": "The paper argues that because technology now shapes global opportunities and outcomes more than ever, technologists carry a heightened ethical responsibility to consider the worldwide distribution of the benefits their work creates."
       },
-      "provenance": {"source": "human", "verified_by": "luis", "verified_at": "2026-09-04"},
+      "provenance": {
+        "source": "synthetic",
+        "verified_by": "luis",
+        "verified_at": "2026-09-04"
+      },
       "query_type": "reasoning",
       "difficulty": "medium",
       "expected_behaviour": "grounded_answer",
@@ -475,10 +543,16 @@
       "query": "What is the 'minor cost proviso' and which argument does it qualify?",
       "expected": {
         "graded_chunks": {},
-        "relevant_document_ids": ["papers/5e80f8764192bbf0"],
+        "relevant_document_ids": [
+          "papers/5e80f8764192bbf0"
+        ],
         "reference_answer": "The minor cost proviso is a weaker, revised version of the global benefit argument, holding that beneficiaries owe redistribution only when doing so comes at little or no cost to themselves; the paper discusses objections to how broadly this proviso actually applies."
       },
-      "provenance": {"source": "human", "verified_by": "luis", "verified_at": "2026-09-04"},
+      "provenance": {
+        "source": "synthetic",
+        "verified_by": "luis",
+        "verified_at": "2026-09-04"
+      },
       "query_type": "definition",
       "difficulty": "hard",
       "expected_behaviour": "grounded_answer",
@@ -490,10 +564,16 @@
       "query": "Which historical and philosophical works does the paper's bibliography draw on for its distributive-justice arguments?",
       "expected": {
         "graded_chunks": {},
-        "relevant_document_ids": ["papers/5e80f8764192bbf0"],
+        "relevant_document_ids": [
+          "papers/5e80f8764192bbf0"
+        ],
         "reference_answer": "The bibliography cites distributive-justice and global-ethics works, including Pogge's 'World Poverty and Human Rights' and Gewirth's 'Human Rights: Essays on Justification and Application,' among others."
       },
-      "provenance": {"source": "human", "verified_by": "luis", "verified_at": "2026-09-04"},
+      "provenance": {
+        "source": "synthetic",
+        "verified_by": "luis",
+        "verified_at": "2026-09-04"
+      },
       "query_type": "factual",
       "difficulty": "hard",
       "expected_behaviour": "grounded_answer",
@@ -505,10 +585,16 @@
       "query": "What does the paper mean by technologists 'standing on the shoulders of giants'?",
       "expected": {
         "graded_chunks": {},
-        "relevant_document_ids": ["papers/5e80f8764192bbf0"],
+        "relevant_document_ids": [
+          "papers/5e80f8764192bbf0"
+        ],
         "reference_answer": "It refers to technologists drawing commercial value from centuries of accumulated, collectively-produced knowledge and infrastructure they did not personally create, which the paper argues creates a debt of reciprocity to the broader community that sustained that shared knowledge."
       },
-      "provenance": {"source": "human", "verified_by": "luis", "verified_at": "2026-09-04"},
+      "provenance": {
+        "source": "synthetic",
+        "verified_by": "luis",
+        "verified_at": "2026-09-04"
+      },
       "query_type": "paraphrase",
       "difficulty": "medium",
       "expected_behaviour": "grounded_answer",
@@ -520,21 +606,38 @@
       "query": "How does the Transformer paper's approach to improving model capability differ from meta-prompting's approach?",
       "expected": {
         "graded_chunks": {},
-        "relevant_document_ids": ["papers/50455611c3ed8b48", "papers/75c2c05bec38ceb9"],
-        "reference_answer": "The Transformer paper improves capability through architectural innovation — replacing recurrence with self-attention inside the model itself — while meta-prompting improves capability at inference time, orchestrating a fixed model through expert personas and tool use without changing its architecture."
+        "relevant_document_ids": [
+          "papers/50455611c3ed8b48",
+          "papers/75c2c05bec38ceb9"
+        ],
+        "reference_answer": "The Transformer paper improves capability through architectural innovation \u2014 replacing recurrence with self-attention inside the model itself \u2014 while meta-prompting improves capability at inference time, orchestrating a fixed model through expert personas and tool use without changing its architecture."
       },
-      "provenance": {"source": "human", "verified_by": "luis", "verified_at": "2026-09-04"},
+      "provenance": {
+        "source": "synthetic",
+        "verified_by": "luis",
+        "verified_at": "2026-09-04"
+      },
       "query_type": "cross_document",
       "difficulty": "hard",
       "expected_behaviour": "grounded_answer",
       "suites": [],
-      "excluded_from": ["sp2"]
+      "excluded_from": [
+        "sp2"
+      ]
     },
     {
       "id": "negative_cooking_ribeye",
       "query": "What is the recommended cooking time for a medium-rare ribeye?",
-      "expected": {"graded_chunks": {}, "relevant_document_ids": [], "reference_answer": ""},
-      "provenance": {"source": "human", "verified_by": "luis", "verified_at": "2026-09-04"},
+      "expected": {
+        "graded_chunks": {},
+        "relevant_document_ids": [],
+        "reference_answer": ""
+      },
+      "provenance": {
+        "source": "synthetic",
+        "verified_by": "luis",
+        "verified_at": "2026-09-04"
+      },
       "query_type": "factual",
       "difficulty": "easy",
       "expected_behaviour": "refusal",
@@ -544,8 +647,16 @@
     {
       "id": "negative_world_cup_winner",
       "query": "Who won the most recent World Cup final?",
-      "expected": {"graded_chunks": {}, "relevant_document_ids": [], "reference_answer": ""},
-      "provenance": {"source": "human", "verified_by": "luis", "verified_at": "2026-09-04"},
+      "expected": {
+        "graded_chunks": {},
+        "relevant_document_ids": [],
+        "reference_answer": ""
+      },
+      "provenance": {
+        "source": "synthetic",
+        "verified_by": "luis",
+        "verified_at": "2026-09-04"
+      },
       "query_type": "factual",
       "difficulty": "easy",
       "expected_behaviour": "refusal",
@@ -555,8 +666,16 @@
     {
       "id": "negative_wine_stain_removal",
       "query": "What's the best way to remove a red wine stain from a white carpet?",
-      "expected": {"graded_chunks": {}, "relevant_document_ids": [], "reference_answer": ""},
-      "provenance": {"source": "human", "verified_by": "luis", "verified_at": "2026-09-04"},
+      "expected": {
+        "graded_chunks": {},
+        "relevant_document_ids": [],
+        "reference_answer": ""
+      },
+      "provenance": {
+        "source": "synthetic",
+        "verified_by": "luis",
+        "verified_at": "2026-09-04"
+      },
       "query_type": "factual",
       "difficulty": "easy",
       "expected_behaviour": "refusal",
@@ -566,8 +685,16 @@
     {
       "id": "negative_wifi_router_reset",
       "query": "How do I reset my home Wi-Fi router to factory settings?",
-      "expected": {"graded_chunks": {}, "relevant_document_ids": [], "reference_answer": ""},
-      "provenance": {"source": "human", "verified_by": "luis", "verified_at": "2026-09-04"},
+      "expected": {
+        "graded_chunks": {},
+        "relevant_document_ids": [],
+        "reference_answer": ""
+      },
+      "provenance": {
+        "source": "synthetic",
+        "verified_by": "luis",
+        "verified_at": "2026-09-04"
+      },
       "query_type": "factual",
       "difficulty": "easy",
       "expected_behaviour": "refusal",
@@ -577,8 +704,16 @@
     {
       "id": "negative_reykjavik_timezone",
       "query": "What time zone is Reykjavik in during the summer?",
-      "expected": {"graded_chunks": {}, "relevant_document_ids": [], "reference_answer": ""},
-      "provenance": {"source": "human", "verified_by": "luis", "verified_at": "2026-09-04"},
+      "expected": {
+        "graded_chunks": {},
+        "relevant_document_ids": [],
+        "reference_answer": ""
+      },
+      "provenance": {
+        "source": "synthetic",
+        "verified_by": "luis",
+        "verified_at": "2026-09-04"
+      },
       "query_type": "factual",
       "difficulty": "easy",
       "expected_behaviour": "refusal",
