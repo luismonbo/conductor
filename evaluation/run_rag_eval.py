@@ -80,7 +80,7 @@ def main() -> int:
     if not dataset.cases:
         print(
             "No cases to run (dataset is empty or filters matched nothing). "
-            "Populate evaluation/rag/datasets/papers_v1.json once real papers are ingested.",
+            "Populate evaluation/rag/datasets/papers_v2.json once real papers are ingested.",
             file=sys.stderr,
         )
         return 1
