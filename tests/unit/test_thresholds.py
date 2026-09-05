@@ -4,7 +4,7 @@ import pytest
 
 from evaluation.harness.metric import MetricResult
 from evaluation.harness.report import CaseReport, EvalReport
-from evaluation.rag.thresholds import Gate, evaluate_gates, load_gates
+from evaluation.rag.thresholds import Gate, evaluate_gates, gate_or_fail, load_gates
 
 
 def _report(score: float, metric: str = "ndcg_at_k") -> EvalReport:
@@ -88,3 +88,41 @@ def test_gate_without_rationale_is_rejected(tmp_path):
 
 def test_missing_file_means_no_gates(tmp_path):
     assert load_gates(tmp_path / "absent.yaml") == []
+
+
+def test_gate_or_fail_returns_0_when_no_gates(tmp_path, capsys):
+    path = tmp_path / "t.yaml"
+    path.write_text("gates: []\n")
+
+    assert gate_or_fail(_report(0.5), path) == 0
+    assert "GATE FAILURES" not in capsys.readouterr().err
+
+
+def test_gate_or_fail_returns_0_when_gate_satisfied(tmp_path, capsys):
+    path = tmp_path / "t.yaml"
+    path.write_text(
+        "gates:\n"
+        "  - metric: ndcg_at_k\n"
+        "    granularity: chunk\n"
+        "    min_mean: 0.5\n"
+        "    rationale: x\n"
+    )
+
+    assert gate_or_fail(_report(0.8), path) == 0
+    assert "GATE FAILURES" not in capsys.readouterr().err
+
+
+def test_gate_or_fail_returns_1_and_prints_failures_when_gate_fails(tmp_path, capsys):
+    path = tmp_path / "t.yaml"
+    path.write_text(
+        "gates:\n"
+        "  - metric: ndcg_at_k\n"
+        "    granularity: chunk\n"
+        "    min_mean: 0.9\n"
+        "    rationale: x\n"
+    )
+
+    assert gate_or_fail(_report(0.5), path) == 1
+    err = capsys.readouterr().err
+    assert "GATE FAILURES" in err
+    assert "ndcg_at_k" in err

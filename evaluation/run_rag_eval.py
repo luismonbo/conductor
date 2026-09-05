@@ -113,7 +113,7 @@ def main() -> int:
     report.print_summary()
     print(f"Report saved -> {out_path}")
 
-    return gate_or_fail(report, _EVAL_DIR / "rag" / "thresholds.yaml")
+    return gate_or_fail(report, _EVAL_DIR / "rag" / "thresholds_generation.yaml")
 
 
 if __name__ == "__main__":

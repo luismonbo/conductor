@@ -53,7 +53,7 @@ def load_gates(path: Path) -> list[Gate]:
     return gates
 
 
-def evaluate_gates(gates: list[Gate], report) -> list[str]:
+def evaluate_gates(gates: list[Gate], report: EvalReport) -> list[str]:
     """Return one message per failed gate. Empty list means the run passes."""
     rows = {(row["metric"], row["granularity"]): row for row in report.aggregate()}
     failures: list[str] = []
@@ -61,13 +61,13 @@ def evaluate_gates(gates: list[Gate], report) -> list[str]:
         row = rows.get((gate.metric, gate.granularity))
         if row is None:
             failures.append(
-                f"{gate.metric} ({gate.granularity or 'any'}): not present in this run — "
+                f"{gate.metric} (granularity={gate.granularity}): not present in this run — "
                 "the gate cannot be evaluated, which is a failure, not a pass."
             )
             continue
         if row["mean"] < gate.min_mean:
             failures.append(
-                f"{gate.metric} ({gate.granularity or 'any'}): mean {row['mean']} "
+                f"{gate.metric} (granularity={gate.granularity}): mean {row['mean']} "
                 f"below threshold {gate.min_mean} over n={row['n']} — {gate.rationale}"
             )
     return failures
