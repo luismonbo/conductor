@@ -8,6 +8,7 @@ RagPipeline already composes Retriever as a separate collaborator; this uses
 that seam rather than adding a mode flag to RagRunner, so "does this run cost
 money" stays a structural property rather than a runtime one.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -74,17 +75,25 @@ def verify_corpus(expected: RagCorpus, actual: dict[str, int]) -> None:
 
 
 class RetrievalRunner:
-    def __init__(self, retriever: Retriever, config: RetrievalConfig | None = None) -> None:
+    def __init__(
+        self, retriever: Retriever, config: RetrievalConfig | None = None
+    ) -> None:
         self._retriever = retriever
         self._config = config or RetrievalConfig()
 
     def run(
-        self, dataset: RagDataset, metrics: list[RetrievalMetric], dataset_name: str = "dataset"
+        self,
+        dataset: RagDataset,
+        metrics: list[RetrievalMetric],
+        dataset_name: str = "dataset",
     ) -> EvalReport:
         return asyncio.run(self.run_async(dataset, metrics, dataset_name))
 
     async def run_async(
-        self, dataset: RagDataset, metrics: list[RetrievalMetric], dataset_name: str = "dataset"
+        self,
+        dataset: RagDataset,
+        metrics: list[RetrievalMetric],
+        dataset_name: str = "dataset",
     ) -> EvalReport:
         report = EvalReport(
             run_id=EvalReport.make_run_id(),
@@ -105,7 +114,10 @@ class RetrievalRunner:
             )
         except Exception as exc:
             return CaseReport(
-                case_id=case.id, input=case.query, passed=False, error=str(exc),
+                case_id=case.id,
+                input=case.query,
+                passed=False,
+                error=str(exc),
                 query_type=case.query_type,
                 latency_ms=(time.perf_counter() - started) * 1000,
             )

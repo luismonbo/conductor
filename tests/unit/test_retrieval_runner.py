@@ -22,8 +22,13 @@ class FakeRetriever:
         self.calls.append((query, k, collection))
         return [
             ScoredChunk(
-                chunk=Chunk(chunk_id=cid, document_id="d1", collection="papers",
-                            text="x", section_path=()),
+                chunk=Chunk(
+                    chunk_id=cid,
+                    document_id="d1",
+                    collection="papers",
+                    text="x",
+                    section_path=(),
+                ),
                 score=1.0,
             )
             for cid in self._chunk_ids[:k]
@@ -38,17 +43,26 @@ class CountingMetric:
 
     async def score(self, case, retrieved) -> MetricResult:
         self.seen.append(len(retrieved))
-        return MetricResult(name=self.name, passed=True, score=1.0,
-                            reason="ok", granularity="chunk")
+        return MetricResult(
+            name=self.name, passed=True, score=1.0, reason="ok", granularity="chunk"
+        )
 
 
 def _dataset() -> RagDataset:
     return RagDataset(
         cases=[
-            RagEvalCase(id="c1", query="q1",
-                        expected=RagExpected(graded_chunks={"a": 3}), query_type="factual"),
-            RagEvalCase(id="c2", query="q2",
-                        expected=RagExpected(graded_chunks={"b": 2}), query_type="multi_hop"),
+            RagEvalCase(
+                id="c1",
+                query="q1",
+                expected=RagExpected(graded_chunks={"a": 3}),
+                query_type="factual",
+            ),
+            RagEvalCase(
+                id="c2",
+                query="q2",
+                expected=RagExpected(graded_chunks={"b": 2}),
+                query_type="multi_hop",
+            ),
         ],
         corpus=RagCorpus(collection="papers", documents={"d1": 2}),
     )
