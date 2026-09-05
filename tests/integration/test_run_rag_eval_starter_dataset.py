@@ -16,9 +16,8 @@ _DATASET_PATH = (
 )
 
 _SKIP_REASON = (
-    "papers_v2.json does not exist yet — it lands in Task 11 (Build the "
-    "dataset — HUMAN IN THE LOOP). This suite turns real automatically once "
-    "that file is created."
+    "papers_v2.json does not exist. This suite turns real automatically once "
+    "that file is created (see evaluation/rag/datasets/README.md)."
 )
 
 
