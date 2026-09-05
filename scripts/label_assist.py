@@ -79,19 +79,21 @@ def _prompt_grade(rank: int, scored: ScoredChunk) -> int:
         print("  Enter 0, 1, 2 or 3.")
 
 
-async def _pool(args: argparse.Namespace) -> list[ScoredChunk]:
+async def _pool(args: argparse.Namespace) -> tuple[list[ScoredChunk], dict[str, int]]:
     # Quota off while pooling: the pool should be the retriever's raw top-N so
     # grading is not biased by a per-document cap. build_retriever reads the
     # quota from settings, so it is overridden here rather than passed.
     settings = get_settings().model_copy(update={"rag_per_document_k": 0})
     store = build_vector_store(settings, args.vector_store)
     retriever = build_retriever(settings, store)
-    return await retriever.retrieve(args.query, args.depth, args.collection)
+    pool = await retriever.retrieve(args.query, args.depth, args.collection)
+    corpus_stats = await store.document_stats(collection=args.collection)
+    return pool, corpus_stats
 
 
 def main() -> int:
     args = _parse_args()
-    pool = asyncio.run(_pool(args))
+    pool, corpus_stats = asyncio.run(_pool(args))
     if not pool:
         print("Retrieval returned nothing — is the index populated?", file=sys.stderr)
         return 1
@@ -146,7 +148,7 @@ def main() -> int:
             "version": "2.0",
             "corpus": {
                 "collection": args.collection,
-                "documents": {},
+                "documents": corpus_stats,
                 "verified_at": date.today().isoformat(),
             },
             "cases": [],
@@ -155,10 +157,6 @@ def main() -> int:
     doc["cases"] = [c for c in doc["cases"] if c["id"] != args.case_id] + [case]
     path.write_text(json.dumps(doc, indent=2) + "\n")
     print(f"\nWrote case '{args.case_id}' -> {path}")
-    print(
-        "Remember to refresh the corpus fingerprint (scripts/label_assist.py --refresh-corpus "
-        "is not implemented; see Task 11 Step 2)."
-    )
     return 0
 
 
