@@ -34,6 +34,14 @@ class RetrievalConfig:
     runner's private state because recall@k, MRR and nDCG@k are not comparable
     across different k — it was always part of benchmark identity.
 
+    CAUTION: only `k` and `collection` are actually passed to `Retriever.retrieve()`
+    by RetrievalRunner. `per_document_k` and `overfetch` take effect only through
+    whichever concrete Retriever object was built by `build_retriever(settings, ...)`
+    *before* this config was constructed — build_retriever reads them from Settings,
+    not from this dataclass. Setting them here without also rebuilding a matching
+    retriever records a manifest that does not describe what actually ran. Whoever
+    writes an SP2 sweep must keep the two in sync explicitly.
+
     SP2 adds: dense_weight, sparse_weight, rerank_model, rerank_top_n,
     contextual_retrieval.
     """
