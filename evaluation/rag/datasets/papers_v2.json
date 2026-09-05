@@ -1,0 +1,589 @@
+{
+  "version": "2.0",
+  "corpus": {
+    "collection": "papers",
+    "documents": {
+      "papers/50455611c3ed8b48": 43,
+      "papers/5e80f8764192bbf0": 59,
+      "papers/75c2c05bec38ceb9": 46
+    },
+    "verified_at": "2026-09-04"
+  },
+  "cases": [
+    {
+      "id": "transformer_encoder_layers",
+      "query": "How many layers are in the encoder stack of the Transformer?",
+      "expected": {
+        "graded_chunks": {
+          "papers/50455611c3ed8b48:4": 3,
+          "papers/50455611c3ed8b48:3": 1,
+          "papers/50455611c3ed8b48:9": 1,
+          "papers/50455611c3ed8b48:10": 1,
+          "papers/50455611c3ed8b48:0": 1,
+          "papers/50455611c3ed8b48:22": 1
+        },
+        "relevant_document_ids": [
+          "papers/50455611c3ed8b48"
+        ],
+        "reference_answer": "The encoder is composed of a stack of N = 6 identical layers. Each layer has two sub-layers. The first is a multi-head self-attention mechanism, and the second is a simple, position-wise fully connected feed-forward network."
+      },
+      "provenance": {
+        "source": "human",
+        "verified_by": "luis",
+        "verified_at": "2026-09-04"
+      },
+      "query_type": "factual",
+      "difficulty": "medium",
+      "expected_behaviour": "grounded_answer",
+      "suites": [],
+      "excluded_from": []
+    },
+    {
+      "id": "meta_prompting_no_solution_recognition",
+      "query": "What benchmark does meta-prompting use to test whether the model recognizes when no valid solution exists?",
+      "expected": {
+        "graded_chunks": {
+          "papers/75c2c05bec38ceb9:24": 1,
+          "papers/75c2c05bec38ceb9:36": 1,
+          "papers/75c2c05bec38ceb9:10": 2,
+          "papers/75c2c05bec38ceb9:0": 1,
+          "papers/75c2c05bec38ceb9:3": 1,
+          "papers/75c2c05bec38ceb9:8": 1,
+          "papers/75c2c05bec38ceb9:13": 2
+        },
+        "relevant_document_ids": [
+          "papers/75c2c05bec38ceb9"
+        ],
+        "reference_answer": "Based on the provided context, meta-prompting uses the Game of 24 (tested over 100 examples) and Checkmate (tested over 250 examples) benchmarks to test whether the model recognizes when no valid solution exists. Across both of these tasks, meta-prompting enabled the model to acknowledge the absence or impossibility of a valid solution significantly more often than standard prompting, favoring direct abstention\u2014such as reporting \"No valid solution found\"\u2014over providing a speculative but incorrect answer."
+      },
+      "provenance": {
+        "source": "human",
+        "verified_by": "luis",
+        "verified_at": "2026-09-04"
+      },
+      "query_type": "factual",
+      "difficulty": "medium",
+      "expected_behaviour": "grounded_answer",
+      "suites": [],
+      "excluded_from": []
+    },
+    {
+      "id": "forceps_opening_example",
+      "query": "What 17th-century medical invention does the paper use as its opening example of a beneficial technology?",
+      "expected": {
+        "graded_chunks": {
+          "papers/5e80f8764192bbf0:0": 3,
+          "papers/5e80f8764192bbf0:1": 2,
+          "papers/5e80f8764192bbf0:39": 1,
+          "papers/5e80f8764192bbf0:2": 1
+        },
+        "relevant_document_ids": [
+          "papers/5e80f8764192bbf0"
+        ],
+        "reference_answer": "Obstetric forceps, first developed and successfully trialed in the early 1600s by the Chamberlens, a family of barber-surgeons."
+      },
+      "provenance": {
+        "source": "human",
+        "verified_by": "luis",
+        "verified_at": "2026-09-04"
+      },
+      "query_type": "factual",
+      "difficulty": "easy",
+      "expected_behaviour": "grounded_answer",
+      "suites": [],
+      "excluded_from": []
+    },
+    {
+      "id": "meta_prompting_definition",
+      "query": "What is meta-prompting?",
+      "expected": {
+        "graded_chunks": {
+          "papers/75c2c05bec38ceb9:2": 2,
+          "papers/75c2c05bec38ceb9:36": 2,
+          "papers/75c2c05bec38ceb9:29": 1,
+          "papers/75c2c05bec38ceb9:0": 2,
+          "papers/75c2c05bec38ceb9:15": 2,
+          "papers/75c2c05bec38ceb9:13": 1,
+          "papers/75c2c05bec38ceb9:5": 2,
+          "papers/75c2c05bec38ceb9:4": 1,
+          "papers/75c2c05bec38ceb9:7": 1,
+          "papers/75c2c05bec38ceb9:3": 1
+        },
+        "relevant_document_ids": [
+          "papers/75c2c05bec38ceb9"
+        ],
+        "reference_answer": "Meta-prompting is a task-agnostic scaffolding technique where a single language model acts as a central conductor that orchestrates multiple expert instances to solve complex problems. Instead of relying on task-specific examples or instructions, it employs a universal set of high-level instructions to decompose complex tasks into smaller sub-components, assign dynamic expert personas to handle each part, facilitate self-reflection and dynamic decision-making, and seamlessly integrate the varied outputs into a single, cohesive response."
+      },
+      "provenance": {
+        "source": "human",
+        "verified_by": "luis",
+        "verified_at": "2026-09-04"
+      },
+      "query_type": "definition",
+      "difficulty": "easy",
+      "expected_behaviour": "grounded_answer",
+      "suites": [],
+      "excluded_from": []
+    },
+    {
+      "id": "tree_of_knowledge_definition",
+      "query": "What does the paper mean by the 'global tree of knowledge' argument?",
+      "expected": {
+        "graded_chunks": {
+          "papers/5e80f8764192bbf0:25": 3,
+          "papers/5e80f8764192bbf0:28": 3,
+          "papers/5e80f8764192bbf0:31": 1,
+          "papers/5e80f8764192bbf0:32": 1,
+          "papers/5e80f8764192bbf0:30": 2,
+          "papers/5e80f8764192bbf0:27": 2,
+          "papers/5e80f8764192bbf0:42": 1
+        },
+        "relevant_document_ids": [
+          "papers/5e80f8764192bbf0"
+        ],
+        "reference_answer": "In the provided paper, the \"global tree of knowledge\" argument holds that modern scientific discoveries and technological breakthroughs are not isolated achievements, but rather built upon an immense intergenerational and global stock of shared ideas, data, methods, and infrastructure. Because technology developers actively generate commercial value by \"standing on the shoulders of giants\"\u2014drawing from centuries of historical knowledge alongside a contemporary, globally distributed ecosystem of labor, resources, data, and publicly funded infrastructure\u2014they owe a debt of fair reciprocity to the worldwide community. Consequently, the argument asserts that the material benefits generated from advanced technologies morally belong to the world and should be broadly redistributed to support everyone who sustains this collective enterprise."
+      },
+      "provenance": {
+        "source": "human",
+        "verified_by": "luis",
+        "verified_at": "2026-09-04"
+      },
+      "query_type": "definition",
+      "difficulty": "medium",
+      "expected_behaviour": "grounded_answer",
+      "suites": [],
+      "excluded_from": []
+    },
+    {
+      "id": "transformer_optimizer_and_dropout",
+      "query": "What optimizer settings and regularization technique did the Transformer authors use during training?",
+      "expected": {
+        "graded_chunks": {
+          "papers/50455611c3ed8b48:20": 1,
+          "papers/50455611c3ed8b48:29": 2,
+          "papers/50455611c3ed8b48:26": 1
+        },
+        "relevant_document_ids": [
+          "papers/50455611c3ed8b48"
+        ],
+        "reference_answer": "During training, the Transformer authors used the Adam optimizer with parameters $\\beta_1 = 0.9$, $\\beta_2 = 0.98$, and $\\epsilon = 10^{-9}$, combined with a dynamic learning rate schedule that scaled inversely with the square root of the step count after a 4,000-step linear warmup period. For regularization, they employed residual dropout applied to sub-layer outputs and embedding sums\u2014using a rate of 0.1 for the base model and up to 0.3 for the large model\u2014alongside label smoothing with a value of 0.1 to prevent overconfidence and improve accuracy."
+      },
+      "provenance": {
+        "source": "human",
+        "verified_by": "luis",
+        "verified_at": "2026-09-04"
+      },
+      "query_type": "multi_hop",
+      "difficulty": "hard",
+      "expected_behaviour": "grounded_answer",
+      "suites": [],
+      "excluded_from": []
+    },
+    {
+      "id": "meta_prompting_fewshot_contrast",
+      "query": "What problem does meta-prompting solve that few-shot prompting does not?",
+      "expected": {
+        "graded_chunks": {
+          "papers/75c2c05bec38ceb9:2": 2,
+          "papers/75c2c05bec38ceb9:36": 1,
+          "papers/75c2c05bec38ceb9:13": 2,
+          "papers/75c2c05bec38ceb9:0": 1,
+          "papers/75c2c05bec38ceb9:7": 2,
+          "papers/75c2c05bec38ceb9:8": 1,
+          "papers/75c2c05bec38ceb9:14": 2
+        },
+        "relevant_document_ids": [
+          "papers/75c2c05bec38ceb9"
+        ],
+        "reference_answer": "While few-shot prompting relies on static, human-crafted exemplars to guide a model within a single context window, meta-prompting solves the problem of rigid, single-perspective execution and error propagation by establishing a task-agnostic \"orchestrator\" model that dynamically breaks down complex queries into subtasks. It solves this by assigning these subtasks to independent \"expert\" model instances, ensuring each expert approaches its assigned piece with \"fresh eyes\"\u2014unburdened by previous mistake-filled chat history that typically causes language models to double down on errors or hallucinate. Furthermore, meta-prompting resolves the need for manual, task-specific prompt creation by using a universal, high-level instruction framework that automatically manages expert creation, multi-step verification loops, and external tool execution (like Python interpreters) to iteratively validate and refine outputs."
+      },
+      "provenance": {
+        "source": "human",
+        "verified_by": "luis",
+        "verified_at": "2026-09-04"
+      },
+      "query_type": "multi_hop",
+      "difficulty": "hard",
+      "expected_behaviour": "grounded_answer",
+      "suites": [],
+      "excluded_from": []
+    },
+    {
+      "id": "global_benefit_objections_fairness",
+      "query": "What objections does the paper raise against the global-benefit argument, and how does it address the fairness concern about unevenly distributed benefits?",
+      "expected": {
+        "graded_chunks": {
+          "papers/5e80f8764192bbf0:21": 1,
+          "papers/5e80f8764192bbf0:32": 2,
+          "papers/5e80f8764192bbf0:20": 2,
+          "papers/5e80f8764192bbf0:42": 2,
+          "papers/5e80f8764192bbf0:22": 1,
+          "papers/5e80f8764192bbf0:33": 2,
+          "papers/5e80f8764192bbf0:18": 2,
+          "papers/5e80f8764192bbf0:41": 2,
+          "papers/5e80f8764192bbf0:23": 2,
+          "papers/5e80f8764192bbf0:14": 1
+        },
+        "relevant_document_ids": [
+          "papers/5e80f8764192bbf0"
+        ],
+        "reference_answer": "Arguments against the global-benefit view rely on libertarian ideals of intellectual property, individual effort, and passive reliance on public goods, asserting that inventors owe no collective debt simply for drawing on shared human knowledge. However, fairness demands a wider distribution of technological dividends to correct the \"lottery of birth,\" counteract systemic global economic injustice, and fulfill a debt of reciprocity to the massive intergenerational and planetary infrastructure that enables modern scientific breakthroughs. When traditional institutions fail to allocate these rewards fairly, the responsibility falls on those with the capacity and technological means to directly deliver material benefits to humanity."
+      },
+      "provenance": {
+        "source": "human",
+        "verified_by": "luis",
+        "verified_at": "2026-09-04"
+      },
+      "query_type": "multi_hop",
+      "difficulty": "hard",
+      "expected_behaviour": "grounded_answer",
+      "suites": [],
+      "excluded_from": []
+    },
+    {
+      "id": "transformer_sequential_processing_paraphrase",
+      "query": "Why did the authors move away from step-by-step sequential processing when designing this architecture?",
+      "expected": {
+        "graded_chunks": {
+          "papers/50455611c3ed8b48:2": 3,
+          "papers/50455611c3ed8b48:3": 2,
+          "papers/50455611c3ed8b48:1": 2,
+          "papers/50455611c3ed8b48:9": 1,
+          "papers/50455611c3ed8b48:7": 1,
+          "papers/50455611c3ed8b48:15": 1,
+          "papers/50455611c3ed8b48:14": 1
+        },
+        "relevant_document_ids": [
+          "papers/50455611c3ed8b48"
+        ],
+        "reference_answer": "The authors moved away from step-by-step sequential processing to overcome severe training bottlenecks and improve the model's ability to handle long-range dependencies. Sequential architectures like Recurrent Neural Networks (RNNs) generate hidden states $h_t$ as a function of $h_{t-1}$, preventing parallelization during training\u2014a critical constraint when scaling to longer sequence lengths across large datasets. Furthermore, sequentially passing information through many steps makes it difficult to learn relationships between distant words due to vanishing gradients, whereas the Transformer's self-attention mechanism processes all tokens simultaneously, reducing the path length between any two sequence positions to a single operation and drastically speeding up computation on modern hardware."
+      },
+      "provenance": {
+        "source": "human",
+        "verified_by": "luis",
+        "verified_at": "2026-09-04"
+      },
+      "query_type": "paraphrase",
+      "difficulty": "medium",
+      "expected_behaviour": "grounded_answer",
+      "suites": [],
+      "excluded_from": []
+    },
+    {
+      "id": "global_benefit_fairness_paraphrase",
+      "query": "Does creating something valuable for everyone automatically create a moral duty to share it fairly?",
+      "expected": {
+        "graded_chunks": {
+          "papers/5e80f8764192bbf0:29": 2,
+          "papers/5e80f8764192bbf0:32": 2,
+          "papers/5e80f8764192bbf0:12": 2,
+          "papers/5e80f8764192bbf0:44": 2,
+          "papers/5e80f8764192bbf0:42": 2,
+          "papers/5e80f8764192bbf0:22": 2,
+          "papers/5e80f8764192bbf0:18": 1,
+          "papers/5e80f8764192bbf0:27": 1,
+          "papers/5e80f8764192bbf0:14": 2,
+          "papers/5e80f8764192bbf0:16": 1,
+          "papers/5e80f8764192bbf0:40": 1,
+          "papers/5e80f8764192bbf0:23": 2,
+          "papers/5e80f8764192bbf0:26": 1,
+          "papers/5e80f8764192bbf0:30": 1
+        },
+        "relevant_document_ids": [
+          "papers/5e80f8764192bbf0"
+        ],
+        "reference_answer": "Critics arguing from libertarian or property-rights perspectives contend that creating a valuable technology generates no inherent moral obligation to distribute it broadly, as developers possess exclusive ownership over their intellectual labor and never consented to a global social contract. However, egalitarian and reciprocity-based frameworks assert that such a duty does exist because no technological innovation is created in isolation. Because modern breakthroughs rely on a shared \"Global Tree of Knowledge,\" public infrastructure, and a global labor force, fairness demands that creators return a dividend to humanity\u2014especially to mitigate the unchosen inequalities of the \"lottery of birth\" and counteract background economic injustices."
+      },
+      "provenance": {
+        "source": "human",
+        "verified_by": "luis",
+        "verified_at": "2026-09-04"
+      },
+      "query_type": "paraphrase",
+      "difficulty": "medium",
+      "expected_behaviour": "grounded_answer",
+      "suites": [],
+      "excluded_from": []
+    },
+    {
+      "id": "transformer_bleu_scores",
+      "query": "Does the paper report BLEU scores for English-to-German and English-to-French translation?",
+      "expected": {
+        "graded_chunks": {},
+        "relevant_document_ids": ["papers/50455611c3ed8b48"],
+        "reference_answer": "Yes, the paper reports BLEU scores for both the WMT 2014 English-to-German and English-to-French translation tasks, alongside the estimated training cost in FLOPs for each model compared."
+      },
+      "provenance": {"source": "human", "verified_by": "luis", "verified_at": "2026-09-04"},
+      "query_type": "factual",
+      "difficulty": "easy",
+      "expected_behaviour": "grounded_answer",
+      "suites": [],
+      "excluded_from": []
+    },
+    {
+      "id": "transformer_multihead_attention_decoder",
+      "query": "What role does multi-head attention play in the Transformer's decoder?",
+      "expected": {
+        "graded_chunks": {},
+        "relevant_document_ids": ["papers/50455611c3ed8b48"],
+        "reference_answer": "The decoder uses multi-head self-attention over its own previous outputs (masked to prevent attending to future positions) and a second multi-head attention layer that attends over the encoder's output."
+      },
+      "provenance": {"source": "human", "verified_by": "luis", "verified_at": "2026-09-04"},
+      "query_type": "reasoning",
+      "difficulty": "medium",
+      "expected_behaviour": "grounded_answer",
+      "suites": [],
+      "excluded_from": []
+    },
+    {
+      "id": "transformer_base_config_hyperparams",
+      "query": "What values of N, d_model, and number of attention heads define the base Transformer configuration?",
+      "expected": {
+        "graded_chunks": {},
+        "relevant_document_ids": ["papers/50455611c3ed8b48"],
+        "reference_answer": "The base model configuration uses N = 6 layers, d_model = 512, and h = 8 attention heads, per the hyperparameter settings table."
+      },
+      "provenance": {"source": "human", "verified_by": "luis", "verified_at": "2026-09-04"},
+      "query_type": "factual",
+      "difficulty": "medium",
+      "expected_behaviour": "grounded_answer",
+      "suites": [],
+      "excluded_from": []
+    },
+    {
+      "id": "transformer_acknowledgments",
+      "query": "Who do the authors thank in the acknowledgments section?",
+      "expected": {
+        "graded_chunks": {},
+        "relevant_document_ids": ["papers/50455611c3ed8b48"],
+        "reference_answer": "The authors thank Nal Kalchbrenner and Stephan Gouws for their comments, corrections, and inspiration."
+      },
+      "provenance": {"source": "human", "verified_by": "luis", "verified_at": "2026-09-04"},
+      "query_type": "factual",
+      "difficulty": "easy",
+      "expected_behaviour": "grounded_answer",
+      "suites": [],
+      "excluded_from": []
+    },
+    {
+      "id": "meta_prompting_tool_use_integration",
+      "query": "What tool-use capabilities does the meta-prompting framework integrate for tackling algorithmic problems?",
+      "expected": {
+        "graded_chunks": {},
+        "relevant_document_ids": ["papers/75c2c05bec38ceb9"],
+        "reference_answer": "Meta-prompting integrates external tool execution, such as a Python expert that generates and runs code, to handle algorithmic and computational tasks more reliably than pure language-only reasoning."
+      },
+      "provenance": {"source": "human", "verified_by": "luis", "verified_at": "2026-09-04"},
+      "query_type": "factual",
+      "difficulty": "medium",
+      "expected_behaviour": "grounded_answer",
+      "suites": [],
+      "excluded_from": []
+    },
+    {
+      "id": "meta_prompting_related_work_multiagent",
+      "query": "Which multi-agent or debate-based approaches does the related work section cite?",
+      "expected": {
+        "graded_chunks": {},
+        "relevant_document_ids": ["papers/75c2c05bec38ceb9"],
+        "reference_answer": "The related work cites approaches such as improving factuality and reasoning through multiagent debate, and AutoGen, a framework for multi-agent conversation-driven LLM applications."
+      },
+      "provenance": {"source": "human", "verified_by": "luis", "verified_at": "2026-09-04"},
+      "query_type": "factual",
+      "difficulty": "medium",
+      "expected_behaviour": "grounded_answer",
+      "suites": [],
+      "excluded_from": []
+    },
+    {
+      "id": "meta_prompting_python_puzzles_benchmark",
+      "query": "What programming puzzle benchmark is used to evaluate meta-prompting's coding performance?",
+      "expected": {
+        "graded_chunks": {},
+        "relevant_document_ids": ["papers/75c2c05bec38ceb9"],
+        "reference_answer": "Python Programming Puzzles is used to evaluate meta-prompting's coding performance, alongside other tasks like Checkmate-in-One and the Game of 24."
+      },
+      "provenance": {"source": "human", "verified_by": "luis", "verified_at": "2026-09-04"},
+      "query_type": "factual",
+      "difficulty": "easy",
+      "expected_behaviour": "grounded_answer",
+      "suites": [],
+      "excluded_from": []
+    },
+    {
+      "id": "meta_prompting_zeroshot_comparison",
+      "query": "How does meta-prompting's performance compare to standard zero-shot prompting across the evaluated benchmarks?",
+      "expected": {
+        "graded_chunks": {},
+        "relevant_document_ids": ["papers/75c2c05bec38ceb9"],
+        "reference_answer": "Meta-prompting consistently outperforms task-agnostic zero-shot baselines across the evaluated benchmarks, including notable gains on tasks like Checkmate-in-One."
+      },
+      "provenance": {"source": "human", "verified_by": "luis", "verified_at": "2026-09-04"},
+      "query_type": "reasoning",
+      "difficulty": "medium",
+      "expected_behaviour": "grounded_answer",
+      "suites": [],
+      "excluded_from": []
+    },
+    {
+      "id": "meta_prompting_self_reflection",
+      "query": "What role does self-reflection or dynamic decision-making play in the meta-prompting framework?",
+      "expected": {
+        "graded_chunks": {},
+        "relevant_document_ids": ["papers/75c2c05bec38ceb9"],
+        "reference_answer": "Meta-prompting's conductor model uses self-reflection and dynamic decision-making to evaluate expert outputs, decide when a sub-task needs to be redone, and manage the flow of information between experts before producing a final answer."
+      },
+      "provenance": {"source": "human", "verified_by": "luis", "verified_at": "2026-09-04"},
+      "query_type": "reasoning",
+      "difficulty": "medium",
+      "expected_behaviour": "grounded_answer",
+      "suites": [],
+      "excluded_from": []
+    },
+    {
+      "id": "global_benefit_lottery_of_birth",
+      "query": "What is the 'lottery of birth' concept used for in the paper's fairness argument?",
+      "expected": {
+        "graded_chunks": {},
+        "relevant_document_ids": ["papers/5e80f8764192bbf0"],
+        "reference_answer": "The 'lottery of birth' refers to the unchosen circumstances of where and to whom a person is born, which the paper uses to argue that unequal access to the benefits of technology compounds an already-arbitrary distribution of life chances, strengthening the case for broader redistribution."
+      },
+      "provenance": {"source": "human", "verified_by": "luis", "verified_at": "2026-09-04"},
+      "query_type": "reasoning",
+      "difficulty": "medium",
+      "expected_behaviour": "grounded_answer",
+      "suites": [],
+      "excluded_from": []
+    },
+    {
+      "id": "global_benefit_technologist_responsibility",
+      "query": "How does the paper characterize the ethical responsibility of technologists in a global age?",
+      "expected": {
+        "graded_chunks": {},
+        "relevant_document_ids": ["papers/5e80f8764192bbf0"],
+        "reference_answer": "The paper argues that because technology now shapes global opportunities and outcomes more than ever, technologists carry a heightened ethical responsibility to consider the worldwide distribution of the benefits their work creates."
+      },
+      "provenance": {"source": "human", "verified_by": "luis", "verified_at": "2026-09-04"},
+      "query_type": "reasoning",
+      "difficulty": "medium",
+      "expected_behaviour": "grounded_answer",
+      "suites": [],
+      "excluded_from": []
+    },
+    {
+      "id": "global_benefit_minor_cost_proviso",
+      "query": "What is the 'minor cost proviso' and which argument does it qualify?",
+      "expected": {
+        "graded_chunks": {},
+        "relevant_document_ids": ["papers/5e80f8764192bbf0"],
+        "reference_answer": "The minor cost proviso is a weaker, revised version of the global benefit argument, holding that beneficiaries owe redistribution only when doing so comes at little or no cost to themselves; the paper discusses objections to how broadly this proviso actually applies."
+      },
+      "provenance": {"source": "human", "verified_by": "luis", "verified_at": "2026-09-04"},
+      "query_type": "definition",
+      "difficulty": "hard",
+      "expected_behaviour": "grounded_answer",
+      "suites": [],
+      "excluded_from": []
+    },
+    {
+      "id": "global_benefit_bibliography_sources",
+      "query": "Which historical and philosophical works does the paper's bibliography draw on for its distributive-justice arguments?",
+      "expected": {
+        "graded_chunks": {},
+        "relevant_document_ids": ["papers/5e80f8764192bbf0"],
+        "reference_answer": "The bibliography cites distributive-justice and global-ethics works, including Pogge's 'World Poverty and Human Rights' and Gewirth's 'Human Rights: Essays on Justification and Application,' among others."
+      },
+      "provenance": {"source": "human", "verified_by": "luis", "verified_at": "2026-09-04"},
+      "query_type": "factual",
+      "difficulty": "hard",
+      "expected_behaviour": "grounded_answer",
+      "suites": [],
+      "excluded_from": []
+    },
+    {
+      "id": "global_benefit_shoulders_of_giants",
+      "query": "What does the paper mean by technologists 'standing on the shoulders of giants'?",
+      "expected": {
+        "graded_chunks": {},
+        "relevant_document_ids": ["papers/5e80f8764192bbf0"],
+        "reference_answer": "It refers to technologists drawing commercial value from centuries of accumulated, collectively-produced knowledge and infrastructure they did not personally create, which the paper argues creates a debt of reciprocity to the broader community that sustained that shared knowledge."
+      },
+      "provenance": {"source": "human", "verified_by": "luis", "verified_at": "2026-09-04"},
+      "query_type": "paraphrase",
+      "difficulty": "medium",
+      "expected_behaviour": "grounded_answer",
+      "suites": [],
+      "excluded_from": []
+    },
+    {
+      "id": "transformer_vs_metaprompting_capability",
+      "query": "How does the Transformer paper's approach to improving model capability differ from meta-prompting's approach?",
+      "expected": {
+        "graded_chunks": {},
+        "relevant_document_ids": ["papers/50455611c3ed8b48", "papers/75c2c05bec38ceb9"],
+        "reference_answer": "The Transformer paper improves capability through architectural innovation — replacing recurrence with self-attention inside the model itself — while meta-prompting improves capability at inference time, orchestrating a fixed model through expert personas and tool use without changing its architecture."
+      },
+      "provenance": {"source": "human", "verified_by": "luis", "verified_at": "2026-09-04"},
+      "query_type": "cross_document",
+      "difficulty": "hard",
+      "expected_behaviour": "grounded_answer",
+      "suites": [],
+      "excluded_from": ["sp2"]
+    },
+    {
+      "id": "negative_cooking_ribeye",
+      "query": "What is the recommended cooking time for a medium-rare ribeye?",
+      "expected": {"graded_chunks": {}, "relevant_document_ids": [], "reference_answer": ""},
+      "provenance": {"source": "human", "verified_by": "luis", "verified_at": "2026-09-04"},
+      "query_type": "factual",
+      "difficulty": "easy",
+      "expected_behaviour": "refusal",
+      "suites": [],
+      "excluded_from": []
+    },
+    {
+      "id": "negative_world_cup_winner",
+      "query": "Who won the most recent World Cup final?",
+      "expected": {"graded_chunks": {}, "relevant_document_ids": [], "reference_answer": ""},
+      "provenance": {"source": "human", "verified_by": "luis", "verified_at": "2026-09-04"},
+      "query_type": "factual",
+      "difficulty": "easy",
+      "expected_behaviour": "refusal",
+      "suites": [],
+      "excluded_from": []
+    },
+    {
+      "id": "negative_wine_stain_removal",
+      "query": "What's the best way to remove a red wine stain from a white carpet?",
+      "expected": {"graded_chunks": {}, "relevant_document_ids": [], "reference_answer": ""},
+      "provenance": {"source": "human", "verified_by": "luis", "verified_at": "2026-09-04"},
+      "query_type": "factual",
+      "difficulty": "easy",
+      "expected_behaviour": "refusal",
+      "suites": [],
+      "excluded_from": []
+    },
+    {
+      "id": "negative_wifi_router_reset",
+      "query": "How do I reset my home Wi-Fi router to factory settings?",
+      "expected": {"graded_chunks": {}, "relevant_document_ids": [], "reference_answer": ""},
+      "provenance": {"source": "human", "verified_by": "luis", "verified_at": "2026-09-04"},
+      "query_type": "factual",
+      "difficulty": "easy",
+      "expected_behaviour": "refusal",
+      "suites": [],
+      "excluded_from": []
+    },
+    {
+      "id": "negative_reykjavik_timezone",
+      "query": "What time zone is Reykjavik in during the summer?",
+      "expected": {"graded_chunks": {}, "relevant_document_ids": [], "reference_answer": ""},
+      "provenance": {"source": "human", "verified_by": "luis", "verified_at": "2026-09-04"},
+      "query_type": "factual",
+      "difficulty": "easy",
+      "expected_behaviour": "refusal",
+      "suites": [],
+      "excluded_from": []
+    }
+  ]
+}
