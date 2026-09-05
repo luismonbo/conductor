@@ -18,6 +18,7 @@ Parallel sweeps need pgvector, or sequential execution.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import sys
 from pathlib import Path
 
@@ -115,8 +116,6 @@ def main() -> int:
 
     store = build_vector_store(settings, backend=args.vector_store)
     if not args.skip_corpus_check:
-        import asyncio
-
         actual = asyncio.run(
             store.document_stats(collection=dataset.corpus.collection or None)
         )

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import statistics
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -107,7 +108,7 @@ class EvalReport:
         if not values:
             return None
         ordered = sorted(values)
-        p95_index = max(0, int(len(ordered) * 0.95) - 1)
+        p95_index = max(0, math.ceil(len(ordered) * 0.95) - 1)
         return {
             "mean_ms": round(statistics.fmean(ordered), 2),
             "median_ms": round(statistics.median(ordered), 2),

@@ -119,3 +119,19 @@ def test_aggregate_is_empty_when_every_result_is_skipped():
     )
 
     assert report.aggregate() == []
+
+
+def test_latency_summary_p95_uses_nearest_rank():
+    # _case() requires a positional query_type with no default, so the cases
+    # are built directly rather than adapting the shared helper's signature.
+    report = EvalReport(
+        run_id="r",
+        dataset="d",
+        cases=[
+            CaseReport(case_id=f"c{i}", input="q", passed=True, latency_ms=float(i))
+            for i in range(1, 21)
+        ],
+    )
+    # 20 values 1.0..20.0: nearest-rank p95 = ceil(0.95*20) = 19th smallest = 19.0
+    summary = report.latency_summary()
+    assert summary["p95_ms"] == 19.0

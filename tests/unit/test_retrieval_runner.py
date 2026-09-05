@@ -108,6 +108,8 @@ async def test_retriever_failure_is_captured_not_raised():
 
     assert report.cases[0].passed is False
     assert "index offline" in report.cases[0].error
+    assert report.cases[0].latency_ms is not None
+    assert report.cases[0].latency_ms >= 0
 
 
 def test_verify_corpus_passes_on_exact_match():
