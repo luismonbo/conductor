@@ -6,31 +6,17 @@ interface AppShellProps {
 
 export function AppShell({ children }: AppShellProps) {
   return (
-    <div style={{
-      minHeight: '100vh',
-      background: 'var(--bg)',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      padding: '24px',
-    }}>
-      <div
-        data-testid="app-shell-card"
-        style={{
-          width: '100%',
-          maxWidth: '900px',
-          height: 'calc(100vh - 48px)',
-          background: 'var(--surface)',
-          border: '1px solid var(--border)',
-          borderRadius: '12px',
-          boxShadow: 'var(--shadow-card)',
-          display: 'flex',
-          flexDirection: 'column',
-          overflow: 'hidden',
-        }}
+    <div
+      data-testid="app-shell-card"
+      className="flex h-[100dvh] w-full overflow-hidden bg-canvas font-sans text-fg"
+    >
+      <a
+        href="#main-content"
+        className="skip-link rounded-md bg-accent px-3 py-2 font-mono text-xs font-medium text-canvas"
       >
-        {children}
-      </div>
+        Skip to conversation
+      </a>
+      {children}
     </div>
   );
 }

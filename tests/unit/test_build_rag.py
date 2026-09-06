@@ -1,14 +1,20 @@
 """Unit tests for RAG-related factory functions in orchestration/build.py."""
+
 from __future__ import annotations
 
 from pathlib import Path
 
 import yaml
 
+from harness.adapters.normalization.routing_normalizer import RoutingNormalizer
 from harness.adapters.vectorstore.in_memory import InMemoryVectorStore
-from harness.config.settings import Settings
+from harness.config.settings import Settings, get_settings
 from harness.core.rag.serve import DiversifiedRetriever, Retriever
-from harness.orchestration.build import build_retriever, list_collections
+from harness.orchestration.build import (
+    build_ingestion_pipeline,
+    build_retriever,
+    list_collections,
+)
 
 
 def test_list_collections_empty_directory_returns_empty_list(tmp_path: Path):
@@ -55,3 +61,15 @@ def test_build_retriever_wraps_in_diversified_retriever_when_quota_enabled():
     retriever = build_retriever(settings, store)
 
     assert isinstance(retriever, DiversifiedRetriever)
+
+
+def test_ingestion_pipeline_uses_routing_normalizer_not_llm(monkeypatch):
+    # get_settings() reads the real .env by default (HARNESS_EMBEDDING_BACKEND
+    # may be azure there) and enforces HARNESS_API_KEY when auth is on — pin
+    # both here so this test is hermetic regardless of the local dev .env.
+    monkeypatch.setenv("HARNESS_EMBEDDING_BACKEND", "fake")
+    monkeypatch.setenv("HARNESS_API_KEY", "test-key")
+
+    pipeline = build_ingestion_pipeline(get_settings(), ["in_memory"])
+
+    assert isinstance(pipeline._normalizer, RoutingNormalizer)

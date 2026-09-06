@@ -4,6 +4,7 @@ This is the seam that lets you develop against Azure OpenAI and later swap in
 Gemma-4 on a Pi without touching the agent loop. The agent depends only on
 these Protocols; concrete clients live in adapters/llm/.
 """
+
 from __future__ import annotations
 
 from typing import AsyncGenerator, Protocol, runtime_checkable
@@ -17,8 +18,8 @@ class LLMClient(Protocol):
 
     Two call styles:
       generate() — blocking, returns one LLMResponse. Used by non-streaming
-                   callers (RagPipeline, LlmNormalizer, the RAG judge
-                   metrics) and as a convenience in tests.
+                   callers (RagPipeline, the RAG judge metrics) and as a
+                   convenience in tests.
       stream()   — async generator; yields str tokens as they arrive, then
                    yields a single LLMResponse as the final item carrying
                    tool_calls, usage, and finish_reason.

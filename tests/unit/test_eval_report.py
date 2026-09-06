@@ -1,4 +1,5 @@
 """Unit tests for EvalReport serialization and summary calculations."""
+
 import json
 import tempfile
 from pathlib import Path
@@ -48,11 +49,12 @@ class TestEvalReportSummary:
         r = EvalReport(run_id="x", dataset="d")
         assert r.pass_rate == 0.0
 
-    def test_by_metric_counts(self):
+    def test_aggregate_counts(self):
         r = _make_report([True, False])
-        by_metric = r._by_metric()
-        assert by_metric["tool_call"]["passed"] == 1
-        assert by_metric["tool_call"]["failed"] == 1
+        [row] = r.aggregate()
+        assert row["metric"] == "tool_call"
+        assert row["passed"] == 1
+        assert row["failed"] == 1
 
 
 class TestEvalReportSerialization:
@@ -71,7 +73,7 @@ class TestEvalReportSerialization:
         assert summary["passed"] == 1
         assert summary["failed"] == 1
         assert "pass_rate" in summary
-        assert "by_metric" in summary
+        assert "aggregate" in summary
 
     def test_case_shape(self):
         r = _make_report([True])

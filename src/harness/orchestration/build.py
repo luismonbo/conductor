@@ -5,6 +5,7 @@ selected LLM client, memory store, and tools, registers them, and returns a
 ready agent graph. Everything else depends only on protocols. Adding a backend
 means editing this file and nothing in core/.
 """
+
 from __future__ import annotations
 
 import logging
@@ -17,7 +18,6 @@ from harness.adapters.chunking.structure_aware import StructureAwareChunker
 from harness.adapters.embedding.fake import FakeEmbedder
 from harness.adapters.llm.parsers import NativeToolCallParser, PromptedToolCallParser
 from harness.adapters.memory.in_memory import InMemoryLongTerm
-from harness.adapters.normalization.llm_normalizer import LlmNormalizer
 from harness.config.settings import Settings
 from harness.core.llm.client import LLMClient
 from harness.core.llm.tool_parsing import ToolCallParser
@@ -157,22 +157,38 @@ def list_collections(index_config_dir: Path = Path("data/index_config")) -> list
 
 def build_parser_router():
     # Deferred: most callers (the API, most of the test suite) never parse a
-    # document, so there's no reason to pay markitdown's import cost for them.
+    # document, so there's no reason to pay markitdown's (or docling's) import
+    # cost for them. DoclingParser() itself imports docling lazily inside
+    # _convert, so constructing it here stays import-free too.
+    from harness.adapters.parsing.docling_parser import DoclingParser
+    from harness.adapters.parsing.markdown_passthrough import MarkdownPassthroughParser
     from harness.adapters.parsing.markitdown_parser import MarkitdownParser
     from harness.adapters.parsing.router import ParserRouter
 
-    return ParserRouter(markitdown=MarkitdownParser())
+    return ParserRouter(
+        markitdown=MarkitdownParser(),
+        markdown=MarkdownPassthroughParser(),
+        docling=DoclingParser(),
+    )
 
 
 def build_ingestion_pipeline(
     settings: Settings, vector_store_backends: list[str], tracer=None
 ) -> IngestionPipeline:
+    from harness.adapters.normalization.docling_normalizer import DoclingNormalizer
+    from harness.adapters.normalization.markdown_normalizer import MarkdownNormalizer
+    from harness.adapters.normalization.routing_normalizer import RoutingNormalizer
+
     return IngestionPipeline(
         parser=build_parser_router(),
-        normalizer=LlmNormalizer(build_llm(settings, build_parser(settings))),
+        normalizer=RoutingNormalizer(
+            markdown=MarkdownNormalizer(), docling=DoclingNormalizer()
+        ),
         chunker=StructureAwareChunker(),
         embedder=build_embedder(settings),
-        vector_stores=[build_vector_store(settings, backend) for backend in vector_store_backends],
+        vector_stores=[
+            build_vector_store(settings, backend) for backend in vector_store_backends
+        ],
         tracer=tracer,
     )
 
@@ -192,7 +208,9 @@ def build_rag_pipeline(
 
 
 def build_agent_registry(
-    settings: Settings, checkpointer, long_term: LongTermMemory | None = None,
+    settings: Settings,
+    checkpointer,
+    long_term: LongTermMemory | None = None,
 ) -> dict[str, object]:
     """Build and return all compiled agent graphs keyed by name.
 

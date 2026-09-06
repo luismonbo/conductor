@@ -3,7 +3,7 @@
 docs/
 CLAUDE.md
 .superpowers/
-
+data/.cache
 # Python
 __pycache__/
 *.py[cod]

@@ -12,6 +12,7 @@ bootstraps with CREATE TABLE IF NOT EXISTS, so a per-field column would need a
 migration mechanism the project doesn't have the first time Chunk gains a
 field. `metadata` stays its own column: it is what search filters query.
 """
+
 from __future__ import annotations
 
 import psycopg
@@ -62,7 +63,9 @@ def _chunk_from_row(row: dict) -> Chunk:
 
 
 class PgVectorStore:
-    def __init__(self, dsn: str, table: str = "rag_chunks", vector_size: int = 768) -> None:
+    def __init__(
+        self, dsn: str, table: str = "rag_chunks", vector_size: int = 768
+    ) -> None:
         self._dsn = dsn
         self._table = table
         self._vector_size = vector_size
@@ -95,7 +98,9 @@ class PgVectorStore:
             SQL(
                 "CREATE INDEX IF NOT EXISTS {idx} ON {table} "
                 "USING hnsw (embedding vector_cosine_ops)"
-            ).format(idx=Identifier(f"{self._table}_hnsw_idx"), table=Identifier(self._table))
+            ).format(
+                idx=Identifier(f"{self._table}_hnsw_idx"), table=Identifier(self._table)
+            )
         )
 
     async def upsert(self, chunks: list[Chunk], embeddings: list[list[float]]) -> None:
@@ -115,8 +120,12 @@ class PgVectorStore:
                     await cur.execute(
                         stmt,
                         (
-                            chunk.chunk_id, chunk.document_id, chunk.collection,
-                            chunk.text, Jsonb(dict(chunk.metadata)), Jsonb(_payload(chunk)),
+                            chunk.chunk_id,
+                            chunk.document_id,
+                            chunk.collection,
+                            chunk.text,
+                            Jsonb(dict(chunk.metadata)),
+                            Jsonb(_payload(chunk)),
                             Vector(embedding),
                         ),
                     )
@@ -138,8 +147,13 @@ class PgVectorStore:
             for key, value in (filters or {}).items():
                 where_parts.append(SQL("metadata ->> {} = %s").format(Literal(key)))
                 params.append(value)
-            where_sql = SQL("WHERE " + " AND ".join(["{}"] * len(where_parts))).format(*where_parts) \
-                if where_parts else SQL("")
+            where_sql = (
+                SQL("WHERE " + " AND ".join(["{}"] * len(where_parts))).format(
+                    *where_parts
+                )
+                if where_parts
+                else SQL("")
+            )
 
             stmt = SQL(
                 "SELECT chunk_id, document_id, collection, text, metadata, chunk_json, "
@@ -170,7 +184,9 @@ class PgVectorStore:
         conn = await self._connect()
         async with conn:
             if collection is None:
-                stmt = SQL("SELECT count(*) FROM {table}").format(table=Identifier(self._table))
+                stmt = SQL("SELECT count(*) FROM {table}").format(
+                    table=Identifier(self._table)
+                )
                 async with conn.cursor() as cur:
                     await cur.execute(stmt)
                     (n,) = await cur.fetchone()
@@ -183,8 +199,29 @@ class PgVectorStore:
                     (n,) = await cur.fetchone()
         return int(n)
 
+    async def document_stats(self, collection: str | None = None) -> dict[str, int]:
+        conn = await self._connect()
+        async with conn:
+            if collection is None:
+                stmt = SQL(
+                    "SELECT document_id, count(*) FROM {table} GROUP BY document_id"
+                ).format(table=Identifier(self._table))
+                params: tuple = ()
+            else:
+                stmt = SQL(
+                    "SELECT document_id, count(*) FROM {table} "
+                    "WHERE collection = %s GROUP BY document_id"
+                ).format(table=Identifier(self._table))
+                params = (collection,)
+            async with conn.cursor() as cur:
+                await cur.execute(stmt, params)
+                rows = await cur.fetchall()
+        return {document_id: int(n) for document_id, n in rows}
+
     async def drop(self) -> None:
         """Test-only cleanup — not part of the VectorStore protocol."""
         conn = await psycopg.AsyncConnection.connect(self._dsn, autocommit=True)
         async with conn:
-            await conn.execute(SQL("DROP TABLE IF EXISTS {table}").format(table=Identifier(self._table)))
+            await conn.execute(
+                SQL("DROP TABLE IF EXISTS {table}").format(table=Identifier(self._table))
+            )

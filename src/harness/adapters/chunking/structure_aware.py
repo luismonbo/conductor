@@ -1,6 +1,7 @@
 """Per-section chunking that respects document structure, splitting oversized
 sections with overlap. See the "Chunking" section of
 docs/superpowers/specs/2026-07-25-rag-ingestion-retrieval-design.md."""
+
 from __future__ import annotations
 
 from harness.core.rag.document import Chunk, DocumentSection, NormalizedDocument
@@ -26,7 +27,13 @@ class StructureAwareChunker:
     def chunk(self, document: NormalizedDocument) -> list[Chunk]:
         chunks: list[Chunk] = []
         index = 0
+        stack: list[tuple[int, str]] = []  # (level, title) of current ancestors
         for section in sorted(document.sections, key=lambda s: s.order):
+            if section.title:
+                while stack and stack[-1][0] >= section.level:
+                    stack.pop()
+                stack.append((section.level, section.title))
+            section_path = tuple(title for _, title in stack)
             for text in self._split_section(section):
                 chunks.append(
                     Chunk(
@@ -34,7 +41,7 @@ class StructureAwareChunker:
                         document_id=document.document_id,
                         collection=document.collection,
                         text=text,
-                        section_path=(section.title,) if section.title else (),
+                        section_path=section_path,
                         section_kind=section.kind,
                         order=index,
                         page_start=section.page_start,
@@ -66,4 +73,6 @@ class StructureAwareChunker:
     def _cap_chars(self, text: str) -> list[str]:
         if len(text) <= self._max_chars:
             return [text]
-        return [text[i : i + self._max_chars] for i in range(0, len(text), self._max_chars)]
+        return [
+            text[i : i + self._max_chars] for i in range(0, len(text), self._max_chars)
+        ]

@@ -5,45 +5,12 @@ interface ToolCallPillProps {
 
 export function ToolCallPill({ name, args }: ToolCallPillProps) {
   return (
-    <details
-      style={{
-        borderLeft: '2px solid var(--accent)',
-        paddingLeft: '10px',
-        margin: '4px 0',
-      }}
-    >
-      <summary
-        style={{
-          cursor: 'pointer',
-          fontFamily: 'var(--mono)',
-          fontSize: 'var(--text-xs)',
-          color: 'var(--text-muted)',
-          listStyle: 'none',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '6px',
-          padding: '3px 0',
-          userSelect: 'none',
-        }}
-      >
+    <details className="my-1 border-l-2 border-accent pl-2.5">
+      <summary className="flex list-none select-none items-center gap-1.5 py-0.5 font-mono text-xs text-fg-muted">
         <span>tool_call</span>
-        <span style={{ color: 'var(--text)', fontWeight: 500 }}>{name}</span>
+        <span className="font-medium text-fg">{name}</span>
       </summary>
-      <pre
-        style={{
-          margin: '6px 0 0',
-          padding: '8px',
-          background: 'var(--surface-raised)',
-          border: '1px solid var(--border)',
-          borderRadius: '4px',
-          fontFamily: 'var(--mono)',
-          fontSize: 'var(--text-xs)',
-          color: 'var(--text-code)',
-          overflowX: 'auto',
-          whiteSpace: 'pre-wrap',
-          wordBreak: 'break-all',
-        }}
-      >
+      <pre className="mt-1.5 overflow-x-auto whitespace-pre-wrap break-all rounded-sm border border-border bg-surface-raised p-2 font-mono text-xs text-fg-code">
         {JSON.stringify(args, null, 2)}
       </pre>
     </details>

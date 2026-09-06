@@ -7,6 +7,7 @@ import { MessageList } from '@/components/MessageList';
 import { ChatInput } from '@/components/ChatInput';
 import { ModelPicker } from '@/components/ModelPicker';
 import { ThreadSidebar } from '@/components/ThreadSidebar';
+import { SidebarSimple } from '@phosphor-icons/react';
 
 export function ChatPage() {
   const {
@@ -32,6 +33,7 @@ export function ChatPage() {
   const [models, setModels] = useState<string[]>([]);
   const [selectedModel, setSelectedModel] = useState<string>('');
   const [threads, setThreads] = useState<ThreadSummary[]>([]);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {
     fetchModels()
@@ -59,6 +61,7 @@ export function ChatPage() {
   }, [threadId]);
 
   const handleSelectThread = useCallback((id: string) => {
+    setSidebarOpen(false);
     loadThread(id)
       .then(() => {
         const stored = localStorage.getItem(`harness:model:${id}`);
@@ -70,6 +73,11 @@ export function ChatPage() {
       })
       .catch(() => { /* thread stays unloaded; sidebar unchanged */ });
   }, [loadThread, models]);
+
+  const handleNewThread = useCallback(() => {
+    setSidebarOpen(false);
+    newThread();
+  }, [newThread]);
 
   // Tool approval (legacy shape)
   const handleApprove = useCallback(() => resumeStream({ approved: true }), [resumeStream]);
@@ -86,84 +94,68 @@ export function ChatPage() {
   void interruptPayload; // used via MessageList → AssistantMessage discriminated union
 
   return (
-    <div style={{
-      display: 'flex',
-      height: '100%',
-    }}>
+    <>
       <ThreadSidebar
         threads={threads}
         activeThreadId={threadId}
         onSelect={handleSelectThread}
-        onNew={newThread}
+        onNew={handleNewThread}
+        open={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
       />
 
-      <div style={{
-        display: 'flex',
-        flexDirection: 'column',
-        height: '100%',
-        flex: 1,
-        minWidth: 0,
-      }}>
-      <header style={{
-        borderBottom: '1px solid var(--border)',
-        padding: '12px 16px',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        flexShrink: 0,
-      }}>
-        <span style={{
-          fontFamily: 'var(--mono)',
-          fontSize: 'var(--text-sm)',
-          color: 'var(--text-muted)',
-          letterSpacing: '0.08em',
-          textTransform: 'uppercase',
-        }}>
-          agent harness
-        </span>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <ModelPicker
-            models={models}
-            value={selectedModel}
-            onChange={handleModelChange}
-            disabled={inputDisabled}
+      <div className="flex h-full min-w-0 flex-1 flex-col">
+        <header className="flex flex-shrink-0 items-center justify-between gap-3 border-b border-border px-4 py-3">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setSidebarOpen(true)}
+              aria-label="Open conversations"
+              className="-ml-1.5 rounded-md p-1.5 text-fg-muted transition hover:text-fg active:scale-[0.98] md:hidden"
+            >
+              <SidebarSimple size={18} />
+            </button>
+            <span className="font-mono text-sm uppercase tracking-wider text-fg-muted">
+              agent harness
+            </span>
+          </div>
+          <div className="flex items-center gap-3">
+            <ModelPicker
+              models={models}
+              value={selectedModel}
+              onChange={handleModelChange}
+              disabled={inputDisabled}
+            />
+            <StatusBar streamStatus={streamStatus} currentTool={currentTool} />
+          </div>
+        </header>
+
+        {errorMessage && (
+          <div className="flex-shrink-0 border-b border-error/20 bg-error/[0.08] px-4 py-2 font-mono text-xs text-error">
+            {errorMessage}
+          </div>
+        )}
+
+        <main id="main-content" className="flex min-h-0 flex-1 flex-col">
+          <MessageList
+            messages={messages}
+            onApprove={handleApprove}
+            onReject={handleReject}
+            onFeedback={handleFeedback}
+            onMemoryApprove={handleMemoryApprove}
+            onMemoryDeny={handleMemoryDeny}
           />
-          <StatusBar streamStatus={streamStatus} currentTool={currentTool} />
-        </div>
-      </header>
+        </main>
 
-      {errorMessage && (
-        <div style={{
-          padding: '8px 16px',
-          background: 'rgba(248, 113, 113, 0.08)',
-          borderBottom: '1px solid rgba(248, 113, 113, 0.2)',
-          fontFamily: 'var(--mono)',
-          fontSize: 'var(--text-xs)',
-          color: 'var(--color-error)',
-          flexShrink: 0,
-        }}>
-          {errorMessage}
-        </div>
-      )}
-
-      <MessageList
-        messages={messages}
-        onApprove={handleApprove}
-        onReject={handleReject}
-        onFeedback={handleFeedback}
-        onMemoryApprove={handleMemoryApprove}
-        onMemoryDeny={handleMemoryDeny}
-      />
-
-      <ChatInput
-        value={inputValue}
-        onChange={setInputValue}
-        onSend={() => sendMessage(inputValue, selectedModel || undefined)}
-        onCancel={cancelStream}
-        streamStatus={streamStatus}
-        disabled={inputDisabled}
-      />
+        <ChatInput
+          value={inputValue}
+          onChange={setInputValue}
+          onSend={() => sendMessage(inputValue, selectedModel || undefined)}
+          onCancel={cancelStream}
+          streamStatus={streamStatus}
+          disabled={inputDisabled}
+        />
       </div>
-    </div>
+    </>
   );
 }

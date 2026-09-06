@@ -1,0 +1,18 @@
+# Pre-registered success criteria for the layer-3 (generation) RAG eval.
+#
+# Gates are written down BEFORE an experiment runs, never fitted after it.
+# Each needs a `rationale`; the loader rejects one without.
+#
+# Empty on purpose — see evaluation/rag/thresholds.yaml (the retrieval layer's
+# gate file) for why. This is a SEPARATE file from that one, not an oversight:
+# run_rag_eval.py only ever computes faithfulness/answer_relevancy, so a
+# retrieval metric gate (ndcg_at_k, recall_at_k, mrr) in a shared file would
+# permanently fail here with "not present in this run" the moment someone
+# populated it for the retrieval layer.
+#
+# Shape, once populated:
+#   - metric: faithfulness
+#     granularity: null
+#     min_mean: 0.8
+#     rationale: "..."
+gates: []

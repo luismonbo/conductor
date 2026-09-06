@@ -1,53 +1,45 @@
 # RAG eval datasets
 
-## Labeling convention
+## Schema v2
 
-`recall_at_k` scores **fractional** recall — `|retrieved ∩ expected| / |expected|` — so the
-label set determines what a perfect score means. Two rules keep that number honest:
+`papers_v2.json` is the eval dataset — three tiers of cases (chunk-graded, document-level,
+negative) against a corpus of three papers. See `evaluation/rag/dataset.py` for the loader and
+`RUBRIC.md` for how chunks are graded 0-3. Grading methodology lives in `RUBRIC.md` and is not
+duplicated here.
 
-1. **Label the minimal set of chunks that individually suffice to answer the question.**
-   Not every chunk that mentions the topic. If one passage answers it, list one id. Listing
-   three "related" chunks means a retriever that surfaces the answer-bearing one and nothing
-   else scores 0.33 despite fully answering the question.
-2. **List several ids only when the answer genuinely requires combining them** (e.g.
-   `meta_definition`, where the abstract and the method section each carry half the
-   definition).
+## Corpus fingerprint
 
-`relevant_document_ids` is the coarse fallback. `recall_at_k` prefers `relevant_chunk_ids`
-when present and only falls back to documents when the chunk list is empty — the denominator
-is never mixed across granularities.
+The dataset's `corpus.documents` field records `{document_id: chunk_count}` at the time it was
+labelled. `RetrievalRunner`/`verify_corpus()` (`evaluation/rag/retrieval_runner.py`) compares
+this against the live index at startup and fails loudly on drift. Current fingerprint:
+
+- `papers/50455611c3ed8b48` (Transformer / "Attention Is All You Need") — 43 chunks
+- `papers/75c2c05bec38ceb9` (Meta-Prompting) — 46 chunks
+- `papers/5e80f8764192bbf0` (globally-beneficial-technology) — 59 chunks
 
 ## Chunk ids are not stable across re-ingestion
 
-`chunk_id` is `{document_id}:{index}`, and the index comes from LLM-driven section
-normalization, which is **non-deterministic**. Re-ingesting the same PDF can renumber every
-chunk and silently invalidate every label here.
-
-`document_id` *is* stable — it hashes the parsed document text.
-
-So: after any re-ingest, chunking change, or embedding-model change, **re-verify the chunk
-ids** before trusting a recall number. Query them back rather than assuming:
+`chunk_id` is `{document_id}:{index}`. Re-ingesting a document — a parser change, a chunking
+change — can renumber every chunk and silently invalidate every chunk-level label. `document_id`
+is a hash of `(collection, source_path)`, not of chunk or document content (see
+`src/harness/core/rag/document.py`), so it survives re-chunking — only the fingerprint above
+catches a chunk-numbering change. After any re-ingest, run `evaluation/run_retrieval_eval.py`
+and let the fingerprint check fail loudly rather than trusting stale ids. To manually spot-check
+a chunk:
 
 ```sql
 SELECT chunk_id, chunk_json->>'section_path', left(text, 120)
 FROM rag_chunks
-WHERE chunk_id = 'papers/ad22e4e8c9f87f5e:5';
+WHERE chunk_id = '<document_id>:<index>';
 ```
 
-A label that no longer points at the intended passage does not error — it just quietly
-reports a retrieval failure that never happened.
+A label pointing at the wrong passage does not error on its own — it just quietly reports a
+retrieval failure that never happened.
 
-## papers_v1.json
+## papers_v1.json (deleted)
 
-Nine cases over two documents, all verified against the live index on 2026-07-27:
-
-- `attention-is-all-you-need.pdf` → `papers/ad22e4e8c9f87f5e` (41 chunks)
-- `Meta-Prompting.pdf` → `papers/23731d65a10a1398` (111 chunks)
-
-Tags: `smoke` (fast subset), `attention` / `meta-prompting` (per document), `factual`,
-`reasoning`, `definition`, `negative`.
-
-The `negative` case (`unanswerable_from_corpus`) has deliberately empty expectations, so
-both retrieval metrics skip it. It exists to exercise the grounding instruction: the answer
-should decline rather than answer from the model's own knowledge, which is what
-`faithfulness` scores.
+Superseded entirely by `papers_v2.json` (schema v2: graded 0-3 relevance replaces a binary label
+list, plus `provenance`, `suites`, `excluded_from`, and the corpus fingerprint above).
+`papers_v1.json`'s labels were invalidated by the `feat/rag-ingestion-v2` re-chunking and were
+never re-verified — see `docs/devlog/019-eval-retrieval-instruments.md` for the full rationale
+for rebuilding rather than migrating.

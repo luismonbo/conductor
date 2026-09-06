@@ -27,9 +27,12 @@ class _ScriptedAgent:
     replays canned tool-call/tool-result events into the tracer, exactly
     like a real agent run would, without depending on any concrete
     agent implementation."""
+
     output: str
     tool_calls: list[ToolCall] = field(default_factory=list)
-    tool_results: list[tuple[str, str, bool]] = field(default_factory=list)  # (name, content, is_error)
+    tool_results: list[tuple[str, str, bool]] = field(
+        default_factory=list
+    )  # (name, content, is_error)
     stopped_reason: str = "final_answer"
     tracer: object = None
 
@@ -38,18 +41,30 @@ class _ScriptedAgent:
             if self.tool_calls:
                 await self.tracer(
                     "llm_response",
-                    {"tool_calls": [{"name": tc.name, "arguments": tc.arguments} for tc in self.tool_calls]},
+                    {
+                        "tool_calls": [
+                            {"name": tc.name, "arguments": tc.arguments}
+                            for tc in self.tool_calls
+                        ]
+                    },
                 )
             for name, content, is_error in self.tool_results:
-                await self.tracer("tool_result", {"name": name, "content": content, "is_error": is_error})
-        return AgentResult(output=self.output, state=state, stopped_reason=self.stopped_reason)
+                await self.tracer(
+                    "tool_result",
+                    {"name": name, "content": content, "is_error": is_error},
+                )
+        return AgentResult(
+            output=self.output, state=state, stopped_reason=self.stopped_reason
+        )
 
 
 def _make_calc_agent(tracer, memory_seed=None):
     """Build a scripted agent that calls calculator then gives a final answer."""
     return _ScriptedAgent(
         output="The result of 12 * 9 is 108.",
-        tool_calls=[ToolCall(id="tc_1", name="calculator", arguments={"expression": "12 * 9"})],
+        tool_calls=[
+            ToolCall(id="tc_1", name="calculator", arguments={"expression": "12 * 9"})
+        ],
         tool_results=[("calculator", "108", False)],
         tracer=tracer,
     )
@@ -109,7 +124,7 @@ class TestEvalRunnerSmoke:
         for mr in case.metric_results:
             assert mr.passed, f"{mr.name} failed: {mr.reason}"
 
-    def test_report_has_correct_by_metric_counts(self):
+    def test_report_has_correct_aggregate_counts(self):
         dataset = Dataset.load(_DATASETS_DIR / "tool_use_v1.json").filter_by_tags(
             ["smoke"]
         )
@@ -117,7 +132,7 @@ class TestEvalRunnerSmoke:
         runner = EvalRunner(_make_calc_agent)
         report = runner.run(dataset, metrics, dataset_name="tool_use_v1.json")
 
-        by_metric = report._by_metric()
+        rows = {row["metric"]: row for row in report.aggregate()}
         for name in ("tool_call", "arg_schema", "output_contains"):
-            assert by_metric[name]["passed"] == 1
-            assert by_metric[name]["failed"] == 0
+            assert rows[name]["passed"] == 1
+            assert rows[name]["failed"] == 0

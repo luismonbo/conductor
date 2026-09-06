@@ -5,5 +5,5 @@ chunk_version: 1
 vector_stores:
 - pgvector
 - milvus
-documents_ingested: 3
+documents_ingested: 4
 documents_failed: 0

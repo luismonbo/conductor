@@ -7,47 +7,17 @@ interface ToolResultPillProps {
 export function ToolResultPill({ text, name, is_error }: ToolResultPillProps) {
   return (
     <details
-      className={is_error ? 'error-result' : undefined}
-      style={{
-        borderLeft: `2px solid ${is_error ? 'var(--color-error)' : 'var(--border)'}`,
-        paddingLeft: '10px',
-        margin: '4px 0',
-      }}
+      className={`my-1 pl-2.5 ${is_error ? 'error-result border-l-2 border-error' : 'border-l-2 border-border'}`}
     >
-      <summary
-        style={{
-          cursor: 'pointer',
-          fontFamily: 'var(--mono)',
-          fontSize: 'var(--text-xs)',
-          color: 'var(--text-muted)',
-          listStyle: 'none',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '6px',
-          padding: '3px 0',
-          userSelect: 'none',
-        }}
-      >
+      <summary className="flex list-none select-none items-center gap-1.5 py-0.5 font-mono text-xs text-fg-muted">
         <span>tool_result</span>
-        <span style={{ color: is_error ? 'var(--color-error)' : 'var(--text)' }}>{name}</span>
-        {is_error && (
-          <span style={{ color: 'var(--color-error)', fontSize: 'var(--text-xs)' }}>error</span>
-        )}
+        <span className={is_error ? 'text-error' : 'text-fg'}>{name}</span>
+        {is_error && <span className="font-mono text-xs text-error">error</span>}
       </summary>
       <pre
-        style={{
-          margin: '6px 0 0',
-          padding: '8px',
-          background: 'var(--surface-raised)',
-          border: `1px solid ${is_error ? 'rgba(248,113,113,0.3)' : 'var(--border)'}`,
-          borderRadius: '4px',
-          fontFamily: 'var(--mono)',
-          fontSize: 'var(--text-xs)',
-          color: is_error ? 'var(--color-error)' : 'var(--text)',
-          overflowX: 'auto',
-          whiteSpace: 'pre-wrap',
-          wordBreak: 'break-all',
-        }}
+        className={`mt-1.5 overflow-x-auto whitespace-pre-wrap break-all rounded-sm border bg-surface-raised p-2 font-mono text-xs ${
+          is_error ? 'border-error/30 text-error' : 'border-border text-fg'
+        }`}
       >
         {text}
       </pre>

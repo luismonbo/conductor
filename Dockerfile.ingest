@@ -1,0 +1,79 @@
+# syntax=docker/dockerfile:1
+
+# Separate, lean image for offline RAG ingestion — kept out of the api image
+# (src/harness/api/Dockerfile) because docling pulls in torch/transformers/
+# opencv, none of which the served API ever needs. Runs ONLY in this Linux
+# container: docling's torch + onnxruntime crash via libomp on macOS, see
+# harness/adapters/parsing/docling_parser.py.
+
+# ---- Builder: resolve dependencies + install the project ------------------
+FROM python:3.13-slim-trixie AS builder
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+ENV UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    UV_NO_DEV=1 \
+    UV_PROJECT_ENVIRONMENT=/app/.venv
+
+WORKDIR /app
+
+# Dependencies first, in their own layer, so code-only changes below don't
+# invalidate the install.
+#
+# Extras: only `docling` actually exists as an optional-dependency group in
+# pyproject.toml today — `azure`/`pgvector` support (azure-identity, pgvector,
+# psycopg) are unconditional base dependencies already, not gated behind
+# extras (the root Dockerfile's `--extra azure --extra pgvector` predates
+# that flattening and is stale/unreferenced by docker-compose.yml; `uv sync`
+# silently no-ops on an unknown --extra name rather than failing, so it never
+# surfaced as a build error — see task-9-report.md).
+#
+# `dev` (pytest/pytest-asyncio, plus ruff/mypy/fpdf2 along for the ride) is
+# included here too, deliberately: it lets the container-gated integration
+# test run as `docker compose --profile ingest run --rm --entrypoint pytest
+# ingest ...` against this same image, with no second test-only image to
+# build and maintain. The added weight is pure-Python and small next to the
+# torch/transformers/opencv stack docling already requires.
+COPY pyproject.toml uv.lock ./
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --locked --no-install-project --extra docling --extra dev
+
+COPY src/ src/
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --locked --extra docling --extra dev
+
+# ---- Runtime: no compiler, no uv, no build cache ---------------------------
+FROM python:3.13-slim-trixie AS runtime
+
+# upgrade: picks up Debian security patches already published for the base
+# image without waiting on a new python:3.13-slim-trixie release (see
+# `docker scout cves`, same rationale as the api Dockerfile).
+# Runtime libs, proven against docling==2.123.1 by an earlier container probe
+# (do not add/remove without re-verifying — see task-9-report.md):
+#   libgomp1       - onnxruntime dlopens it at import time (TableFormer, OCR)
+#   libgl1/libglib2.0-0/libxcb1/libsm6/libxext6/libxrender1
+#                  - OpenCV's runtime deps (docling's TableFormer pipeline)
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
+      libgomp1 libgl1 libglib2.0-0 libxcb1 libsm6 libxext6 libxrender1 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY --from=builder /app/.venv /app/.venv
+COPY --from=builder /app/src /app/src
+# pytest needs this at runtime to find [tool.pytest.ini_options]
+# (asyncio_mode = "auto", pythonpath) when the container-gated integration
+# test is run via `--entrypoint pytest` — without it pytest silently falls
+# back to strict asyncio mode and mishandles tests/integration/conftest.py's
+# async autouse fixture. Irrelevant to the normal `python -m
+# harness.cli.ingest` entrypoint, which never reads this file.
+COPY --from=builder /app/pyproject.toml /app/pyproject.toml
+
+ENV PATH="/app/.venv/bin:$PATH"
+# Model cache (docling downloads TableFormer/layout models on first run) and
+# HF_HOME both land under /app so they ride the `./data` bind mount's
+# filesystem rather than vanishing with the container — avoids re-downloading
+# on every `make ingest` invocation.
+ENV HF_HOME=/app/data/.cache/huggingface
+
+ENTRYPOINT ["python", "-m", "harness.cli.ingest"]

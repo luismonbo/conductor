@@ -10,6 +10,31 @@ services:
     environment:
       HARNESS_API_KEY: "${HARNESS_API_KEY:?HARNESS_API_KEY must be set}"
     depends_on: [api]
+  # Offline RAG ingestion — separate image from `api` (docling drags in
+  # torch/transformers/opencv; the served API never needs any of that).
+  # profiles: ["ingest"] keeps it out of `make up`/`docker compose up`;
+  # invoke via `make ingest COLLECTION=papers` or the profile flag directly.
+  ingest:
+    build: { context: ., dockerfile: Dockerfile.ingest }
+    profiles: ["ingest"]
+    env_file: .env
+    environment:
+      # .env's HARNESS_PGVECTOR_URL points at localhost, correct for a
+      # host-run process reaching postgres via its published port. Inside
+      # this container, postgres is a sibling reachable only by its
+      # Compose service name — same reason litellm overrides its DSN below.
+      HARNESS_PGVECTOR_URL: postgresql://harness:harness@postgres:5432/harness
+    volumes:
+      - "./data:/app/data"    # raw docs in, manifests + HF model cache out
+      # Test code isn't baked into the image (tests/ is .dockerignored so
+      # code-only changes don't bust the dependency-install layer cache) —
+      # bind-mounted only so the container-gated integration test
+      # (tests/integration/test_docling_parser_integration.py) can run
+      # against this same image via `--entrypoint pytest` without a second
+      # test-only image.
+      - "./tests:/app/tests"
+    depends_on: [postgres]
+
   postgres:
     image: pgvector/pgvector:pg16
     environment:

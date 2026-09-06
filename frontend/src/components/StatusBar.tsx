@@ -33,36 +33,21 @@ export function StatusBar({ streamStatus, currentTool }: StatusBarProps) {
       : 'Done';
 
   const isPulsing = streamStatus === 'streaming';
-  const dotColor =
-    streamStatus === 'interrupted' ? 'var(--color-warning, #f59e0b)' : 'var(--accent)';
+  const dotClass = streamStatus === 'interrupted' ? 'bg-warning' : 'bg-accent';
 
   return (
     <div
       role="status"
       aria-live="polite"
       aria-atomic="true"
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: '6px',
-        padding: '6px 16px',
-        fontFamily: 'var(--mono)',
-        fontSize: 'var(--text-xs)',
-        color: 'var(--text-muted)',
-        minHeight: '28px',
-      }}
+      className="flex min-h-[28px] items-center gap-1.5 px-4 py-1.5 font-mono text-xs text-fg-muted"
     >
       {visible && (
         <>
           <span
-            style={{
-              width: 6,
-              height: 6,
-              borderRadius: '50%',
-              background: dotColor,
-              display: 'inline-block',
-              animation: isPulsing ? 'pulse 1.5s ease-in-out infinite' : 'none',
-            }}
+            className={`inline-block h-1.5 w-1.5 rounded-full ${dotClass} ${
+              isPulsing ? 'animate-[pulse_1.5s_ease-in-out_infinite]' : ''
+            }`}
           />
           {label}
         </>
