@@ -18,6 +18,12 @@ services:
     build: { context: ., dockerfile: Dockerfile.ingest }
     profiles: ["ingest"]
     env_file: .env
+    environment:
+      # .env's HARNESS_PGVECTOR_URL points at localhost, correct for a
+      # host-run process reaching postgres via its published port. Inside
+      # this container, postgres is a sibling reachable only by its
+      # Compose service name — same reason litellm overrides its DSN below.
+      HARNESS_PGVECTOR_URL: postgresql://harness:harness@postgres:5432/harness
     volumes:
       - "./data:/app/data"    # raw docs in, manifests + HF model cache out
       # Test code isn't baked into the image (tests/ is .dockerignored so
