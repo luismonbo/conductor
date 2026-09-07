@@ -46,6 +46,7 @@ load_dotenv(override=False)
 # Lazy-initialized module-level state
 _run_store: RunStore | None = None
 _run_store_lock: asyncio.Lock | None = None
+_checkpointer_conn: aiosqlite.Connection | None = None
 
 
 @asynccontextmanager
@@ -53,9 +54,11 @@ async def lifespan(app: FastAPI):
     # Validate settings at boot: fail fast here, not on the first request.
     get_settings()
     yield
-    global _run_store
+    global _run_store, _checkpointer_conn
     if _run_store is not None:
         await _run_store._conn.close()
+    if _checkpointer_conn is not None:
+        await _checkpointer_conn.close()
 
 
 app = FastAPI(title="Agent Harness", lifespan=lifespan)
@@ -135,10 +138,11 @@ async def _get_run_store() -> RunStore | None:
 
 
 async def _get_registry() -> dict[str, object]:
-    global _registry
+    global _registry, _checkpointer_conn
     if _registry is None:
         settings = get_settings()
         cp = await build_checkpointer(settings)
+        _checkpointer_conn = getattr(cp, "conn", None)
         _registry = build_agent_registry(settings, cp)
     return _registry
 

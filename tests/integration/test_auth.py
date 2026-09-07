@@ -4,7 +4,7 @@ docs/superpowers/specs/2026-08-28-authentication-design.md
 """
 from __future__ import annotations
 
-import httpx
+import httpx2
 import pytest
 
 import harness.api.main as _main
@@ -13,8 +13,8 @@ from harness.config.settings import get_settings
 
 @pytest.fixture
 async def client():
-    transport = httpx.ASGITransport(app=_main.app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+    transport = httpx2.ASGITransport(app=_main.app)
+    async with httpx2.AsyncClient(transport=transport, base_url="http://test") as c:
         yield c
 
 
@@ -52,7 +52,7 @@ async def test_protected_route_with_wrong_key_returns_401(client):
 async def test_protected_route_with_non_ascii_token_returns_401(client):
     """A raw non-ASCII header byte must not crash hmac.compare_digest into a 500.
 
-    The value is sent as bytes (not str) to bypass httpx's own client-side
+    The value is sent as bytes (not str) to bypass httpx2's own client-side
     ascii-encode guard on str header values -- a non-Python caller has no such
     guard, so the server must handle this on its own. Starlette decodes header
     bytes as latin-1 (never raises), so the app sees a str with a non-ASCII
