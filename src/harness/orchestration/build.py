@@ -2,27 +2,29 @@
 
 The ONE place that knows about concrete adapters. It reads config, builds the
 selected LLM client, memory store, and tools, registers them, and returns a
-ready ReActAgent. Everything else depends only on protocols. Adding a backend
+ready agent graph. Everything else depends only on protocols. Adding a backend
 means editing this file and nothing in core/.
 """
+
 from __future__ import annotations
+
+import logging
+from pathlib import Path
+from typing import cast
+
+import yaml
 
 from harness.adapters.chunking.structure_aware import StructureAwareChunker
 from harness.adapters.embedding.fake import FakeEmbedder
 from harness.adapters.llm.parsers import NativeToolCallParser, PromptedToolCallParser
 from harness.adapters.memory.in_memory import InMemoryLongTerm
-from harness.adapters.normalization.llm_normalizer import LlmNormalizer
-from harness.adapters.tools.calculator import CalculatorTool
-from harness.adapters.tools.recall import RecallTool
 from harness.config.settings import Settings
-from harness.core.agents.react import ReActAgent
 from harness.core.llm.client import LLMClient
 from harness.core.llm.tool_parsing import ToolCallParser
 from harness.core.memory.store import LongTermMemory
 from harness.core.rag.ingest import IngestionPipeline
-from harness.core.rag.ports import Embedder, VectorStore
+from harness.core.rag.ports import Embedder, Retriever as RetrieverPort, VectorStore
 from harness.core.rag.serve import DiversifiedRetriever, RagPipeline, Retriever
-from harness.core.tools.registry import ToolRegistry
 
 
 def build_parser(settings: Settings) -> ToolCallParser:
@@ -124,36 +126,69 @@ def build_vector_store(settings: Settings, backend: str) -> VectorStore:
     raise ValueError(f"Unknown vector store backend: {backend}")
 
 
+def build_retriever(settings: Settings, vector_store: VectorStore) -> RetrieverPort:
+    embedder = build_embedder(settings)
+    plain = Retriever(embedder=embedder, vector_store=vector_store)
+    if settings.rag_per_document_k > 0:
+        return DiversifiedRetriever(
+            plain,
+            per_document_k=settings.rag_per_document_k,
+            overfetch=settings.rag_overfetch,
+        )
+    return plain
+
+
+def list_collections(index_config_dir: Path = Path("data/index_config")) -> list[str]:
+    """Discover ingested collection names from cli/ingest.py's manifest files.
+
+    No hand-maintained enum: cli/ingest.py already writes/updates
+    data/index_config/<collection>.yaml on every ingest run, so this stays
+    accurate as of the next process restart with zero extra bookkeeping.
+    """
+    if not index_config_dir.is_dir():
+        return []
+    names: list[str] = []
+    for manifest_path in sorted(index_config_dir.glob("*.yaml")):
+        manifest = yaml.safe_load(manifest_path.read_text())
+        if manifest and "collection" in manifest:
+            names.append(manifest["collection"])
+    return sorted(dict.fromkeys(names))
+
+
 def build_parser_router():
-    # Imported lazily: docling pulls torch + transformers, and this module is
-    # imported by the API and most of the test suite, which never parse a document.
+    # Deferred: most callers (the API, most of the test suite) never parse a
+    # document, so there's no reason to pay markitdown's (or docling's) import
+    # cost for them. DoclingParser() itself imports docling lazily inside
+    # _convert, so constructing it here stays import-free too.
+    from harness.adapters.parsing.docling_parser import DoclingParser
+    from harness.adapters.parsing.markdown_passthrough import MarkdownPassthroughParser
     from harness.adapters.parsing.markitdown_parser import MarkitdownParser
-    from harness.adapters.parsing.router import DOCLING_EXTENSIONS, ParserRouter
+    from harness.adapters.parsing.router import ParserRouter
 
-    markitdown = MarkitdownParser()
-    if DOCLING_EXTENSIONS:
-        from harness.adapters.parsing.docling_parser import DoclingParser
-
-        docling = DoclingParser()
-    else:
-        # Skip importing docling/torch entirely while DOCLING_EXTENSIONS is
-        # empty — merely having torch in the process is enough to trigger the
-        # libomp crash it's disabled for (see router.py), so it's not enough
-        # to just avoid calling it. Never routed to either way; markitdown
-        # here is an inert placeholder for the unused slot.
-        docling = markitdown
-    return ParserRouter(docling=docling, markitdown=markitdown)
+    return ParserRouter(
+        markitdown=MarkitdownParser(),
+        markdown=MarkdownPassthroughParser(),
+        docling=DoclingParser(),
+    )
 
 
 def build_ingestion_pipeline(
     settings: Settings, vector_store_backends: list[str], tracer=None
 ) -> IngestionPipeline:
+    from harness.adapters.normalization.docling_normalizer import DoclingNormalizer
+    from harness.adapters.normalization.markdown_normalizer import MarkdownNormalizer
+    from harness.adapters.normalization.routing_normalizer import RoutingNormalizer
+
     return IngestionPipeline(
         parser=build_parser_router(),
-        normalizer=LlmNormalizer(build_llm(settings, build_parser(settings))),
+        normalizer=RoutingNormalizer(
+            markdown=MarkdownNormalizer(), docling=DoclingNormalizer()
+        ),
         chunker=StructureAwareChunker(),
         embedder=build_embedder(settings),
-        vector_stores=[build_vector_store(settings, backend) for backend in vector_store_backends],
+        vector_stores=[
+            build_vector_store(settings, backend) for backend in vector_store_backends
+        ],
         tracer=tracer,
     )
 
@@ -161,52 +196,58 @@ def build_ingestion_pipeline(
 def build_rag_pipeline(
     settings: Settings, vector_store_backend: str, tracer=None
 ) -> RagPipeline:
-    embedder = build_embedder(settings)
     vector_store = build_vector_store(settings, vector_store_backend)
-    retriever = Retriever(embedder=embedder, vector_store=vector_store)
-    if settings.rag_per_document_k > 0:
-        retriever = DiversifiedRetriever(
-            retriever,
-            per_document_k=settings.rag_per_document_k,
-            overfetch=settings.rag_overfetch,
-        )
+    retriever = build_retriever(settings, vector_store)
     llm = build_llm(settings, build_parser(settings))
-    return RagPipeline(retriever=retriever, llm=llm, tracer=tracer)
+    # RagPipeline's constructor is nominally typed to the concrete Retriever
+    # (see harness.core.rag.serve); build_retriever's return type is the
+    # protocol (RetrieverPort) because it may also return a DiversifiedRetriever.
+    # Both concrete classes satisfy the protocol structurally at runtime — this
+    # cast only bridges the nominal/structural typing gap for mypy.
+    return RagPipeline(retriever=cast(Retriever, retriever), llm=llm, tracer=tracer)
 
 
-def build_agent(
+def build_agent_registry(
     settings: Settings,
-    tracer=None,
+    checkpointer,
     long_term: LongTermMemory | None = None,
-) -> ReActAgent:
-    parser = build_parser(settings)
-    llm = build_llm(settings, parser)
-    memory = long_term if long_term is not None else build_long_term(settings)
-
-    registry = ToolRegistry()
-    registry.register(CalculatorTool())
-    registry.register(RecallTool(memory))
-
-    return ReActAgent(
-        llm=llm,
-        tools=registry,
-        system_prompt=settings.system_prompt,
-        tracer=tracer,
-    )
-
-
-def build_agent_registry(settings: Settings, checkpointer) -> dict[str, object]:
+) -> dict[str, object]:
     """Build and return all compiled agent graphs keyed by name.
 
     The API routes to the agent named in ChatRequest.agent (default: settings.agent).
-    Adding a new agent means adding it here and in agents/<name>/.
+    Adding a new agent means adding it here and in agents/<name>/. `long_term` lets a
+    caller (the eval harness) pre-seed memory before building, enabling external memory
+    initialization.
     """
     from harness.agents.default.graph import build_graph as build_default_graph
     from harness.agents.default.tools import build_registry
 
     llm = build_llm(settings, build_parser(settings))
-    long_term = build_long_term(settings)
-    registry = build_registry(long_term)
+    if long_term is None:
+        long_term = build_long_term(settings)
+
+    vector_store: VectorStore | None = None
+    retriever: RetrieverPort | None = None
+    collections: list[str] = []
+    try:
+        vector_store = build_vector_store(settings, settings.rag_vector_store_backend)
+        retriever = build_retriever(settings, vector_store)
+        collections = list_collections()
+    except Exception:
+        logging.getLogger(__name__).warning(
+            "RAG backend unavailable; search_documents tool disabled", exc_info=True
+        )
+        vector_store = None
+        retriever = None
+
+    registry = build_registry(
+        long_term=long_term,
+        retriever=retriever,
+        vector_store=vector_store,
+        default_collection=settings.rag_collection,
+        default_k=settings.rag_k,
+        collections=collections,
+    )
     return {
         "default": build_default_graph(llm, checkpointer, registry=registry),
     }

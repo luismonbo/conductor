@@ -49,16 +49,7 @@ export function ChatInput({
   const resolvedPlaceholder = placeholder ?? (isInterrupted ? 'Waiting for approval…' : 'Send a message…');
 
   return (
-    <div
-      style={{
-        borderTop: '1px solid var(--border)',
-        padding: '12px 16px',
-        display: 'flex',
-        gap: '8px',
-        alignItems: 'flex-end',
-        background: 'var(--bg)',
-      }}
-    >
+    <div className="flex flex-shrink-0 items-end gap-2 border-t border-border bg-canvas px-4 py-3">
       <textarea
         ref={textareaRef}
         value={value}
@@ -68,41 +59,13 @@ export function ChatInput({
         placeholder={resolvedPlaceholder}
         aria-label="Message"
         rows={1}
-        style={{
-          flex: 1,
-          background: 'var(--surface)',
-          border: '1px solid var(--border)',
-          borderRadius: '8px',
-          padding: '10px 12px',
-          color: 'var(--text)',
-          fontFamily: 'var(--sans)',
-          fontSize: 'var(--text-base)',
-          resize: 'none',
-          outline: 'none',
-          lineHeight: '20px',
-          minHeight: '40px',
-          transition: 'border-color 0.15s',
-          opacity: disabled ? 0.5 : 1,
-        }}
+        className="min-h-[40px] flex-1 resize-none rounded-md border border-border bg-surface px-3 py-2.5 font-sans text-base leading-5 text-fg outline-none transition placeholder:text-fg-muted focus:border-accent disabled:opacity-50"
       />
       {isStreaming ? (
         <button
           type="button"
           onClick={onCancel}
-          style={{
-            padding: '10px 16px',
-            background: 'transparent',
-            border: '1px solid var(--color-error)',
-            borderRadius: '8px',
-            color: 'var(--color-error)',
-            fontFamily: 'var(--mono)',
-            fontSize: 'var(--text-sm)',
-            cursor: 'pointer',
-            whiteSpace: 'nowrap',
-            transition: 'background 0.15s',
-          }}
-          onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(248,113,113,0.1)')}
-          onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+          className="whitespace-nowrap rounded-md border border-error px-4 py-2.5 font-mono text-sm text-error transition hover:bg-error/10 active:scale-[0.98]"
         >
           Cancel
         </button>
@@ -112,29 +75,7 @@ export function ChatInput({
             type="button"
             onClick={onSend}
             disabled={disabled || !value.trim()}
-            style={{
-              padding: '10px 16px',
-              background: 'transparent',
-              border: '1px solid var(--border)',
-              borderRadius: '8px',
-              color: 'var(--text-muted)',
-              fontFamily: 'var(--mono)',
-              fontSize: 'var(--text-sm)',
-              cursor: disabled || !value.trim() ? 'not-allowed' : 'pointer',
-              whiteSpace: 'nowrap',
-              transition: 'border-color 0.15s, color 0.15s',
-              opacity: disabled || !value.trim() ? 0.4 : 1,
-            }}
-            onMouseEnter={(e) => {
-              if (!disabled && value.trim()) {
-                e.currentTarget.style.borderColor = 'var(--accent)';
-                e.currentTarget.style.color = 'var(--accent)';
-              }
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.borderColor = 'var(--border)';
-              e.currentTarget.style.color = 'var(--text-muted)';
-            }}
+            className="whitespace-nowrap rounded-md border border-border px-4 py-2.5 font-mono text-sm text-fg-muted transition enabled:hover:border-accent enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-40 active:enabled:scale-[0.98]"
           >
             Send
           </button>

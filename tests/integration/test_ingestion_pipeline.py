@@ -24,7 +24,9 @@ class _StubNormalizer:
                 format=parsed.format,
                 parser=parsed.parser,
                 content_hash="stubhash",
-                sections=(DocumentSection(title="Intro", level=1, text="Hello.", order=0),),
+                sections=(
+                    DocumentSection(title="Intro", level=1, text="Hello.", order=0),
+                ),
                 ingested_at="2026-07-25T00:00:00Z",
             )
         ]
@@ -45,9 +47,48 @@ class _StubChunker:
         ]
 
 
+class _NSectionNormalizer:
+    """Same (source-path-stable) document_id every call, but a configurable
+    number of sections — simulates editing a file down to fewer sections. The
+    real chunker then emits chunk ids docid:0..N-1, so a shrink orphans the
+    higher-indexed chunks unless the pipeline deletes first."""
+
+    def __init__(self, n: int) -> None:
+        self._n = n
+
+    async def normalize(self, parsed, source_path, collection):
+        from harness.core.rag.document import (
+            DocumentSection,
+            NormalizedDocument,
+            make_document_id,
+        )
+
+        return [
+            NormalizedDocument(
+                document_id=make_document_id(collection, source_path),
+                source_path=source_path,
+                collection=collection,
+                title="T",
+                format=parsed.format,
+                parser=parsed.parser,
+                content_hash="h",
+                sections=tuple(
+                    DocumentSection(title=f"S{i}", level=1, text=f"t{i}", order=i)
+                    for i in range(self._n)
+                ),
+                ingested_at="2026-08-31T00:00:00Z",
+            )
+        ]
+
+
 class _FailingParser:
     async def parse(self, path):
         raise RuntimeError("simulated parse failure")
+
+
+class _FailingEmbedder:
+    async def embed(self, texts):
+        raise RuntimeError("embed down")
 
 
 def _events_named(tracer, name: str) -> list[dict]:
@@ -59,8 +100,11 @@ def _events_named(tracer, name: str) -> list[dict]:
 async def test_ingest_file_embeds_and_upserts_to_all_stores(tmp_path):
     store_a, store_b = InMemoryVectorStore(), InMemoryVectorStore()
     pipeline = IngestionPipeline(
-        parser=_StubParser(), normalizer=_StubNormalizer(), chunker=_StubChunker(),
-        embedder=FakeEmbedder(dimension=4), vector_stores=[store_a, store_b],
+        parser=_StubParser(),
+        normalizer=_StubNormalizer(),
+        chunker=_StubChunker(),
+        embedder=FakeEmbedder(dimension=4),
+        vector_stores=[store_a, store_b],
     )
     source = tmp_path / "note.html"
     source.write_text("<h1>Intro</h1><p>Hello.</p>")
@@ -78,8 +122,11 @@ async def test_ingest_file_embeds_and_upserts_to_all_stores(tmp_path):
 async def test_ingest_file_stamps_embedding_model_before_upsert(tmp_path):
     store = InMemoryVectorStore()
     pipeline = IngestionPipeline(
-        parser=_StubParser(), normalizer=_StubNormalizer(), chunker=_StubChunker(),
-        embedder=FakeEmbedder(dimension=4), vector_stores=[store],
+        parser=_StubParser(),
+        normalizer=_StubNormalizer(),
+        chunker=_StubChunker(),
+        embedder=FakeEmbedder(dimension=4),
+        vector_stores=[store],
     )
     source = tmp_path / "note.html"
     source.write_text("<h1>Intro</h1><p>Hello.</p>")
@@ -98,14 +145,19 @@ async def test_ingest_collection_does_not_abort_on_one_bad_file(tmp_path):
     bad.write_text("<h1>Bad</h1>")
 
     pipeline = IngestionPipeline(
-        parser=_FailingParser(), normalizer=_StubNormalizer(), chunker=_StubChunker(),
-        embedder=FakeEmbedder(), vector_stores=[InMemoryVectorStore()],
+        parser=_FailingParser(),
+        normalizer=_StubNormalizer(),
+        chunker=_StubChunker(),
+        embedder=FakeEmbedder(),
+        vector_stores=[InMemoryVectorStore()],
     )
 
     results = await pipeline.ingest_collection(tmp_path, collection="papers")
 
     assert len(results) == 2
-    assert all(r.error is not None for r in results)  # _FailingParser fails on both, on purpose
+    assert all(
+        r.error is not None for r in results
+    )  # _FailingParser fails on both, on purpose
     assert all(r.chunk_count == 0 for r in results)
 
 
@@ -115,8 +167,11 @@ async def test_ingest_file_records_trace_events(tmp_path):
 
     tracer = TraceCollector()
     pipeline = IngestionPipeline(
-        parser=_StubParser(), normalizer=_StubNormalizer(), chunker=_StubChunker(),
-        embedder=FakeEmbedder(dimension=4), vector_stores=[InMemoryVectorStore()],
+        parser=_StubParser(),
+        normalizer=_StubNormalizer(),
+        chunker=_StubChunker(),
+        embedder=FakeEmbedder(dimension=4),
+        vector_stores=[InMemoryVectorStore()],
         tracer=tracer,
     )
     source = tmp_path / "note.html"
@@ -136,8 +191,12 @@ async def test_ingest_file_records_trace_event_on_failure(tmp_path):
 
     tracer = TraceCollector()
     pipeline = IngestionPipeline(
-        parser=_FailingParser(), normalizer=_StubNormalizer(), chunker=_StubChunker(),
-        embedder=FakeEmbedder(), vector_stores=[InMemoryVectorStore()], tracer=tracer,
+        parser=_FailingParser(),
+        normalizer=_StubNormalizer(),
+        chunker=_StubChunker(),
+        embedder=FakeEmbedder(),
+        vector_stores=[InMemoryVectorStore()],
+        tracer=tracer,
     )
     source = tmp_path / "bad.html"
     source.write_text("<h1>Bad</h1>")
@@ -147,3 +206,133 @@ async def test_ingest_file_records_trace_event_on_failure(tmp_path):
     events = _events_named(tracer, "ingest_file_failed")
     assert len(events) == 1
     assert "simulated parse failure" in events[0]["error"]
+
+
+@pytest.mark.asyncio
+async def test_reingest_of_edited_file_leaves_no_orphans(tmp_path):
+    from harness.adapters.chunking.structure_aware import StructureAwareChunker
+
+    store = InMemoryVectorStore()
+    source = tmp_path / "note.md"
+    source.write_text("x")
+
+    three = IngestionPipeline(
+        parser=_StubParser(),
+        normalizer=_NSectionNormalizer(3),
+        chunker=StructureAwareChunker(),
+        embedder=FakeEmbedder(dimension=4),
+        vector_stores=[store],
+    )
+    await three.ingest_file(source, collection="docs")
+    assert await store.count(collection="docs") == 3
+
+    one = IngestionPipeline(
+        parser=_StubParser(),
+        normalizer=_NSectionNormalizer(1),
+        chunker=StructureAwareChunker(),
+        embedder=FakeEmbedder(dimension=4),
+        vector_stores=[store],
+    )
+    await one.ingest_file(
+        source, collection="docs"
+    )  # same source_path -> same document_id
+    assert (
+        await store.count(collection="docs") == 1
+    )  # orphaned S1/S2 chunks deleted, not left behind
+
+
+@pytest.mark.asyncio
+async def test_reingest_to_zero_chunks_deletes_old_chunks(tmp_path):
+    """Editing a file down to zero sections must still delete its old chunks.
+    Regression test: the delete-then-upsert used to live inside `if all_chunks:`,
+    so a zero-chunk re-ingest skipped the delete entirely and left permanent
+    orphans, violating the idempotency guarantee."""
+    from harness.adapters.chunking.structure_aware import StructureAwareChunker
+
+    store = InMemoryVectorStore()
+    source = tmp_path / "note.md"
+    source.write_text("x")
+
+    three = IngestionPipeline(
+        parser=_StubParser(),
+        normalizer=_NSectionNormalizer(3),
+        chunker=StructureAwareChunker(),
+        embedder=FakeEmbedder(dimension=4),
+        vector_stores=[store],
+    )
+    await three.ingest_file(source, collection="docs")
+    assert await store.count(collection="docs") == 3
+
+    zero = IngestionPipeline(
+        parser=_StubParser(),
+        normalizer=_NSectionNormalizer(0),
+        chunker=StructureAwareChunker(),
+        embedder=FakeEmbedder(dimension=4),
+        vector_stores=[store],
+    )
+    await zero.ingest_file(
+        source, collection="docs"
+    )  # same source_path -> same document_id, now 0 sections
+    assert (
+        await store.count(collection="docs") == 0
+    )  # old chunks deleted despite the zero-chunk yield
+
+
+@pytest.mark.asyncio
+async def test_reingest_fails_safe_when_embed_errors(tmp_path):
+    """A transient embed failure (e.g. a transient Azure error) must not orphan
+    the index: the old chunks must survive until a new embed actually succeeds.
+    Regression test for the unconditional pre-embed delete: that version deleted
+    from every store before embedding, so an embed failure left the document
+    absent from the index instead of merely stale."""
+    from harness.adapters.chunking.structure_aware import StructureAwareChunker
+
+    store = InMemoryVectorStore()
+    source = tmp_path / "note.md"
+    source.write_text("x")
+
+    three = IngestionPipeline(
+        parser=_StubParser(),
+        normalizer=_NSectionNormalizer(3),
+        chunker=StructureAwareChunker(),
+        embedder=FakeEmbedder(dimension=4),
+        vector_stores=[store],
+    )
+    await three.ingest_file(source, collection="docs")
+    assert await store.count(collection="docs") == 3
+
+    failing = IngestionPipeline(
+        parser=_StubParser(),
+        normalizer=_NSectionNormalizer(3),
+        chunker=StructureAwareChunker(),
+        embedder=_FailingEmbedder(),
+        vector_stores=[store],
+    )
+    result = await failing.ingest_file(
+        source, collection="docs"
+    )  # same source_path -> same document_id, embed() raises
+
+    assert result.error is not None  # per-file isolation caught the failure
+    assert (
+        await store.count(collection="docs") == 3
+    )  # old chunks survive: delete never ran because embed failed first
+
+
+@pytest.mark.asyncio
+async def test_ingest_file_emits_stage_events(tmp_path):
+    from harness.observability.tracer import TraceCollector
+
+    tracer = TraceCollector()
+    pipeline = IngestionPipeline(
+        parser=_StubParser(),
+        normalizer=_StubNormalizer(),
+        chunker=_StubChunker(),
+        embedder=FakeEmbedder(dimension=4),
+        vector_stores=[InMemoryVectorStore()],
+        tracer=tracer,
+    )
+    source = tmp_path / "n.html"
+    source.write_text("<h1>Intro</h1><p>Hello.</p>")
+    await pipeline.ingest_file(source, collection="papers")
+    stages = [d["stage"] for _, e, d in tracer.events if e == "ingest_stage"]
+    assert stages == ["parse", "normalize", "chunk", "embed", "upsert"]

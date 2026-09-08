@@ -21,6 +21,7 @@ def test_build_llm_selects_openai_compatible():
         llm_base_url="http://localhost:8080/v1",
         llm_model="gemma4:a2b",
         default_model="",
+        api_key="test-key",
     )
     client = build_llm(settings, NativeToolCallParser())
     assert isinstance(client, OpenAICompatibleClient)
@@ -28,6 +29,6 @@ def test_build_llm_selects_openai_compatible():
 
 
 def test_build_llm_unknown_backend_raises():
-    settings = Settings(_env_file=None, llm_backend="nope")
+    settings = Settings(_env_file=None, llm_backend="nope", api_key="test-key")
     with pytest.raises(ValueError, match="Unknown llm_backend"):
         build_llm(settings, NativeToolCallParser())

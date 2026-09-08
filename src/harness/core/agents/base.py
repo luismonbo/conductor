@@ -1,5 +1,6 @@
-"""Agent protocol. A single ReAct agent and (later) a supervisor both satisfy
-this, so the orchestration graph can treat them uniformly as nodes."""
+"""Agent protocol. The seam that lets the eval harness drive a real agent
+implementation (GraphAgentAdapter, wrapping the LangGraph graph that serves
+live chat) without depending on its internals."""
 from __future__ import annotations
 
 from typing import Protocol, runtime_checkable

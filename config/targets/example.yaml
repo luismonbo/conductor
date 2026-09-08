@@ -1,0 +1,39 @@
+# Template for a deployment target. Copy this file to <name>.yaml (e.g.
+# daily-driver.yaml, luismonbo-com.yaml) and set HARNESS_TARGET=<name> to
+# select it. Real target files are gitignored — this example is the only
+# one committed, since this repo is public.
+#
+# Only non-secret Settings fields belong here. Fields that can carry a
+# credential (API keys, DSNs — see SECRET_FIELDS in
+# src/harness/config/targets.py) are rejected at load time if present.
+# Secrets always come from real environment variables / .env locally, or
+# the deployment's own environment in production.
+#
+# Precedence: a real environment variable always overrides the value set
+# here; anything not set here or by a real env var falls back to the
+# Settings field default (see src/harness/config/settings.py).
+
+# --- Backend selection -------------------------------------------------
+llm_backend: azure              # fake | openai_compatible | azure
+embedding_backend: azure        # fake | openai_compatible | azure
+memory_backend: pgvector        # in_memory | sqlite | pgvector
+checkpointer: postgres          # memory | sqlite | postgres
+
+# --- Azure OpenAI (endpoint + deployment names only — never azure_api_key)
+azure_endpoint: https://your-resource.openai.azure.com
+azure_deployment: gpt-5.4-mini
+azure_api_version: "2024-10-21"  # quoted: unquoted, YAML parses this as a date, not a string
+azure_embedding_deployment: text-embedding-3-large
+
+# --- RAG / knowledge base ------------------------------------------------
+rag_collection: example-docs
+rag_vector_store_backend: pgvector   # pgvector | milvus | in_memory
+pgvector_table: rag_chunks
+embedding_dimension: 3072
+
+# --- Agent behavior --------------------------------------------------------
+system_prompt: "You are a helpful assistant for example.com."
+
+# Using the openai_compatible backend (e.g. pointing at a LiteLLM proxy)
+# instead of azure? Use llm_base_url / llm_model / default_model here
+# instead of the azure_* fields above.

@@ -1,6 +1,8 @@
-"""markitdown-backed Parser — the broad-format, lighter-weight path (docx,
-pptx, xlsx, html, and the docling-failure fallback for PDFs). See
-docs/superpowers/specs/2026-07-25-rag-ingestion-retrieval-design.md."""
+"""markitdown-backed Parser — handles the remaining office/html formats
+(docx, pptx, xlsx, html, ...). ParserRouter sends .pdf to DoclingParser and
+.md/.markdown to MarkdownPassthroughParser; everything else falls through
+to this parser (see router.py)."""
+
 from __future__ import annotations
 
 import asyncio
@@ -23,7 +25,9 @@ class MarkitdownParser:
         try:
             result = await asyncio.to_thread(self._md.convert, str(path))
         except Exception as exc:
-            raise MarkitdownParseError(f"markitdown failed to convert {path}: {exc}") from exc
+            raise MarkitdownParseError(
+                f"markitdown failed to convert {path}: {exc}"
+            ) from exc
 
         text = getattr(result, "markdown", None) or getattr(result, "text_content", None)
         if not text:

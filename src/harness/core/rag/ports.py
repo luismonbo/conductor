@@ -1,12 +1,18 @@
 """Protocols the ingestion pipeline (and, later, the serving pipeline) depend
 on. Concrete implementations live in adapters/; core/ imports nothing outward.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
-from harness.core.rag.document import Chunk, NormalizedDocument, ParsedContent, ScoredChunk
+from harness.core.rag.document import (
+    Chunk,
+    NormalizedDocument,
+    ParsedContent,
+    ScoredChunk,
+)
 
 
 class Parser(Protocol):
@@ -30,7 +36,9 @@ class Embedder(Protocol):
 
 @runtime_checkable
 class VectorStore(Protocol):
-    async def upsert(self, chunks: list[Chunk], embeddings: list[list[float]]) -> None: ...
+    async def upsert(
+        self, chunks: list[Chunk], embeddings: list[list[float]]
+    ) -> None: ...
 
     async def search(
         self,
@@ -43,6 +51,11 @@ class VectorStore(Protocol):
     async def delete(self, document_id: str) -> None: ...
 
     async def count(self, collection: str | None = None) -> int: ...
+
+    async def document_stats(self, collection: str | None = None) -> dict[str, int]:
+        """document_id -> chunk count. Used to fingerprint the index so an
+        eval dataset can detect that a re-ingest invalidated its labels."""
+        ...
 
 
 @runtime_checkable

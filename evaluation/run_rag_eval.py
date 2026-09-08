@@ -2,9 +2,10 @@
 
 Usage:
     uv run python evaluation/run_rag_eval.py
-    uv run python evaluation/run_rag_eval.py --tags smoke
+    uv run python evaluation/run_rag_eval.py --suite smoke
     uv run python evaluation/run_rag_eval.py --vector-store milvus
 """
+
 from __future__ import annotations
 
 import argparse
@@ -25,9 +26,8 @@ from harness.orchestration.build import build_llm, build_parser, build_rag_pipel
 from evaluation.rag.dataset import RagDataset  # noqa: E402
 from evaluation.rag.metrics.answer_relevancy import AnswerRelevancyMetric  # noqa: E402
 from evaluation.rag.metrics.faithfulness import FaithfulnessMetric  # noqa: E402
-from evaluation.rag.metrics.mrr import MRRMetric  # noqa: E402
-from evaluation.rag.metrics.recall_at_k import RecallAtKMetric  # noqa: E402
 from evaluation.rag.runner import RagRunner  # noqa: E402
+from evaluation.rag.thresholds import gate_or_fail  # noqa: E402
 
 _EVAL_DIR = Path(__file__).parent
 _DATASETS_DIR = _EVAL_DIR / "rag" / "datasets"
@@ -36,15 +36,19 @@ _REPORTS_DIR = _EVAL_DIR / "reports"
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the RAG eval harness")
-    parser.add_argument("--dataset", default="papers_v1.json")
-    parser.add_argument("--tags", nargs="*", default=[])
+    parser.add_argument("--dataset", default="papers_v2.json")
+    parser.add_argument("--suite", default=None, help="Only cases declaring this suite")
     parser.add_argument(
         "--vector-store", default="pgvector", choices=["pgvector", "milvus", "in_memory"]
     )
     parser.add_argument("--backend", default=None, help="Override HARNESS_LLM_BACKEND")
-    parser.add_argument("--k", type=int, default=None, help="Retrieval depth (default HARNESS_RAG_K)")
     parser.add_argument(
-        "--per-document-k", type=int, default=None,
+        "--k", type=int, default=None, help="Retrieval depth (default HARNESS_RAG_K)"
+    )
+    parser.add_argument(
+        "--per-document-k",
+        type=int,
+        default=None,
         help="Max chunks per document; 0 disables the quota (default HARNESS_RAG_PER_DOCUMENT_K)",
     )
     return parser.parse_args()
@@ -53,7 +57,9 @@ def _parse_args() -> argparse.Namespace:
 def main() -> int:
     args = _parse_args()
     dataset_path = (
-        Path(args.dataset) if Path(args.dataset).is_absolute() else _DATASETS_DIR / args.dataset
+        Path(args.dataset)
+        if Path(args.dataset).is_absolute()
+        else _DATASETS_DIR / args.dataset
     )
     if not dataset_path.exists():
         print(f"Dataset not found: {dataset_path}", file=sys.stderr)
@@ -70,11 +76,11 @@ def main() -> int:
     if overrides:
         settings = settings.model_copy(update=overrides)
 
-    dataset = RagDataset.load(dataset_path).filter_by_tags(args.tags)
+    dataset = RagDataset.load(dataset_path).filter_by_suite(args.suite)
     if not dataset.cases:
         print(
             "No cases to run (dataset is empty or filters matched nothing). "
-            "Populate evaluation/rag/datasets/papers_v1.json once real papers are ingested.",
+            "Populate evaluation/rag/datasets/papers_v2.json once real papers are ingested.",
             file=sys.stderr,
         )
         return 1
@@ -85,11 +91,15 @@ def main() -> int:
     judge_llm = build_llm(settings, build_parser(settings))
 
     def pipeline_factory(tracer):
-        return build_rag_pipeline(settings, vector_store_backend=args.vector_store, tracer=tracer)
+        return build_rag_pipeline(
+            settings, vector_store_backend=args.vector_store, tracer=tracer
+        )
 
+    # Retrieval-only metrics (recall@k, MRR, nDCG) live in run_retrieval_eval.py,
+    # which runs with no LLM judge. This layer scores only the generated answer.
     metrics = [
-        RecallAtKMetric(), MRRMetric(),
-        FaithfulnessMetric(judge=judge_llm), AnswerRelevancyMetric(judge=judge_llm),
+        FaithfulnessMetric(judge=judge_llm),
+        AnswerRelevancyMetric(judge=judge_llm),
     ]
     runner = RagRunner(pipeline_factory, k=settings.rag_k)
     quota = settings.rag_per_document_k or "off"
@@ -102,7 +112,8 @@ def main() -> int:
     out_path = report.save(_REPORTS_DIR)
     report.print_summary()
     print(f"Report saved -> {out_path}")
-    return 0 if report.pass_rate == 1.0 else 1
+
+    return gate_or_fail(report, _EVAL_DIR / "rag" / "thresholds_generation.yaml")
 
 
 if __name__ == "__main__":

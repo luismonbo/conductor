@@ -1,0 +1,17 @@
+# Pre-registered success criteria for the RAG eval.
+#
+# Gates are written down BEFORE an experiment runs, never fitted after it.
+# Each needs a `rationale`; the loader rejects one without.
+#
+# Empty on purpose. The dataset is currently at proof-of-machinery size, and a
+# threshold pinned against ~10 chunk-graded cases would be theater — any
+# plausible movement sits inside the noise. Populate this once the dataset
+# reaches ~50 chunk-graded cases, choosing effect sizes actually resolvable at
+# that n. "Inconclusive" is a legitimate outcome.
+#
+# Shape, once populated:
+#   - metric: ndcg_at_k
+#     granularity: chunk
+#     min_mean: 0.72
+#     rationale: "SP2 baseline 0.68 + smallest effect resolvable at n=50."
+gates: []

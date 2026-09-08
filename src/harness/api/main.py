@@ -1,6 +1,5 @@
 """FastAPI entry point.
 
-POST /chat         — legacy blocking endpoint (unchanged; uses ReActAgent).
 POST /chat/stream  — LangGraph streaming endpoint; emits SSE AgentEvents.
 POST /resume/{thread_id} — resume a paused (interrupted) graph run.
 POST /cancel/{thread_id} — cancel a running streaming task.
@@ -18,21 +17,23 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from langgraph.types import Command
+from slowapi.errors import RateLimitExceeded
 
 import aiosqlite
 
-from harness.adapters.memory.in_memory import InMemoryShortTerm
-from harness.api.schemas import ChatRequest, ChatResponse, ResumeRequest
+from harness.api.auth import require_api_key
+from harness.api.rate_limit import default_limit, limiter, strict_limit
+from harness.api.schemas import ChatRequest, ResumeRequest
 from harness.config.settings import get_settings
-from harness.core.types import AgentEvent, AgentState, Message, Role
+from harness.core.types import AgentEvent, Message, Role
+from harness.observability.langfuse_tracing import langfuse_configured
 from harness.observability.run_store import RunStore
 from harness.observability.token_accumulator import TokenAccumulator
-from harness.observability.tracer import TraceCollector
-from harness.orchestration.build import build_agent, build_agent_registry
+from harness.orchestration.build import build_agent_registry
 from harness.orchestration.checkpointer import build_checkpointer
 
 # Settings() reads HARNESS_-prefixed vars straight from .env itself, but this
@@ -49,6 +50,8 @@ _run_store_lock: asyncio.Lock | None = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Validate settings at boot: fail fast here, not on the first request.
+    get_settings()
     yield
     global _run_store
     if _run_store is not None:
@@ -67,10 +70,32 @@ app.add_middleware(
     allow_origins=_cors_origins,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["Retry-After"],
     allow_credentials=False,
 )
 
-_short_term = InMemoryShortTerm()
+app.state.limiter = limiter
+
+
+async def _rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:
+    """429 body reshaped to this API's {"detail": ...} convention (matching the
+    404 on GET /threads/{id} and other existing error responses), rather than
+    slowapi's own default body shape.
+
+    Retry-After is hardcoded to 60s: both configured tiers (rate_limit_strict,
+    rate_limit_default) are per-minute by design -- see
+    docs/superpowers/specs/2026-08-27-rate-limiting-design.md. Revisit if a
+    non-minute granularity is ever introduced.
+    """
+    return JSONResponse(
+        status_code=429,
+        content={"detail": "Rate limit exceeded. Please slow down and try again shortly."},
+        headers={"Retry-After": "60"},
+    )
+
+
+app.add_exception_handler(RateLimitExceeded, _rate_limit_handler)
+
 _running: dict[str, asyncio.Task] = {}
 
 # Backends where a client-supplied ChatRequest.model is safe to honor:
@@ -137,7 +162,8 @@ async def _list_model_ids(client: Any) -> list[str]:
 
 
 @app.get("/models")
-async def list_models() -> dict:
+@limiter.limit(default_limit)
+async def list_models(request: Request, _auth: None = Depends(require_api_key)) -> dict:
     """Model profiles the proxy serves; the UI picker feeds from this.
 
     default=None (not settings.default_model/llm_model) whenever there's no
@@ -184,7 +210,8 @@ def _title_from(messages: list[Message]) -> str:
 
 
 @app.get("/threads")
-async def list_threads() -> dict:
+@limiter.limit(default_limit)
+async def list_threads(request: Request, _auth: None = Depends(require_api_key)) -> dict:
     run_store = await _get_run_store()
     if run_store is None:
         return {"threads": []}
@@ -206,7 +233,8 @@ async def list_threads() -> dict:
 
 
 @app.get("/threads/{thread_id}")
-async def thread_messages(thread_id: str) -> dict:
+@limiter.limit(default_limit)
+async def thread_messages(request: Request, thread_id: str, _auth: None = Depends(require_api_key)) -> dict:
     settings = get_settings()
     registry = await _get_registry()
     graph = registry[settings.agent]
@@ -231,37 +259,6 @@ async def thread_messages(thread_id: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Legacy blocking endpoint — untouched
-# ---------------------------------------------------------------------------
-
-@app.post("/chat", response_model=ChatResponse)
-async def chat(req: ChatRequest) -> ChatResponse:
-    settings = get_settings()
-    conversation_id = req.thread_id or str(uuid.uuid4())
-
-    user_msg = Message(role=Role.USER, content=req.message)
-    await _short_term.append(conversation_id, user_msg)
-    history = await _short_term.history(conversation_id)
-
-    tracer = TraceCollector()
-    agent = build_agent(settings, tracer=tracer)
-
-    state = AgentState(messages=list(history), max_iterations=settings.max_iterations)
-    result = await agent.run(state)
-
-    await _short_term.append(
-        conversation_id, Message(role=Role.ASSISTANT, content=result.output)
-    )
-
-    return ChatResponse(
-        output=result.output,
-        conversation_id=conversation_id,
-        stopped_reason=result.stopped_reason,
-        trace_summary=tracer.summary(),
-    )
-
-
-# ---------------------------------------------------------------------------
 # Observability + error shaping
 # ---------------------------------------------------------------------------
 
@@ -278,7 +275,7 @@ def _build_callbacks(thread_id: str, agent_name: str) -> tuple[list, dict]:
     The SDK reads LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY / LANGFUSE_HOST
     from the environment itself; we only gate on their presence.
     """
-    if not (os.environ.get("LANGFUSE_PUBLIC_KEY") and os.environ.get("LANGFUSE_SECRET_KEY")):
+    if not langfuse_configured():
         return [], {}
     try:
         handler = _make_langfuse_handler()
@@ -370,7 +367,8 @@ async def _run_graph(
 # ---------------------------------------------------------------------------
 
 @app.post("/chat/stream")
-async def chat_stream(req: ChatRequest) -> StreamingResponse:
+@limiter.limit(strict_limit)
+async def chat_stream(request: Request, req: ChatRequest, _auth: None = Depends(require_api_key)) -> StreamingResponse:
     """Stream agent events as Server-Sent Events.
 
     First SSE frame: ``{"thread_id": "<uuid>"}``
@@ -398,6 +396,7 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
         },
         "callbacks": callbacks,
         "metadata": lf_metadata,
+        "run_name": "chat-response",
     }
     input_state = {
         "messages": [Message(role=Role.USER, content=req.message)],
@@ -428,7 +427,8 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
 # ---------------------------------------------------------------------------
 
 @app.post("/resume/{thread_id}")
-async def resume_run(thread_id: str, req: ResumeRequest) -> StreamingResponse:
+@limiter.limit(strict_limit)
+async def resume_run(request: Request, thread_id: str, req: ResumeRequest, _auth: None = Depends(require_api_key)) -> StreamingResponse:
     """Resume a paused graph run (after an interrupt).
 
     Response: same SSE stream as /chat/stream (starts with thread_id frame).
@@ -451,6 +451,7 @@ async def resume_run(thread_id: str, req: ResumeRequest) -> StreamingResponse:
         },
         "callbacks": callbacks,
         "metadata": lf_metadata,
+        "run_name": "chat-resume",
     }
 
     run_store = await _get_run_store()
@@ -475,7 +476,8 @@ async def resume_run(thread_id: str, req: ResumeRequest) -> StreamingResponse:
 # ---------------------------------------------------------------------------
 
 @app.post("/cancel/{thread_id}")
-async def cancel_run(thread_id: str) -> dict:
+@limiter.limit(default_limit)
+async def cancel_run(request: Request, thread_id: str, _auth: None = Depends(require_api_key)) -> dict:
     """Cancel a running streaming agent task by thread_id."""
     task = _running.get(thread_id)
     if task and not task.done():

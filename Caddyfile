@@ -1,0 +1,14 @@
+:8000 {
+	handle /api/* {
+		uri strip_prefix /api
+		reverse_proxy api:8000 {
+			header_up Authorization "Bearer {$HARNESS_API_KEY}"
+		}
+	}
+
+	handle {
+		root * /srv
+		file_server
+		try_files {path} /index.html
+	}
+}

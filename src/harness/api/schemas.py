@@ -18,13 +18,6 @@ class ResumeRequest(BaseModel):
     decision: dict[str, Any]       # {"approved": True} | {"approved": False}
 
 
-class ChatResponse(BaseModel):
-    output: str
-    conversation_id: str
-    stopped_reason: str
-    trace_summary: dict
-
-
 class AgentEventDTO(BaseModel):
     type: str
     text: str = ""

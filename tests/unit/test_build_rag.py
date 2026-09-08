@@ -1,0 +1,75 @@
+"""Unit tests for RAG-related factory functions in orchestration/build.py."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import yaml
+
+from harness.adapters.normalization.routing_normalizer import RoutingNormalizer
+from harness.adapters.vectorstore.in_memory import InMemoryVectorStore
+from harness.config.settings import Settings, get_settings
+from harness.core.rag.serve import DiversifiedRetriever, Retriever
+from harness.orchestration.build import (
+    build_ingestion_pipeline,
+    build_retriever,
+    list_collections,
+)
+
+
+def test_list_collections_empty_directory_returns_empty_list(tmp_path: Path):
+    assert list_collections(tmp_path) == []
+
+
+def test_list_collections_reads_collection_field_from_each_manifest(tmp_path: Path):
+    (tmp_path / "papers.yaml").write_text(yaml.safe_dump({"collection": "papers"}))
+    (tmp_path / "manuals.yaml").write_text(yaml.safe_dump({"collection": "manuals"}))
+
+    assert list_collections(tmp_path) == ["manuals", "papers"]
+
+
+def test_list_collections_missing_directory_returns_empty_list(tmp_path: Path):
+    assert list_collections(tmp_path / "does_not_exist") == []
+
+
+def test_build_retriever_returns_plain_retriever_when_quota_disabled():
+    settings = Settings(
+        _env_file=None,
+        embedding_backend="fake",
+        embedding_dimension=768,
+        rag_per_document_k=0,
+        api_key="test-key",
+    )
+    store = InMemoryVectorStore()
+
+    retriever = build_retriever(settings, store)
+
+    assert type(retriever) is Retriever
+
+
+def test_build_retriever_wraps_in_diversified_retriever_when_quota_enabled():
+    settings = Settings(
+        _env_file=None,
+        embedding_backend="fake",
+        embedding_dimension=768,
+        rag_per_document_k=2,
+        rag_overfetch=5,
+        api_key="test-key",
+    )
+    store = InMemoryVectorStore()
+
+    retriever = build_retriever(settings, store)
+
+    assert isinstance(retriever, DiversifiedRetriever)
+
+
+def test_ingestion_pipeline_uses_routing_normalizer_not_llm(monkeypatch):
+    # get_settings() reads the real .env by default (HARNESS_EMBEDDING_BACKEND
+    # may be azure there) and enforces HARNESS_API_KEY when auth is on — pin
+    # both here so this test is hermetic regardless of the local dev .env.
+    monkeypatch.setenv("HARNESS_EMBEDDING_BACKEND", "fake")
+    monkeypatch.setenv("HARNESS_API_KEY", "test-key")
+
+    pipeline = build_ingestion_pipeline(get_settings(), ["in_memory"])
+
+    assert isinstance(pipeline._normalizer, RoutingNormalizer)

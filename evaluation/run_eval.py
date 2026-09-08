@@ -20,10 +20,13 @@ sys.path.insert(0, str(_root / "src"))
 if str(_root) not in sys.path:
     sys.path.append(str(_root))
 
+from langgraph.checkpoint.memory import MemorySaver
+
 from harness.config.settings import get_settings
-from harness.orchestration.build import build_agent, build_long_term
+from harness.orchestration.build import build_agent_registry, build_long_term
 
 from evaluation.harness.dataset import Dataset
+from evaluation.harness.graph_agent import GraphAgentAdapter
 from evaluation.harness.runner import EvalRunner
 from evaluation.metrics.arg_schema import ArgSchemaMetric
 from evaluation.metrics.no_tool_call import NoToolCallMetric
@@ -77,7 +80,8 @@ def main() -> int:
         memory = build_long_term(settings)
         for fact in (memory_seed or []):
             await memory.write(fact)
-        return build_agent(settings, tracer=tracer, long_term=memory)
+        registry = build_agent_registry(settings, MemorySaver(), long_term=memory)
+        return GraphAgentAdapter(registry["default"], tracer=tracer)
 
     dataset = Dataset.load(dataset_path).filter_by_tags(args.tags)
     if not dataset.cases:

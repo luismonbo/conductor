@@ -26,17 +26,19 @@ export function MessageList({ messages, onApprove, onReject, onFeedback, onMemor
     }
   }, [messages]);
 
+  if (messages.length === 0) {
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center gap-2 px-4 text-center">
+        <span className="font-mono text-2xl text-accent">&gt;_</span>
+        <p className="font-mono text-sm text-fg-muted">Send a message to start the conversation</p>
+      </div>
+    );
+  }
+
   return (
     <div
       ref={containerRef}
-      style={{
-        flex: 1,
-        overflowY: 'auto',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '8px',
-        padding: '16px 0',
-      }}
+      className="flex flex-1 flex-col gap-2 overflow-y-auto py-4"
     >
       {messages.map((msg) =>
         msg.role === 'user' ? (

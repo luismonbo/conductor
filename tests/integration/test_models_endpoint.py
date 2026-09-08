@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from fastapi.testclient import TestClient
 
 from harness.api.main import app, _list_model_ids
+from harness.config.settings import get_settings
 
 
 def test_models_empty_on_fake_backend(monkeypatch):
@@ -14,7 +15,7 @@ def test_models_empty_on_fake_backend(monkeypatch):
     # prove the backend itself suppresses it, not merely that the var is unset.
     monkeypatch.setenv("HARNESS_LLM_BACKEND", "fake")
     monkeypatch.setenv("HARNESS_DEFAULT_MODEL", "local-gemma")
-    with TestClient(app) as client:
+    with TestClient(app, headers={"Authorization": f"Bearer {get_settings().api_key}"}) as client:
         resp = client.get("/models")
     assert resp.status_code == 200
     body = resp.json()

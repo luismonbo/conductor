@@ -1,7 +1,7 @@
-.PHONY: up down infra api web dev test init-dbs logs
+.PHONY: up down infra proxy api web dev test init-dbs logs ingest
 
 # Bring up infra (postgres, litellm) and print next steps.
-# Langfuse/ClickHouse/Redis/MinIO removed for now — see docker-compose.yml.
+# Langfuse runs against Langfuse Cloud, not local infra — see .env.example.
 up:
 	uv run python scripts/validate_litellm_config.py litellm_config.yaml
 	docker compose up -d postgres litellm
@@ -13,6 +13,13 @@ down:
 infra:
 	docker compose up -d postgres
 
+# Bring up the Caddy-fronted stack (api + caddy) — the auth/proxy topology
+# from docs/superpowers/specs/2026-08-28-authentication-design.md. Port 8000
+# is Caddy; api itself is not published to the host in this mode.
+proxy:
+	docker compose up -d --build postgres api caddy
+	@echo "proxied stack up — http://localhost:8000 (Caddy; api is internal-only)"
+
 api:
 	uv run uvicorn harness.api.main:app --reload --app-dir src
 
@@ -22,10 +29,14 @@ web:
 # One-time for postgres volumes created before the init SQL existed.
 init-dbs:
 	docker compose exec postgres psql -U harness -c 'CREATE DATABASE litellm;' || true
-	docker compose exec postgres psql -U harness -c 'CREATE DATABASE langfuse;' || true
 
 test:
 	uv run pytest -q && pnpm -C frontend test
 
 logs:
 	docker compose logs -f litellm
+
+# Offline RAG ingestion, containerized (docling needs Linux; never run on the
+# macOS host). COLLECTION selects data/raw/<name>/ — e.g. papers or docs.
+ingest:
+	docker compose --profile ingest run --rm ingest --collection $(COLLECTION)

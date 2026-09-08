@@ -9,15 +9,19 @@ import pytest
 import harness.api.main as _main
 import harness.orchestration.build as build_module
 from harness.adapters.llm.fake import FakeLLMClient
+from harness.api.rate_limit import limiter
 from harness.core.types import LLMResponse
+
+_TEST_API_KEY = "test-api-key"
 
 
 @pytest.fixture(autouse=True)
 async def clean_app_state(monkeypatch):
     """Reset all module-level state and force memory checkpointer before each test."""
     monkeypatch.setenv("HARNESS_CHECKPOINTER", "memory")
+    monkeypatch.setenv("HARNESS_API_KEY", _TEST_API_KEY)
+    limiter.reset()
     _main._running.clear()
-    _main._short_term._store.clear()
     _main._registry = None
     _main._run_store = None
     _main._run_store_lock = None
@@ -26,7 +30,6 @@ async def clean_app_state(monkeypatch):
         if not task.done():
             task.cancel()
     _main._running.clear()
-    _main._short_term._store.clear()
     _main._registry = None
     _main._run_store = None
     _main._run_store_lock = None
@@ -48,7 +51,9 @@ async def client_with_fake(monkeypatch, tmp_path):
 
     transport = httpx.ASGITransport(app=_main.app)
     async with httpx.AsyncClient(
-        transport=transport, base_url="http://test"
+        transport=transport,
+        base_url="http://test",
+        headers={"Authorization": f"Bearer {_TEST_API_KEY}"},
     ) as client:
         yield client, fake
 
@@ -70,7 +75,9 @@ async def client_with_fake_azure_backend(monkeypatch, tmp_path):
 
     transport = httpx.ASGITransport(app=_main.app)
     async with httpx.AsyncClient(
-        transport=transport, base_url="http://test"
+        transport=transport,
+        base_url="http://test",
+        headers={"Authorization": f"Bearer {_TEST_API_KEY}"},
     ) as client:
         yield client, fake
 

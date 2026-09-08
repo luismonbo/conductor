@@ -1,17 +1,13 @@
-"""Integration smoke test: EvalRunner with FakeLLMClient.
+"""Integration smoke test: EvalRunner against a scripted Agent-protocol double.
 
-Scripts the fake client to call the calculator tool and produce "108",
-then asserts all three metrics pass for the calc_mul_001 case.
-No network, no real LLM — fully deterministic.
+Scripts _ScriptedAgent to call the calculator tool and produce "108", then
+asserts all three metrics pass for the calc_mul_001 case. No network, no real
+LLM or agent implementation — fully deterministic.
 """
 
-from harness.adapters.llm.fake import FakeLLMClient
-from harness.adapters.memory.in_memory import InMemoryLongTerm
-from harness.adapters.tools.calculator import CalculatorTool
-from harness.adapters.tools.recall import RecallTool
-from harness.core.agents.react import ReActAgent
-from harness.core.tools.registry import ToolRegistry
-from harness.core.types import LLMResponse, ToolCall
+from dataclasses import dataclass, field
+
+from harness.core.types import AgentResult, AgentState, ToolCall
 
 from evaluation.harness.dataset import Dataset, EvalCase, Expected
 from evaluation.harness.runner import EvalRunner
@@ -25,42 +21,58 @@ _DATASETS_DIR = (
 )
 
 
+@dataclass
+class _ScriptedAgent:
+    """Minimal Agent-protocol double: returns a canned AgentResult and
+    replays canned tool-call/tool-result events into the tracer, exactly
+    like a real agent run would, without depending on any concrete
+    agent implementation."""
+
+    output: str
+    tool_calls: list[ToolCall] = field(default_factory=list)
+    tool_results: list[tuple[str, str, bool]] = field(
+        default_factory=list
+    )  # (name, content, is_error)
+    stopped_reason: str = "final_answer"
+    tracer: object = None
+
+    async def run(self, state: AgentState) -> AgentResult:
+        if self.tracer is not None:
+            if self.tool_calls:
+                await self.tracer(
+                    "llm_response",
+                    {
+                        "tool_calls": [
+                            {"name": tc.name, "arguments": tc.arguments}
+                            for tc in self.tool_calls
+                        ]
+                    },
+                )
+            for name, content, is_error in self.tool_results:
+                await self.tracer(
+                    "tool_result",
+                    {"name": name, "content": content, "is_error": is_error},
+                )
+        return AgentResult(
+            output=self.output, state=state, stopped_reason=self.stopped_reason
+        )
+
+
 def _make_calc_agent(tracer, memory_seed=None):
     """Build a scripted agent that calls calculator then gives a final answer."""
-    client = FakeLLMClient([
-        LLMResponse(
-            text="",
-            tool_calls=(
-                ToolCall(id="tc_1", name="calculator", arguments={"expression": "12 * 9"}),
-            ),
-        ),
-        LLMResponse(text="The result of 12 * 9 is 108."),
-    ])
-    memory = InMemoryLongTerm()
-    registry = ToolRegistry()
-    registry.register(CalculatorTool())
-    registry.register(RecallTool(memory))
-    return ReActAgent(
-        llm=client,
-        tools=registry,
-        system_prompt="You are a helpful assistant.",
+    return _ScriptedAgent(
+        output="The result of 12 * 9 is 108.",
+        tool_calls=[
+            ToolCall(id="tc_1", name="calculator", arguments={"expression": "12 * 9"})
+        ],
+        tool_results=[("calculator", "108", False)],
         tracer=tracer,
     )
 
 
 def _make_direct_agent(tracer, memory_seed=None):
     """Build a scripted agent that answers without calling any tool."""
-    client = FakeLLMClient([LLMResponse(text="Hello there!")])
-    memory = InMemoryLongTerm()
-    registry = ToolRegistry()
-    registry.register(CalculatorTool())
-    registry.register(RecallTool(memory))
-    return ReActAgent(
-        llm=client,
-        tools=registry,
-        system_prompt="You are a helpful assistant.",
-        tracer=tracer,
-    )
+    return _ScriptedAgent(output="Hello there!", tracer=tracer)
 
 
 class TestNoToolCallMetricSmoke:
@@ -112,7 +124,7 @@ class TestEvalRunnerSmoke:
         for mr in case.metric_results:
             assert mr.passed, f"{mr.name} failed: {mr.reason}"
 
-    def test_report_has_correct_by_metric_counts(self):
+    def test_report_has_correct_aggregate_counts(self):
         dataset = Dataset.load(_DATASETS_DIR / "tool_use_v1.json").filter_by_tags(
             ["smoke"]
         )
@@ -120,7 +132,7 @@ class TestEvalRunnerSmoke:
         runner = EvalRunner(_make_calc_agent)
         report = runner.run(dataset, metrics, dataset_name="tool_use_v1.json")
 
-        by_metric = report._by_metric()
+        rows = {row["metric"]: row for row in report.aggregate()}
         for name in ("tool_call", "arg_schema", "output_contains"):
-            assert by_metric[name]["passed"] == 1
-            assert by_metric[name]["failed"] == 0
+            assert rows[name]["passed"] == 1
+            assert rows[name]["failed"] == 0
