@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 
-import httpx
+import httpx2
 import pytest
 
 import harness.api.main as _main
@@ -25,14 +25,18 @@ async def clean_app_state(monkeypatch):
     _main._registry = None
     _main._run_store = None
     _main._run_store_lock = None
+    _main._checkpointer_conn = None
     yield
     for task in list(_main._running.values()):
         if not task.done():
             task.cancel()
     _main._running.clear()
+    if _main._checkpointer_conn is not None:
+        await _main._checkpointer_conn.close()
     _main._registry = None
     _main._run_store = None
     _main._run_store_lock = None
+    _main._checkpointer_conn = None
 
 
 @pytest.fixture
@@ -49,8 +53,8 @@ async def client_with_fake(monkeypatch, tmp_path):
     fake = FakeLLMClient([LLMResponse(text="Hello from fake!")])
     monkeypatch.setattr(build_module, "build_llm", lambda settings, parser: fake)
 
-    transport = httpx.ASGITransport(app=_main.app)
-    async with httpx.AsyncClient(
+    transport = httpx2.ASGITransport(app=_main.app)
+    async with httpx2.AsyncClient(
         transport=transport,
         base_url="http://test",
         headers={"Authorization": f"Bearer {_TEST_API_KEY}"},
@@ -73,8 +77,8 @@ async def client_with_fake_azure_backend(monkeypatch, tmp_path):
     fake = FakeLLMClient([LLMResponse(text="Hello from fake!")])
     monkeypatch.setattr(build_module, "build_llm", lambda settings, parser: fake)
 
-    transport = httpx.ASGITransport(app=_main.app)
-    async with httpx.AsyncClient(
+    transport = httpx2.ASGITransport(app=_main.app)
+    async with httpx2.AsyncClient(
         transport=transport,
         base_url="http://test",
         headers={"Authorization": f"Bearer {_TEST_API_KEY}"},
@@ -85,7 +89,7 @@ async def client_with_fake_azure_backend(monkeypatch, tmp_path):
         await _main._run_store._conn.close()
 
 
-def sse_frames(resp: httpx.Response) -> list[dict]:
+def sse_frames(resp: httpx2.Response) -> list[dict]:
     """All `data:` frames of a fully-buffered SSE response, parsed."""
     return [
         json.loads(line[len("data: "):])
@@ -94,5 +98,5 @@ def sse_frames(resp: httpx.Response) -> list[dict]:
     ]
 
 
-def thread_id_from(resp: httpx.Response) -> str:
+def thread_id_from(resp: httpx2.Response) -> str:
     return sse_frames(resp)[0]["thread_id"]

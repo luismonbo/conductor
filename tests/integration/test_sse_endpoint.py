@@ -1,6 +1,6 @@
 """Integration tests for POST /chat/stream, POST /resume, and POST /cancel.
 
-Uses httpx AsyncClient with ASGITransport to exercise the real FastAPI app.
+Uses httpx2 AsyncClient with ASGITransport to exercise the real FastAPI app.
 HARNESS_LLM_BACKEND=fake ensures no credentials are needed; the fake backend
 returns a canned final-answer response so the stream terminates deterministically.
 """
@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 
 import pytest
-from httpx import ASGITransport, AsyncClient
+from httpx2 import ASGITransport, AsyncClient
 
 from harness.api.main import app
 from harness.config.settings import get_settings
