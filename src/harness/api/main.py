@@ -294,6 +294,15 @@ def _build_callbacks(thread_id: str, agent_name: str) -> tuple[list, dict]:
 
 _CONNECTION_ERROR_NAMES = {"APIConnectionError", "APITimeoutError", "ConnectError"}
 
+# Provider-side auth/quota/rate-limit failures (e.g. an Azure spend cap or key
+# rotation tripping) — never echo these to the public chat widget: the detail
+# belongs in the server log (see _run_graph's except block), not the response.
+_PROVIDER_UNAVAILABLE_ERROR_NAMES = {
+    "RateLimitError",
+    "PermissionDeniedError",
+    "AuthenticationError",
+}
+
 
 def _friendly_error(exc: Exception) -> str:
     if type(exc).__name__ in _CONNECTION_ERROR_NAMES:
@@ -301,6 +310,8 @@ def _friendly_error(exc: Exception) -> str:
             "LLM gateway unreachable — is the stack running? Try `make up`. "
             f"({exc})"
         )
+    if type(exc).__name__ in _PROVIDER_UNAVAILABLE_ERROR_NAMES:
+        return "The assistant is temporarily unavailable. Please try again later."
     return str(exc)
 
 
@@ -348,6 +359,9 @@ async def _run_graph(
         await event_queue.put(AgentEvent(type="error", text="cancelled"))
         raise
     except Exception as exc:
+        logging.getLogger(__name__).exception(
+            "agent run failed for thread_id=%s run_id=%s", thread_id, run_id
+        )
         stopped_reason_holder[0] = "error"
         await event_queue.put(AgentEvent(type="error", text=_friendly_error(exc)))
     finally:
