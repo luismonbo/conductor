@@ -56,6 +56,7 @@ class RagRunner:
                 error=str(exc),
                 query_type=case.query_type,
                 latency_ms=(time.perf_counter() - started) * 1000,
+                system_tokens=tracer.usage_for("token_usage"),
             )
         latency_ms = (time.perf_counter() - started) * 1000
 
@@ -69,4 +70,6 @@ class RagRunner:
             metric_results=metric_results,
             query_type=case.query_type,
             latency_ms=latency_ms,
+            system_tokens=tracer.usage_for("token_usage"),
+            eval_tokens=tracer.usage_for("judge_token_usage"),
         )

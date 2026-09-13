@@ -95,6 +95,29 @@ async def test_tool_then_answer_reports_correct_trace():
 
 
 @pytest.mark.asyncio
+async def test_run_reports_token_usage_on_the_tracer():
+    graph = build_graph(
+        llm=FakeLLMClient([
+            LLMResponse(
+                text="",
+                tool_calls=(ToolCall(id="tc_1", name="calculator", arguments={"expression": "2+2"}),),
+                usage={"input_tokens": 10, "output_tokens": 5},
+            ),
+            LLMResponse(text="The answer is 4.", usage={"input_tokens": 20, "output_tokens": 8}),
+        ]),
+        checkpointer=MemorySaver(),
+        registry=_calculator_registry(),
+    )
+    tracer = TraceCollector()
+    adapter = GraphAgentAdapter(graph, tracer=tracer)
+
+    await adapter.run(AgentState(messages=[Message(Role.USER, "what is 2+2?")]))
+
+    # Both LLM turns' usage accumulated, not just the tool-calling one.
+    assert tracer.usage_for("token_usage") == {"input_tokens": 30, "output_tokens": 13}
+
+
+@pytest.mark.asyncio
 async def test_max_iterations_reports_stopped_reason():
     responses = [
         LLMResponse(

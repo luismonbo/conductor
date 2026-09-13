@@ -55,6 +55,33 @@ async def test_faithfulness_passes_when_judge_says_grounded():
 
 
 @pytest.mark.asyncio
+async def test_faithfulness_records_judge_token_usage_on_tracer():
+    judge = FakeLLMClient(
+        [
+            LLMResponse(
+                text="",
+                tool_calls=(
+                    ToolCall(
+                        id="c1",
+                        name="score_faithfulness",
+                        arguments={"grounded": True, "reasoning": "fully supported"},
+                    ),
+                ),
+                usage={"input_tokens": 50, "output_tokens": 6},
+            ),
+        ]
+    )
+    metric = FaithfulnessMetric(judge=judge)
+    case = RagEvalCase(id="q1", query="q", expected=RagExpected())
+    result = RagResult(answer="X causes Y", retrieved=(), assembled_prompt="p")
+    tracer = TraceCollector()
+
+    await metric.score(case, result, tracer)
+
+    assert tracer.usage_for("judge_token_usage") == {"input_tokens": 50, "output_tokens": 6}
+
+
+@pytest.mark.asyncio
 async def test_faithfulness_fails_when_judge_says_ungrounded():
     judge = FakeLLMClient(
         [
@@ -121,6 +148,33 @@ async def test_answer_relevancy_passes_when_judge_says_relevant():
 
     assert mr.passed
     assert mr.score == 1.0
+
+
+@pytest.mark.asyncio
+async def test_answer_relevancy_records_judge_token_usage_on_tracer():
+    judge = FakeLLMClient(
+        [
+            LLMResponse(
+                text="",
+                tool_calls=(
+                    ToolCall(
+                        id="c1",
+                        name="score_answer_relevancy",
+                        arguments={"relevant": True, "reasoning": "directly answers"},
+                    ),
+                ),
+                usage={"input_tokens": 30, "output_tokens": 4},
+            ),
+        ]
+    )
+    metric = AnswerRelevancyMetric(judge=judge)
+    case = RagEvalCase(id="q1", query="what mechanism is used?", expected=RagExpected())
+    result = RagResult(answer="Self-attention.", retrieved=(), assembled_prompt="p")
+    tracer = TraceCollector()
+
+    await metric.score(case, result, tracer)
+
+    assert tracer.usage_for("judge_token_usage") == {"input_tokens": 30, "output_tokens": 4}
 
 
 @pytest.mark.asyncio

@@ -67,3 +67,19 @@ async def test_answer_records_retrieval_event_on_tracer():
     events = [data for _, event, data in tracer.events if event == "retrieval_result"]
     assert len(events) == 1
     assert events[0]["chunk_ids"] == ["c1"]
+
+
+@pytest.mark.asyncio
+async def test_answer_records_token_usage_on_tracer():
+    store = InMemoryVectorStore()
+    embedder = FakeEmbedder(dimension=4)
+    llm = FakeLLMClient(
+        [LLMResponse(text="answer", usage={"input_tokens": 42, "output_tokens": 7})]
+    )
+    retriever = Retriever(embedder=embedder, vector_store=store)
+    tracer = TraceCollector()
+
+    pipeline = RagPipeline(retriever=retriever, llm=llm, tracer=tracer)
+    await pipeline.answer("query")
+
+    assert tracer.usage_for("token_usage") == {"input_tokens": 42, "output_tokens": 7}

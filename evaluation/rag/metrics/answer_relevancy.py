@@ -38,6 +38,12 @@ class AnswerRelevancyMetric:
             Message(Role.USER, f"Question:\n{case.query}\n\nAnswer:\n{result.answer}"),
         ]
         response = await self._judge.generate(messages, tools=[_RELEVANCY_TOOL])
+        if tracer is not None:
+            input_tokens, output_tokens = response.token_usage
+            await tracer(
+                "judge_token_usage",
+                {"usage": {"input_tokens": input_tokens, "output_tokens": output_tokens}},
+            )
         if not response.tool_calls:
             return MetricResult(
                 name=self.name, passed=False, score=0.0,

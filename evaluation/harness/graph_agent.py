@@ -12,6 +12,7 @@ import uuid
 from typing import Any, Awaitable, Callable
 
 from harness.core.types import AgentEvent, AgentResult, AgentState
+from harness.observability.token_accumulator import TokenAccumulator
 
 Tracer = Callable[[str, dict], Awaitable[None]]
 
@@ -24,11 +25,13 @@ class GraphAgentAdapter:
     async def run(self, state: AgentState) -> AgentResult:
         queue: asyncio.Queue = asyncio.Queue()
         stopped_reason_holder: list[str] = ["unknown"]
+        accumulator = TokenAccumulator()
         config = {
             "configurable": {
                 "thread_id": str(uuid.uuid4()),
                 "event_queue": queue,
                 "stopped_reason_holder": stopped_reason_holder,
+                "token_accumulator": accumulator,
             },
         }
         graph_state = {
@@ -51,6 +54,17 @@ class GraphAgentAdapter:
                 break
             events.append(item)
         result = await task
+
+        if self._trace is not None:
+            await self._trace(
+                "token_usage",
+                {
+                    "usage": {
+                        "input_tokens": accumulator.input_tokens,
+                        "output_tokens": accumulator.output_tokens,
+                    }
+                },
+            )
 
         if (result or {}).get("__interrupt__"):
             raise RuntimeError(

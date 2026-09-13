@@ -112,6 +112,81 @@ async def test_runner_combines_multiple_llm_judge_metrics():
     }
 
 
+@pytest.mark.asyncio
+async def test_runner_captures_system_and_eval_tokens_separately():
+    store = InMemoryVectorStore()
+    embedder = FakeEmbedder(dimension=4)
+    chunk = Chunk(
+        chunk_id="c1",
+        document_id="d1",
+        collection="papers",
+        text="the model uses self-attention",
+        section_path=(),
+    )
+    [vec] = await embedder.embed([chunk.text])
+    await store.upsert([chunk], [vec])
+    llm = FakeLLMClient(
+        [
+            LLMResponse(
+                text="The model uses self-attention.",
+                usage={"input_tokens": 100, "output_tokens": 10},
+            )
+        ]
+    )
+    judge = FakeLLMClient(
+        [
+            LLMResponse(
+                text="",
+                tool_calls=(
+                    ToolCall(
+                        id="c1",
+                        name="score_faithfulness",
+                        arguments={"grounded": True, "reasoning": "matches context"},
+                    ),
+                ),
+                usage={"input_tokens": 50, "output_tokens": 5},
+            ),
+            LLMResponse(
+                text="",
+                tool_calls=(
+                    ToolCall(
+                        id="c2",
+                        name="score_answer_relevancy",
+                        arguments={"relevant": True, "reasoning": "answers the question"},
+                    ),
+                ),
+                usage={"input_tokens": 40, "output_tokens": 4},
+            ),
+        ]
+    )
+
+    def pipeline_factory(tracer):
+        return RagPipeline(
+            retriever=Retriever(embedder=embedder, vector_store=store),
+            llm=llm,
+            tracer=tracer,
+        )
+
+    case = RagEvalCase(
+        id="case1",
+        query="what mechanism is used?",
+        expected=RagExpected(graded_chunks={"c1": 3}),
+    )
+    dataset = RagDataset([case])
+    runner = RagRunner(pipeline_factory)
+    metrics = [
+        FaithfulnessMetric(judge=judge),
+        AnswerRelevancyMetric(judge=judge),
+    ]
+
+    report = await runner.run_async(dataset, metrics, dataset_name="test")
+
+    # Production cost (the pipeline's own answer call) stays separate from
+    # what it cost to *evaluate* (both judges' calls, summed).
+    assert report.cases[0].system_tokens == {"input_tokens": 100, "output_tokens": 10}
+    assert report.cases[0].eval_tokens == {"input_tokens": 90, "output_tokens": 9}
+
+
 def test_runner_records_error_without_crashing_the_whole_run():
     def broken_factory(tracer):
         raise RuntimeError("pipeline construction failed")
