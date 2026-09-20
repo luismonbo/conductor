@@ -27,6 +27,7 @@ import aiosqlite
 
 from harness.api.auth import require_api_key
 from harness.api.rate_limit import default_limit, limiter, strict_limit
+from harness.api.session import attach as attach_session_cookie, read_or_mint
 from harness.api.schemas import ChatRequest, ResumeRequest
 from harness.config.settings import get_settings
 from harness.core.types import AgentEvent, Message, Role
@@ -76,6 +77,22 @@ app.add_middleware(
     expose_headers=["Retry-After"],
     allow_credentials=False,
 )
+
+
+@app.middleware("http")
+async def _visitor_session(request: Request, call_next):
+    """Attach an opaque visitor id to every request; issue the cookie once.
+
+    Middleware, not a dependency: FastAPI drops a dependency-set Set-Cookie
+    header when the endpoint returns a Response directly (see session.py).
+    """
+    sid, minted = read_or_mint(request)
+    request.state.sid = sid
+    response = await call_next(request)
+    if minted:
+        attach_session_cookie(response, sid)
+    return response
+
 
 app.state.limiter = limiter
 
