@@ -20,6 +20,8 @@ from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
+from starlette.middleware.base import RequestResponseEndpoint
+from starlette.responses import Response
 from langgraph.types import Command
 from slowapi.errors import RateLimitExceeded
 
@@ -80,7 +82,9 @@ app.add_middleware(
 
 
 @app.middleware("http")
-async def _visitor_session(request: Request, call_next):
+async def _visitor_session(
+    request: Request, call_next: RequestResponseEndpoint
+) -> Response:
     """Attach an opaque visitor id to every request; issue the cookie once.
 
     Middleware, not a dependency: FastAPI drops a dependency-set Set-Cookie
