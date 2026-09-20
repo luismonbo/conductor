@@ -120,7 +120,8 @@ async def _rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONR
 
 app.add_exception_handler(RateLimitExceeded, _rate_limit_handler)
 
-_running: dict[str, asyncio.Task] = {}
+# thread_id -> (session_id of the visitor who started it, task)
+_running: dict[str, tuple[str, asyncio.Task]] = {}
 
 # Backends where a client-supplied ChatRequest.model is safe to honor:
 # openai_compatible routes per-model through a proxy by design; fake never
@@ -243,7 +244,7 @@ async def list_threads(request: Request, _auth: None = Depends(require_api_key))
     settings = get_settings()
     registry = await _get_registry()
     graph = registry[settings.agent]
-    rows = await run_store.list_threads()
+    rows = await run_store.list_threads(request.state.sid)
 
     async def _summarize(row: dict) -> dict:
         try:
@@ -260,6 +261,12 @@ async def list_threads(request: Request, _auth: None = Depends(require_api_key))
 @app.get("/threads/{thread_id}")
 @limiter.limit(default_limit)
 async def thread_messages(request: Request, thread_id: str, _auth: None = Depends(require_api_key)) -> dict:
+    run_store = await _get_run_store()
+    if run_store is None or not await run_store.owns_thread(request.state.sid, thread_id):
+        # Fail closed: with no run store there is nothing to check ownership
+        # against. 404 rather than 403 so a thread that is not yours is
+        # indistinguishable from one that does not exist.
+        raise HTTPException(status_code=404, detail="unknown thread")
     settings = get_settings()
     registry = await _get_registry()
     graph = registry[settings.agent]
@@ -446,13 +453,15 @@ async def chat_stream(request: Request, req: ChatRequest, _auth: None = Depends(
 
     run_store = await _get_run_store()
     if run_store:
-        await run_store.start_run(run_id, thread_id, agent_name, settings.llm_backend)
+        await run_store.start_run(
+            run_id, thread_id, agent_name, settings.llm_backend, request.state.sid
+        )
 
     task = asyncio.create_task(_run_graph(
         graph, input_state, config, thread_id, run_id,
         event_queue, accumulator, stopped_reason_holder, run_store,
     ))
-    _running[thread_id] = task
+    _running[thread_id] = (request.state.sid, task)
 
     return StreamingResponse(
         _make_sse_generator(thread_id, event_queue, task),
@@ -473,6 +482,12 @@ async def resume_run(request: Request, thread_id: str, req: ResumeRequest, _auth
     Response: same SSE stream as /chat/stream (starts with thread_id frame).
     """
     settings = get_settings()
+    run_store = await _get_run_store()
+    if run_store is None or not await run_store.owns_thread(request.state.sid, thread_id):
+        # Fail closed: with no run store there is nothing to check ownership
+        # against. 404 rather than 403 so a thread that is not yours is
+        # indistinguishable from one that does not exist.
+        raise HTTPException(status_code=404, detail="unknown thread")
     registry = await _get_registry()
     graph = registry[settings.agent]
     run_id = str(uuid.uuid4())
@@ -493,15 +508,16 @@ async def resume_run(request: Request, thread_id: str, req: ResumeRequest, _auth
         "run_name": "chat-resume",
     }
 
-    run_store = await _get_run_store()
     if run_store:
-        await run_store.start_run(run_id, thread_id, settings.agent, settings.llm_backend)
+        await run_store.start_run(
+            run_id, thread_id, settings.agent, settings.llm_backend, request.state.sid
+        )
 
     task = asyncio.create_task(_run_graph(
         graph, Command(resume=req.decision), config, thread_id, run_id,
         event_queue, accumulator, stopped_reason_holder, run_store,
     ))
-    _running[thread_id] = task
+    _running[thread_id] = (request.state.sid, task)
 
     return StreamingResponse(
         _make_sse_generator(thread_id, event_queue, task),
@@ -518,8 +534,10 @@ async def resume_run(request: Request, thread_id: str, req: ResumeRequest, _auth
 @limiter.limit(default_limit)
 async def cancel_run(request: Request, thread_id: str, _auth: None = Depends(require_api_key)) -> dict:
     """Cancel a running streaming agent task by thread_id."""
-    task = _running.get(thread_id)
-    if task and not task.done():
-        task.cancel()
-        return {"status": "cancelled", "thread_id": thread_id}
+    entry = _running.get(thread_id)
+    if entry is not None:
+        owner, task = entry
+        if owner == request.state.sid and not task.done():
+            task.cancel()
+            return {"status": "cancelled", "thread_id": thread_id}
     return {"status": "not_found", "thread_id": thread_id}

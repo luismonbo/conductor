@@ -27,7 +27,7 @@ async def clean_app_state(monkeypatch):
     _main._run_store_lock = None
     _main._checkpointer_conn = None
     yield
-    for task in list(_main._running.values()):
+    for _sid, task in list(_main._running.values()):
         if not task.done():
             task.cancel()
     _main._running.clear()
