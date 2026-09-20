@@ -11,6 +11,7 @@ import json
 import pytest
 from httpx2 import ASGITransport, AsyncClient
 
+import harness.api.main as _main
 from harness.api.main import app
 from harness.config.settings import get_settings
 
@@ -171,11 +172,16 @@ def _make_hitl_registry_factory(scripted_responses):
 
 
 @pytest.mark.asyncio
-async def test_hitl_resume_approved_produces_final(monkeypatch):
+async def test_hitl_resume_approved_produces_final(monkeypatch, tmp_path):
     """interrupt → resume(approved=True) must produce a final event."""
     from harness.core.types import LLMResponse, ToolCall
 
     monkeypatch.setenv("HARNESS_LLM_BACKEND", "fake")
+    # /resume now fails closed without a run store to check thread ownership
+    # against (see thread_ownership design), so this needs a real backing
+    # store, not the default in-memory checkpointer.
+    monkeypatch.setenv("HARNESS_CHECKPOINTER", "sqlite")
+    monkeypatch.setenv("HARNESS_CHECKPOINTER_URL", str(tmp_path / "hitl-approve.sqlite"))
     monkeypatch.setattr(
         "harness.api.main.build_agent_registry",
         _make_hitl_registry_factory([
@@ -189,38 +195,42 @@ async def test_hitl_resume_approved_produces_final(monkeypatch):
 
     thread_id = "hitl-approve-test"
     transport = ASGITransport(app=app)
-    async with AsyncClient(
-        transport=transport,
-        base_url="http://test",
-        headers={"Authorization": f"Bearer {get_settings().api_key}"},
-    ) as client:
-        events1 = []
-        async with client.stream(
-            "POST", "/chat/stream",
-            json={"message": "what is 2+2?", "thread_id": thread_id},
-            timeout=10.0,
-        ) as response:
-            async for line in response.aiter_lines():
-                if line.startswith("data: "):
-                    events1.append(json.loads(line[6:]))
-                if events1 and events1[-1].get("type") in ("final", "error", "interrupt"):
-                    break
+    try:
+        async with AsyncClient(
+            transport=transport,
+            base_url="http://test",
+            headers={"Authorization": f"Bearer {get_settings().api_key}"},
+        ) as client:
+            events1 = []
+            async with client.stream(
+                "POST", "/chat/stream",
+                json={"message": "what is 2+2?", "thread_id": thread_id},
+                timeout=10.0,
+            ) as response:
+                async for line in response.aiter_lines():
+                    if line.startswith("data: "):
+                        events1.append(json.loads(line[6:]))
+                    if events1 and events1[-1].get("type") in ("final", "error", "interrupt"):
+                        break
 
-        assert any(e.get("type") == "interrupt" for e in events1), (
-            f"Expected interrupt in first stream; got: {[e.get('type') for e in events1]}"
-        )
+            assert any(e.get("type") == "interrupt" for e in events1), (
+                f"Expected interrupt in first stream; got: {[e.get('type') for e in events1]}"
+            )
 
-        events2 = []
-        async with client.stream(
-            "POST", f"/resume/{thread_id}",
-            json={"decision": {"approved": True}},
-            timeout=10.0,
-        ) as response:
-            async for line in response.aiter_lines():
-                if line.startswith("data: "):
-                    events2.append(json.loads(line[6:]))
-                if events2 and events2[-1].get("type") in ("final", "error"):
-                    break
+            events2 = []
+            async with client.stream(
+                "POST", f"/resume/{thread_id}",
+                json={"decision": {"approved": True}},
+                timeout=10.0,
+            ) as response:
+                async for line in response.aiter_lines():
+                    if line.startswith("data: "):
+                        events2.append(json.loads(line[6:]))
+                    if events2 and events2[-1].get("type") in ("final", "error"):
+                        break
+    finally:
+        if _main._run_store is not None:
+            await _main._run_store._conn.close()
 
     types2 = [e.get("type") for e in events2]
     assert "final" in types2, f"Expected final after approval; got: {types2}"
@@ -228,11 +238,16 @@ async def test_hitl_resume_approved_produces_final(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_hitl_resume_rejected_agent_recovers(monkeypatch):
+async def test_hitl_resume_rejected_agent_recovers(monkeypatch, tmp_path):
     """interrupt → resume(approved=False) must produce final (agent recovers), not error."""
     from harness.core.types import LLMResponse, ToolCall
 
     monkeypatch.setenv("HARNESS_LLM_BACKEND", "fake")
+    # /resume now fails closed without a run store to check thread ownership
+    # against (see thread_ownership design), so this needs a real backing
+    # store, not the default in-memory checkpointer.
+    monkeypatch.setenv("HARNESS_CHECKPOINTER", "sqlite")
+    monkeypatch.setenv("HARNESS_CHECKPOINTER_URL", str(tmp_path / "hitl-reject.sqlite"))
     monkeypatch.setattr(
         "harness.api.main.build_agent_registry",
         _make_hitl_registry_factory([
@@ -246,38 +261,42 @@ async def test_hitl_resume_rejected_agent_recovers(monkeypatch):
 
     thread_id = "hitl-reject-test"
     transport = ASGITransport(app=app)
-    async with AsyncClient(
-        transport=transport,
-        base_url="http://test",
-        headers={"Authorization": f"Bearer {get_settings().api_key}"},
-    ) as client:
-        events1 = []
-        async with client.stream(
-            "POST", "/chat/stream",
-            json={"message": "what is 1+1?", "thread_id": thread_id},
-            timeout=10.0,
-        ) as response:
-            async for line in response.aiter_lines():
-                if line.startswith("data: "):
-                    events1.append(json.loads(line[6:]))
-                if events1 and events1[-1].get("type") in ("final", "error", "interrupt"):
-                    break
+    try:
+        async with AsyncClient(
+            transport=transport,
+            base_url="http://test",
+            headers={"Authorization": f"Bearer {get_settings().api_key}"},
+        ) as client:
+            events1 = []
+            async with client.stream(
+                "POST", "/chat/stream",
+                json={"message": "what is 1+1?", "thread_id": thread_id},
+                timeout=10.0,
+            ) as response:
+                async for line in response.aiter_lines():
+                    if line.startswith("data: "):
+                        events1.append(json.loads(line[6:]))
+                    if events1 and events1[-1].get("type") in ("final", "error", "interrupt"):
+                        break
 
-        assert any(e.get("type") == "interrupt" for e in events1), (
-            f"Expected interrupt in first stream; got: {[e.get('type') for e in events1]}"
-        )
+            assert any(e.get("type") == "interrupt" for e in events1), (
+                f"Expected interrupt in first stream; got: {[e.get('type') for e in events1]}"
+            )
 
-        events2 = []
-        async with client.stream(
-            "POST", f"/resume/{thread_id}",
-            json={"decision": {"approved": False}},
-            timeout=10.0,
-        ) as response:
-            async for line in response.aiter_lines():
-                if line.startswith("data: "):
-                    events2.append(json.loads(line[6:]))
-                if events2 and events2[-1].get("type") in ("final", "error"):
-                    break
+            events2 = []
+            async with client.stream(
+                "POST", f"/resume/{thread_id}",
+                json={"decision": {"approved": False}},
+                timeout=10.0,
+            ) as response:
+                async for line in response.aiter_lines():
+                    if line.startswith("data: "):
+                        events2.append(json.loads(line[6:]))
+                    if events2 and events2[-1].get("type") in ("final", "error"):
+                        break
+    finally:
+        if _main._run_store is not None:
+            await _main._run_store._conn.close()
 
     types2 = [e.get("type") for e in events2]
     assert "final" in types2, f"Expected final after rejection (agent recovers); got: {types2}"
