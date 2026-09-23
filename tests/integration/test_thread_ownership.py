@@ -56,6 +56,26 @@ async def test_reading_another_visitors_thread_is_404(two_clients):
     assert (await bob.get(f"/threads/{alice_thread}")).status_code == 404
 
 
+async def test_chat_stream_rejects_another_visitors_thread_id(two_clients):
+    """A caller may continue its own thread but not name someone else's.
+
+    Without the check, Bob's post would load Alice's history into his
+    response AND record his session as an owner of her thread.
+    """
+    alice, bob = two_clients
+    response = await alice.post("/chat/stream", json={"message": "alice secret"})
+    alice_thread = thread_id_from(response)
+
+    hijack = await bob.post("/chat/stream", json={"message": "recap", "thread_id": alice_thread})
+    assert hijack.status_code == 404
+    # No shared ownership was recorded as a side effect of the attempt.
+    assert (await bob.get(f"/threads/{alice_thread}")).status_code == 404
+
+    # The owner can still continue her own thread through the same check.
+    own = await alice.post("/chat/stream", json={"message": "and again", "thread_id": alice_thread})
+    assert own.status_code == 200
+
+
 async def test_cancelling_another_visitors_thread_is_not_found(two_clients, monkeypatch):
     """Bob is denied; Alice, cancelling the same in-flight run, succeeds.
 
@@ -140,3 +160,17 @@ async def test_thread_read_fails_closed_without_a_run_store(client_with_fake, mo
 
     monkeypatch.setattr(_main, "_get_run_store", _no_store)
     assert (await client.get(f"/threads/{thread_id}")).status_code == 404
+
+
+async def test_resume_fails_closed_without_a_run_store(client_with_fake, monkeypatch):
+    """No run store means no way to verify ownership, so resume is refused too."""
+    client, _ = client_with_fake
+    response = await client.post("/chat/stream", json={"message": "hello"})
+    thread_id = thread_id_from(response)
+
+    async def _no_store():
+        return None
+
+    monkeypatch.setattr(_main, "_get_run_store", _no_store)
+    resp = await client.post(f"/resume/{thread_id}", json={"decision": {"approved": True}})
+    assert resp.status_code == 404
