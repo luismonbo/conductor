@@ -1,20 +1,26 @@
 """A visitor sees only their own threads and cannot read anyone else's."""
 import asyncio
 
+import aiosqlite
 import httpx2
 import pytest
 
 import harness.api.main as _main
 from harness.adapters.llm.fake import FakeLLMClient
-from harness.core.types import LLMResponse
-from tests.integration.conftest import _TEST_API_KEY, thread_id_from
+from harness.core.types import LLMResponse, ToolCall
+from harness.observability.run_store import RunStore
+from tests.integration.conftest import _TEST_API_KEY, sse_frames, thread_id_from
 
 
-@pytest.fixture
-async def two_clients(monkeypatch, tmp_path):
-    """Two independent cookie jars against one app and one sqlite file."""
+@pytest.fixture(params=["sqlite", "memory"])
+async def two_clients(request, monkeypatch, tmp_path):
+    """Two independent cookie jars against one app, once per checkpointer mode.
+
+    Ownership must hold identically in every mode — memory mode has its own
+    in-process run store — so every test using this runs against both.
+    """
     monkeypatch.setenv("HARNESS_LLM_BACKEND", "fake")
-    monkeypatch.setenv("HARNESS_CHECKPOINTER", "sqlite")
+    monkeypatch.setenv("HARNESS_CHECKPOINTER", request.param)
     monkeypatch.setenv("HARNESS_CHECKPOINTER_URL", str(tmp_path / "h.sqlite"))
 
     import harness.orchestration.build as build_module
@@ -140,37 +146,57 @@ async def test_cancelling_another_visitors_thread_is_not_found(two_clients, monk
         await asyncio.wait_for(task, timeout=5)
 
 
-async def test_resuming_another_visitors_thread_is_404(two_clients):
+async def test_resuming_another_visitors_thread_is_404(two_clients, monkeypatch):
+    """Bob cannot answer Alice's pending approval; she still can, afterwards.
+
+    The run pauses on a real interrupt (a proposed `remember`; conftest enables
+    the memory tools), so Bob is refused while there is something to answer,
+    and Alice answering after him proves his attempt left it pending. Both
+    decisions deny, so no tool runs even if the guard regresses.
+    """
     alice, bob = two_clients
-    response = await alice.post("/chat/stream", json={"message": "alice secret"})
+
+    import harness.orchestration.build as build_module
+
+    proposal = LLMResponse(
+        text="",
+        tool_calls=(ToolCall(id="c1", name="remember", arguments={"text": "alice secret"}),),
+    )
+    fake = FakeLLMClient([proposal, LLMResponse(text="Not saved.")])
+    monkeypatch.setattr(build_module, "build_llm", lambda settings, parser: fake)
+
+    response = await alice.post("/chat/stream", json={"message": "remember my secret"})
+    assert "interrupt" in [f.get("type") for f in sse_frames(response)]
     alice_thread = thread_id_from(response)
 
-    resp = await bob.post(f"/resume/{alice_thread}", json={"decision": {"approved": True}})
-    assert resp.status_code == 404
+    deny = {"decision": {"action": "deny"}}
+    assert (await bob.post(f"/resume/{alice_thread}", json=deny)).status_code == 404
+
+    own = await alice.post(f"/resume/{alice_thread}", json=deny)
+    assert own.status_code == 200
+    assert sse_frames(own)[-1]["type"] == "final"
 
 
-async def test_thread_read_fails_closed_without_a_run_store(client_with_fake, monkeypatch):
-    """No run store means no way to verify ownership, so nothing is served."""
-    client, _ = client_with_fake
-    response = await client.post("/chat/stream", json={"message": "hello"})
-    thread_id = thread_id_from(response)
+async def test_a_failed_run_store_setup_is_retried_not_cached(monkeypatch):
+    """A store cached before its schema is in place would 404 every continued
+    thread until restart, so a failed setup is discarded (and closed)."""
+    real_create_table = RunStore.create_table
+    attempts: list[RunStore] = []
 
-    async def _no_store():
-        return None
+    async def _fails_once(self):
+        attempts.append(self)
+        if len(attempts) == 1:
+            raise aiosqlite.OperationalError("database is locked")
+        await real_create_table(self)
 
-    monkeypatch.setattr(_main, "_get_run_store", _no_store)
-    assert (await client.get(f"/threads/{thread_id}")).status_code == 404
+    monkeypatch.setattr(RunStore, "create_table", _fails_once)
 
+    with pytest.raises(aiosqlite.OperationalError):
+        await _main._get_run_store()
+    assert _main._run_store is None
+    with pytest.raises(ValueError):
+        await attempts[0]._conn.execute("SELECT 1")  # its connection was closed
 
-async def test_resume_fails_closed_without_a_run_store(client_with_fake, monkeypatch):
-    """No run store means no way to verify ownership, so resume is refused too."""
-    client, _ = client_with_fake
-    response = await client.post("/chat/stream", json={"message": "hello"})
-    thread_id = thread_id_from(response)
-
-    async def _no_store():
-        return None
-
-    monkeypatch.setattr(_main, "_get_run_store", _no_store)
-    resp = await client.post(f"/resume/{thread_id}", json={"decision": {"approved": True}})
-    assert resp.status_code == 404
+    store = await _main._get_run_store()
+    await store.start_run("r1", "t1", "default", "fake", "sid-a")
+    assert await store.owns_thread("sid-a", "t1") is True

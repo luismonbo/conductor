@@ -14,6 +14,7 @@ from httpx2 import ASGITransport, AsyncClient
 import harness.api.main as _main
 from harness.api.main import app
 from harness.config.settings import get_settings
+from tests.integration.conftest import sse_frames
 
 
 @pytest.mark.asyncio
@@ -69,10 +70,10 @@ async def test_chat_stream_ends_with_final_or_error(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_chat_stream_propagates_explicit_thread_id(monkeypatch):
-    """If thread_id is supplied in the request body, it must appear in the first SSE."""
+async def test_continuing_a_thread_echoes_its_server_issued_id(monkeypatch):
+    """Thread ids are server-issued: a visitor takes the id from the first SSE
+    frame of a new thread, sends it back to continue, and gets it echoed."""
     monkeypatch.setenv("HARNESS_LLM_BACKEND", "fake")
-    tid = "my-test-thread-123"
 
     transport = ASGITransport(app=app)
     async with AsyncClient(
@@ -80,20 +81,17 @@ async def test_chat_stream_propagates_explicit_thread_id(monkeypatch):
         base_url="https://test",
         headers={"Authorization": f"Bearer {get_settings().api_key}"},
     ) as client:
-        events = []
-        async with client.stream(
-            "POST",
-            "/chat/stream",
-            json={"message": "hi", "thread_id": tid},
-            timeout=10.0,
-        ) as response:
-            async for line in response.aiter_lines():
-                if line.startswith("data: "):
-                    events.append(json.loads(line[6:]))
-                if events and events[-1].get("type") in ("final", "error"):
-                    break
+        started = await client.post("/chat/stream", json={"message": "hi"}, timeout=10.0)
+        thread_id = sse_frames(started)[0]["thread_id"]
 
-    assert events[0]["thread_id"] == tid
+        continued = await client.post(
+            "/chat/stream",
+            json={"message": "and again", "thread_id": thread_id},
+            timeout=10.0,
+        )
+
+    assert continued.status_code == 200
+    assert sse_frames(continued)[0]["thread_id"] == thread_id
 
 
 @pytest.mark.asyncio
@@ -177,9 +175,9 @@ async def test_hitl_resume_approved_produces_final(monkeypatch, tmp_path):
     from harness.core.types import LLMResponse, ToolCall
 
     monkeypatch.setenv("HARNESS_LLM_BACKEND", "fake")
-    # /resume now fails closed without a run store to check thread ownership
-    # against (see thread_ownership design), so this needs a real backing
-    # store, not the default in-memory checkpointer.
+    # sqlite, the default checkpointer, so the interrupt and the resume
+    # round-trip through real persistence. Resume under the memory
+    # checkpointer is covered in test_thread_ownership.py.
     monkeypatch.setenv("HARNESS_CHECKPOINTER", "sqlite")
     monkeypatch.setenv("HARNESS_CHECKPOINTER_URL", str(tmp_path / "hitl-approve.sqlite"))
     monkeypatch.setattr(
@@ -245,9 +243,9 @@ async def test_hitl_resume_rejected_agent_recovers(monkeypatch, tmp_path):
     from harness.core.types import LLMResponse, ToolCall
 
     monkeypatch.setenv("HARNESS_LLM_BACKEND", "fake")
-    # /resume now fails closed without a run store to check thread ownership
-    # against (see thread_ownership design), so this needs a real backing
-    # store, not the default in-memory checkpointer.
+    # sqlite, the default checkpointer, so the interrupt and the resume
+    # round-trip through real persistence. Resume under the memory
+    # checkpointer is covered in test_thread_ownership.py.
     monkeypatch.setenv("HARNESS_CHECKPOINTER", "sqlite")
     monkeypatch.setenv("HARNESS_CHECKPOINTER_URL", str(tmp_path / "hitl-reject.sqlite"))
     monkeypatch.setattr(

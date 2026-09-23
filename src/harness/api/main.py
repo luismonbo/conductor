@@ -146,19 +146,38 @@ def _get_run_store_lock() -> asyncio.Lock:
     return _run_store_lock
 
 
-async def _get_run_store() -> RunStore | None:
+async def _get_run_store() -> RunStore:
+    """The process-wide run store, opened on first use.
+
+    Every checkpointer mode has one, because thread ownership is checked
+    against it. Memory mode keeps it in an in-process sqlite database, which
+    lives exactly as long as this one connection: the process.
+
+    Cached only once its schema is in place. A store cached before
+    create_table() succeeded would lack the session_id column, so every
+    continued thread would 404 until restart.
+    """
     global _run_store
     if _run_store is not None:
         return _run_store
     settings = get_settings()
-    if settings.checkpointer == "memory":
-        return None
     async with _get_run_store_lock():
         if _run_store is None:
-            conn = await aiosqlite.connect(settings.checkpointer_url)
-            _run_store = RunStore(conn)
-            await _run_store.create_table()
-    return _run_store
+            path = (
+                ":memory:"
+                if settings.checkpointer == "memory"
+                else settings.checkpointer_url
+            )
+            conn = await aiosqlite.connect(path)
+            store = RunStore(conn)
+            try:
+                await store.create_table()
+            except BaseException:
+                # Not cached, so the next request retries on a fresh connection.
+                await conn.close()
+                raise
+            _run_store = store
+        return _run_store
 
 
 async def _get_registry() -> dict[str, object]:
@@ -237,28 +256,14 @@ def _title_from(messages: list[Message]) -> str:
     return (first_user.content[:60] if first_user else "")
 
 
-async def _require_owned_thread(
-    request: Request, thread_id: str, *, fail_closed: bool = True
-) -> None:
-    """404 unless a run store confirms this visitor's session owns thread_id.
+async def _require_owned_thread(request: Request, thread_id: str) -> None:
+    """404 unless this visitor's session owns thread_id.
 
-    fail_closed=True (thread_messages, resume_run): these routes exist only to
-    act on a specific existing thread, so with no run store there is nothing
-    to check ownership against and the request is refused outright.
-
-    fail_closed=False (chat_stream): a fresh or continuing chat must keep
-    working even with no run store (checkpointer=memory, test-only); the
-    ownership check is simply skipped in that mode rather than blocking chat
-    entirely, matching the degradation list_threads already has there.
-
-    404 rather than 403 either way, so a thread that is not yours is
-    indistinguishable from one that does not exist.
+    Enforced identically in every checkpointer mode: there is always a run
+    store to check against (see _get_run_store). 404 rather than 403, so a
+    thread that is not yours is indistinguishable from one that does not exist.
     """
     run_store = await _get_run_store()
-    if run_store is None:
-        if fail_closed:
-            raise HTTPException(status_code=404, detail="unknown thread")
-        return
     if not await run_store.owns_thread(request.state.sid, thread_id):
         raise HTTPException(status_code=404, detail="unknown thread")
 
@@ -267,8 +272,6 @@ async def _require_owned_thread(
 @limiter.limit(default_limit)
 async def list_threads(request: Request, _auth: None = Depends(require_api_key)) -> dict:
     run_store = await _get_run_store()
-    if run_store is None:
-        return {"threads": []}
     settings = get_settings()
     registry = await _get_registry()
     graph = registry[settings.agent]
@@ -395,7 +398,7 @@ async def _run_graph(
     event_queue: asyncio.Queue,
     accumulator: TokenAccumulator,
     stopped_reason_holder: list[str],
-    run_store: RunStore | None,
+    run_store: RunStore,
 ) -> None:
     try:
         result = await graph.ainvoke(invoke_arg, config)
@@ -417,17 +420,16 @@ async def _run_graph(
         await event_queue.put(AgentEvent(type="error", text=_friendly_error(exc)))
     finally:
         _running.pop(thread_id, None)
-        if run_store:
-            # Shield finish_run so it completes even if the task is being cancelled
-            # (the SSE generator's finally block calls task.cancel() once it sees None).
-            # finish_run must land before we send the sentinel so the task is already
-            # done by the time the generator can cancel it.
-            try:
-                await asyncio.shield(
-                    run_store.finish_run(run_id, accumulator, stopped_reason_holder[0])
-                )
-            except asyncio.CancelledError:
-                pass
+        # Shield finish_run so it completes even if the task is being cancelled
+        # (the SSE generator's finally block calls task.cancel() once it sees None).
+        # finish_run must land before we send the sentinel so the task is already
+        # done by the time the generator can cancel it.
+        try:
+            await asyncio.shield(
+                run_store.finish_run(run_id, accumulator, stopped_reason_holder[0])
+            )
+        except asyncio.CancelledError:
+            pass
         await event_queue.put(None)
 
 
@@ -451,7 +453,7 @@ async def chat_stream(request: Request, req: ChatRequest, _auth: None = Depends(
         # visitor's history into this response (it feeds the graph as prior
         # state) and hands this session co-ownership going forward, since
         # start_run below would record it as an owner too.
-        await _require_owned_thread(request, req.thread_id, fail_closed=False)
+        await _require_owned_thread(request, req.thread_id)
     settings = get_settings()
     thread_id = req.thread_id or str(uuid.uuid4())
     run_id = str(uuid.uuid4())
@@ -483,10 +485,9 @@ async def chat_stream(request: Request, req: ChatRequest, _auth: None = Depends(
     }
 
     run_store = await _get_run_store()
-    if run_store:
-        await run_store.start_run(
-            run_id, thread_id, agent_name, settings.llm_backend, request.state.sid
-        )
+    await run_store.start_run(
+        run_id, thread_id, agent_name, settings.llm_backend, request.state.sid
+    )
 
     task = asyncio.create_task(_run_graph(
         graph, input_state, config, thread_id, run_id,
@@ -535,10 +536,9 @@ async def resume_run(request: Request, thread_id: str, req: ResumeRequest, _auth
     }
 
     run_store = await _get_run_store()
-    if run_store:
-        await run_store.start_run(
-            run_id, thread_id, settings.agent, settings.llm_backend, request.state.sid
-        )
+    await run_store.start_run(
+        run_id, thread_id, settings.agent, settings.llm_backend, request.state.sid
+    )
 
     task = asyncio.create_task(_run_graph(
         graph, Command(resume=req.decision), config, thread_id, run_id,

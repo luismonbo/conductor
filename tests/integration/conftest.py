@@ -32,6 +32,10 @@ async def clean_app_state(monkeypatch):
         if not task.done():
             task.cancel()
     _main._running.clear()
+    # Every checkpointer mode opens a run store (memory mode's is an in-process
+    # sqlite database), so there is always a connection to close.
+    if _main._run_store is not None:
+        await _main._run_store._conn.close()
     if _main._checkpointer_conn is not None:
         await _main._checkpointer_conn.close()
     _main._registry = None
