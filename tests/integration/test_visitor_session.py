@@ -1,8 +1,9 @@
 """An opaque sid cookie identifies an anonymous visitor across requests."""
 import httpx2
+from starlette.requests import Request
 
 import harness.api.main as _main
-from harness.api.session import COOKIE_NAME
+from harness.api.session import COOKIE_NAME, read_or_mint
 
 
 def _attributes(set_cookie: str) -> set[str]:
@@ -66,3 +67,11 @@ async def test_separate_clients_get_separate_ids():
             await a.get("/health")
             await b.get("/health")
             assert a.cookies.get(COOKIE_NAME) != b.cookies.get(COOKIE_NAME)
+
+
+def test_minted_session_id_carries_256_bits():
+    # The id is deliberately unsigned; that ruling rests on it being
+    # unguessable. secrets.token_urlsafe(32) is 43 base64url characters.
+    sid, minted = read_or_mint(Request({"type": "http", "headers": []}))
+    assert minted
+    assert len(sid) >= 43

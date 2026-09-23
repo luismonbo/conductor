@@ -55,6 +55,18 @@ async def test_owns_thread(store):
     assert await store.owns_thread(SID_A, "never-existed") is False
 
 
+async def test_owns_thread_fails_closed_when_the_store_errors():
+    conn = await aiosqlite.connect(":memory:")
+    store = RunStore(conn)
+    await store.create_table()
+    await store.start_run("r1", "mine", "default", "fake", SID_A)
+    assert await store.owns_thread(SID_A, "mine") is True
+
+    await conn.close()  # every query now raises
+
+    assert await store.owns_thread(SID_A, "mine") is False
+
+
 async def test_create_table_is_idempotent_and_migrates_legacy_rows():
     """A database created before this change gains the column without raising."""
     conn = await aiosqlite.connect(":memory:")
