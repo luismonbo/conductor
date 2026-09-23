@@ -18,13 +18,15 @@ def build_registry(
     default_collection: str = "papers",
     default_k: int = 5,
     collections: list[str] | None = None,
+    memory_tools: bool = False,
 ) -> ToolRegistry:
     if long_term is None:
         long_term = InMemoryLongTerm()
     registry = ToolRegistry()
     registry.register(CalculatorTool())
-    registry.register(RecallTool(long_term))
-    registry.register(RememberTool(long_term))
+    if memory_tools:
+        registry.register(RecallTool(long_term))
+        registry.register(RememberTool(long_term))
     if retriever is not None and vector_store is not None:
         registry.register(SearchDocumentsTool(
             retriever, vector_store, default_collection, default_k, collections,

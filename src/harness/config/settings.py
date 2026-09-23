@@ -81,6 +81,12 @@ class Settings(BaseSettings):
     # Agent
     agent: str = "default"
     max_iterations: int = 8
+
+    # Long-term memory is a single shared store with no per-visitor partition,
+    # so remember/recall must stay off on any public deployment. Default-safe;
+    # the daily-driver target opts in. See
+    # docs/superpowers/specs/2026-09-19-visitor-scoped-threads-design.md.
+    memory_tools_enabled: bool = False
     system_prompt: str = (
         "You are a helpful assistant. "
         "Use the calculator tool for any arithmetic operation or numeric "

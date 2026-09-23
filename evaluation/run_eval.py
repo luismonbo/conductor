@@ -73,6 +73,9 @@ def main() -> int:
         return 1
 
     settings = get_settings()
+    # The eval measures the agent's full capability; tool_use_v1.json contains
+    # recall/remember cases that would silently fail under the public default.
+    settings = settings.model_copy(update={"memory_tools_enabled": True})
     if args.backend:
         settings = settings.model_copy(update={"llm_backend": args.backend})
 
