@@ -110,6 +110,11 @@ class Settings(BaseSettings):
     auth_enabled: bool = True
     api_key: str = ""
 
+    # Visitor session cookie (sid): Secure by default. Set false only for local
+    # development on a browser that does not treat http://localhost as a
+    # secure context.
+    session_cookie_secure: bool = True
+
     @model_validator(mode="after")
     def _require_api_key_when_auth_enabled(self) -> "Settings":
         if self.auth_enabled and not self.api_key:

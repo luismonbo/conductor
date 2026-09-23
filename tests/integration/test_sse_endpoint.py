@@ -24,7 +24,7 @@ async def test_chat_stream_starts_with_thread_id(monkeypatch):
     transport = ASGITransport(app=app)
     async with AsyncClient(
         transport=transport,
-        base_url="http://test",
+        base_url="https://test",
         headers={"Authorization": f"Bearer {get_settings().api_key}"},
     ) as client:
         events = []
@@ -51,7 +51,7 @@ async def test_chat_stream_ends_with_final_or_error(monkeypatch):
     transport = ASGITransport(app=app)
     async with AsyncClient(
         transport=transport,
-        base_url="http://test",
+        base_url="https://test",
         headers={"Authorization": f"Bearer {get_settings().api_key}"},
     ) as client:
         events = []
@@ -77,7 +77,7 @@ async def test_chat_stream_propagates_explicit_thread_id(monkeypatch):
     transport = ASGITransport(app=app)
     async with AsyncClient(
         transport=transport,
-        base_url="http://test",
+        base_url="https://test",
         headers={"Authorization": f"Bearer {get_settings().api_key}"},
     ) as client:
         events = []
@@ -104,7 +104,7 @@ async def test_cancel_unknown_thread_returns_not_found(monkeypatch):
     transport = ASGITransport(app=app)
     async with AsyncClient(
         transport=transport,
-        base_url="http://test",
+        base_url="https://test",
         headers={"Authorization": f"Bearer {get_settings().api_key}"},
     ) as client:
         response = await client.post("/cancel/nonexistent-id-xyz")
@@ -127,7 +127,7 @@ async def test_token_events_appear_in_stream(monkeypatch):
     transport = ASGITransport(app=app)
     async with AsyncClient(
         transport=transport,
-        base_url="http://test",
+        base_url="https://test",
         headers={"Authorization": f"Bearer {get_settings().api_key}"},
     ) as client:
         events = []
@@ -197,7 +197,7 @@ async def test_hitl_resume_approved_produces_final(monkeypatch, tmp_path):
     try:
         async with AsyncClient(
             transport=transport,
-            base_url="http://test",
+            base_url="https://test",
             headers={"Authorization": f"Bearer {get_settings().api_key}"},
         ) as client:
             # No thread_id: server-issues one (thread ids are server-issued
@@ -265,7 +265,7 @@ async def test_hitl_resume_rejected_agent_recovers(monkeypatch, tmp_path):
     try:
         async with AsyncClient(
             transport=transport,
-            base_url="http://test",
+            base_url="https://test",
             headers={"Authorization": f"Bearer {get_settings().api_key}"},
         ) as client:
             # No thread_id: server-issues one (thread ids are server-issued

@@ -133,6 +133,7 @@ uv run pytest -q   # 354 tests
 | `HARNESS_TOOL_PARSER` | `native` | `native` · `prompted` |
 | `HARNESS_MAX_ITERATIONS` | `8` | integer |
 | `HARNESS_MEMORY_TOOLS_ENABLED` | `false` | `true` · `false` — gates the shared `remember`/`recall` long-term memory tools; must stay off on a public deployment since that store is not partitioned per visitor |
+| `HARNESS_SESSION_COOKIE_SECURE` | `true` | `true` · `false` — marks the visitor `sid` cookie `Secure`, so browsers only send it over HTTPS; set `false` only for local development on a browser that does not treat `http://localhost` as a secure context |
 | `HARNESS_RATE_LIMIT_ENABLED` | `true` | `true` · `false` |
 | `HARNESS_RATE_LIMIT_STRICT` | `15/minute` | slowapi rate string; applies to LLM-invoking endpoints |
 | `HARNESS_RATE_LIMIT_DEFAULT` | `60/minute` | slowapi rate string; applies to all other rate-limited endpoints |

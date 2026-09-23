@@ -57,7 +57,7 @@ async def client_with_fake(monkeypatch, tmp_path):
     transport = httpx2.ASGITransport(app=_main.app)
     async with httpx2.AsyncClient(
         transport=transport,
-        base_url="http://test",
+        base_url="https://test",
         headers={"Authorization": f"Bearer {_TEST_API_KEY}"},
     ) as client:
         yield client, fake
@@ -81,7 +81,7 @@ async def client_with_fake_azure_backend(monkeypatch, tmp_path):
     transport = httpx2.ASGITransport(app=_main.app)
     async with httpx2.AsyncClient(
         transport=transport,
-        base_url="http://test",
+        base_url="https://test",
         headers={"Authorization": f"Bearer {_TEST_API_KEY}"},
     ) as client:
         yield client, fake

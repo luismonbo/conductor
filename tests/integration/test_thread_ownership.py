@@ -24,8 +24,8 @@ async def two_clients(monkeypatch, tmp_path):
 
     transport = httpx2.ASGITransport(app=_main.app)
     headers = {"Authorization": f"Bearer {_TEST_API_KEY}"}
-    async with httpx2.AsyncClient(transport=transport, base_url="http://test", headers=headers) as a:
-        async with httpx2.AsyncClient(transport=transport, base_url="http://test", headers=headers) as b:
+    async with httpx2.AsyncClient(transport=transport, base_url="https://test", headers=headers) as a:
+        async with httpx2.AsyncClient(transport=transport, base_url="https://test", headers=headers) as b:
             yield a, b
 
     if _main._run_store is not None:
