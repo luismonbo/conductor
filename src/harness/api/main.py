@@ -235,6 +235,32 @@ def _title_from(messages: list[Message]) -> str:
     return (first_user.content[:60] if first_user else "")
 
 
+async def _require_owned_thread(
+    request: Request, thread_id: str, *, fail_closed: bool = True
+) -> None:
+    """404 unless a run store confirms this visitor's session owns thread_id.
+
+    fail_closed=True (thread_messages, resume_run): these routes exist only to
+    act on a specific existing thread, so with no run store there is nothing
+    to check ownership against and the request is refused outright.
+
+    fail_closed=False (chat_stream): a fresh or continuing chat must keep
+    working even with no run store (checkpointer=memory, test-only); the
+    ownership check is simply skipped in that mode rather than blocking chat
+    entirely, matching the degradation list_threads already has there.
+
+    404 rather than 403 either way, so a thread that is not yours is
+    indistinguishable from one that does not exist.
+    """
+    run_store = await _get_run_store()
+    if run_store is None:
+        if fail_closed:
+            raise HTTPException(status_code=404, detail="unknown thread")
+        return
+    if not await run_store.owns_thread(request.state.sid, thread_id):
+        raise HTTPException(status_code=404, detail="unknown thread")
+
+
 @app.get("/threads")
 @limiter.limit(default_limit)
 async def list_threads(request: Request, _auth: None = Depends(require_api_key)) -> dict:
@@ -261,12 +287,7 @@ async def list_threads(request: Request, _auth: None = Depends(require_api_key))
 @app.get("/threads/{thread_id}")
 @limiter.limit(default_limit)
 async def thread_messages(request: Request, thread_id: str, _auth: None = Depends(require_api_key)) -> dict:
-    run_store = await _get_run_store()
-    if run_store is None or not await run_store.owns_thread(request.state.sid, thread_id):
-        # Fail closed: with no run store there is nothing to check ownership
-        # against. 404 rather than 403 so a thread that is not yours is
-        # indistinguishable from one that does not exist.
-        raise HTTPException(status_code=404, detail="unknown thread")
+    await _require_owned_thread(request, thread_id)
     settings = get_settings()
     registry = await _get_registry()
     graph = registry[settings.agent]
@@ -421,6 +442,14 @@ async def chat_stream(request: Request, req: ChatRequest, _auth: None = Depends(
     Subsequent frames: each AgentEvent serialized with dataclasses.asdict().
     Stream ends after a ``final``, ``interrupt``, or ``error`` event.
     """
+    if req.thread_id:
+        # Thread ids are server-issued only: a caller may continue a thread
+        # this session started, but not name one it doesn't already own.
+        # Without this, a guessed/shared thread_id both leaks another
+        # visitor's history into this response (it feeds the graph as prior
+        # state) and hands this session co-ownership going forward, since
+        # start_run below would record it as an owner too.
+        await _require_owned_thread(request, req.thread_id, fail_closed=False)
     settings = get_settings()
     thread_id = req.thread_id or str(uuid.uuid4())
     run_id = str(uuid.uuid4())
@@ -481,13 +510,8 @@ async def resume_run(request: Request, thread_id: str, req: ResumeRequest, _auth
 
     Response: same SSE stream as /chat/stream (starts with thread_id frame).
     """
+    await _require_owned_thread(request, thread_id)
     settings = get_settings()
-    run_store = await _get_run_store()
-    if run_store is None or not await run_store.owns_thread(request.state.sid, thread_id):
-        # Fail closed: with no run store there is nothing to check ownership
-        # against. 404 rather than 403 so a thread that is not yours is
-        # indistinguishable from one that does not exist.
-        raise HTTPException(status_code=404, detail="unknown thread")
     registry = await _get_registry()
     graph = registry[settings.agent]
     run_id = str(uuid.uuid4())
@@ -508,6 +532,7 @@ async def resume_run(request: Request, thread_id: str, req: ResumeRequest, _auth
         "run_name": "chat-resume",
     }
 
+    run_store = await _get_run_store()
     if run_store:
         await run_store.start_run(
             run_id, thread_id, settings.agent, settings.llm_backend, request.state.sid

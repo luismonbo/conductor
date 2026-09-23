@@ -1,4 +1,6 @@
 """A visitor sees only their own threads and cannot read anyone else's."""
+import asyncio
+
 import httpx2
 import pytest
 
@@ -54,13 +56,77 @@ async def test_reading_another_visitors_thread_is_404(two_clients):
     assert (await bob.get(f"/threads/{alice_thread}")).status_code == 404
 
 
-async def test_cancelling_another_visitors_thread_is_not_found(two_clients):
+async def test_cancelling_another_visitors_thread_is_not_found(two_clients, monkeypatch):
+    """Bob is denied; Alice, cancelling the same in-flight run, succeeds.
+
+    Both directions matter: a single not_found assertion would also pass
+    against an unguarded cancel_run if the run had already finished by the
+    time we checked — proving nothing about ownership. The second assertion
+    (Alice succeeds) is what proves the guard discriminates by owner rather
+    than blanket-denying.
+
+    httpx2's ASGITransport fully drains the ASGI app (runs chat_stream's
+    background task to completion) before returning anything at all to the
+    caller — client.stream() included, since ASGIResponseStream just replays
+    an already-fully-collected buffer. So there is no way to observe an
+    in-flight run from a client response. Instead: run the POST as a
+    concurrent task, and use a real asyncio.Event to pause the fake LLM call
+    mid-run, so the task is genuinely still registered in `_running` — found
+    by reading it directly, the same way cancel_run itself would look it up
+    — while we issue the two cancel requests concurrently on the same loop.
+
+    For the same reason, each client's sid cookie must be primed with a plain
+    request before the paused POST: the paused request's own Set-Cookie
+    header cannot reach the client's jar until its response returns, which
+    ASGITransport withholds until the run finishes — long after the cancel
+    requests need it.
+    """
+    alice, bob = two_clients
+
+    # Each client needs its sid cookie BEFORE the paused chat request: that
+    # request's Set-Cookie cannot reach the client's jar until its response
+    # returns, which httpx2's ASGITransport withholds until the run finishes.
+    await alice.get("/health")
+    await bob.get("/health")
+
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    class _PausableFakeLLMClient(FakeLLMClient):
+        async def stream(self, messages, tools=None, model=None):
+            started.set()
+            await release.wait()
+            async for chunk in super().stream(messages, tools=tools, model=model):
+                yield chunk
+
+    import harness.orchestration.build as build_module
+
+    monkeypatch.setattr(
+        build_module,
+        "build_llm",
+        lambda settings, parser: _PausableFakeLLMClient([LLMResponse(text="hi")]),
+    )
+
+    task = asyncio.create_task(alice.post("/chat/stream", json={"message": "alice secret"}))
+    try:
+        await asyncio.wait_for(started.wait(), timeout=5)
+        assert list(_main._running.keys()), "run never registered in _running"
+        alice_thread = next(iter(_main._running))
+
+        assert (await bob.post(f"/cancel/{alice_thread}")).json()["status"] == "not_found"
+        assert (await alice.post(f"/cancel/{alice_thread}")).json()["status"] == "cancelled"
+    finally:
+        release.set()
+        await asyncio.wait_for(task, timeout=5)
+
+
+async def test_resuming_another_visitors_thread_is_404(two_clients):
     alice, bob = two_clients
     response = await alice.post("/chat/stream", json={"message": "alice secret"})
     alice_thread = thread_id_from(response)
 
-    body = (await bob.post(f"/cancel/{alice_thread}")).json()
-    assert body["status"] == "not_found"
+    resp = await bob.post(f"/resume/{alice_thread}", json={"decision": {"approved": True}})
+    assert resp.status_code == 404
 
 
 async def test_thread_read_fails_closed_without_a_run_store(client_with_fake, monkeypatch):

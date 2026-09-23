@@ -193,7 +193,6 @@ async def test_hitl_resume_approved_produces_final(monkeypatch, tmp_path):
         ]),
     )
 
-    thread_id = "hitl-approve-test"
     transport = ASGITransport(app=app)
     try:
         async with AsyncClient(
@@ -201,10 +200,12 @@ async def test_hitl_resume_approved_produces_final(monkeypatch, tmp_path):
             base_url="http://test",
             headers={"Authorization": f"Bearer {get_settings().api_key}"},
         ) as client:
+            # No thread_id: server-issues one (thread ids are server-issued
+            # only — see thread_ownership design), same as the real frontend.
             events1 = []
             async with client.stream(
                 "POST", "/chat/stream",
-                json={"message": "what is 2+2?", "thread_id": thread_id},
+                json={"message": "what is 2+2?"},
                 timeout=10.0,
             ) as response:
                 async for line in response.aiter_lines():
@@ -216,6 +217,7 @@ async def test_hitl_resume_approved_produces_final(monkeypatch, tmp_path):
             assert any(e.get("type") == "interrupt" for e in events1), (
                 f"Expected interrupt in first stream; got: {[e.get('type') for e in events1]}"
             )
+            thread_id = events1[0]["thread_id"]
 
             events2 = []
             async with client.stream(
@@ -259,7 +261,6 @@ async def test_hitl_resume_rejected_agent_recovers(monkeypatch, tmp_path):
         ]),
     )
 
-    thread_id = "hitl-reject-test"
     transport = ASGITransport(app=app)
     try:
         async with AsyncClient(
@@ -267,10 +268,12 @@ async def test_hitl_resume_rejected_agent_recovers(monkeypatch, tmp_path):
             base_url="http://test",
             headers={"Authorization": f"Bearer {get_settings().api_key}"},
         ) as client:
+            # No thread_id: server-issues one (thread ids are server-issued
+            # only — see thread_ownership design), same as the real frontend.
             events1 = []
             async with client.stream(
                 "POST", "/chat/stream",
-                json={"message": "what is 1+1?", "thread_id": thread_id},
+                json={"message": "what is 1+1?"},
                 timeout=10.0,
             ) as response:
                 async for line in response.aiter_lines():
@@ -282,6 +285,7 @@ async def test_hitl_resume_rejected_agent_recovers(monkeypatch, tmp_path):
             assert any(e.get("type") == "interrupt" for e in events1), (
                 f"Expected interrupt in first stream; got: {[e.get('type') for e in events1]}"
             )
+            thread_id = events1[0]["thread_id"]
 
             events2 = []
             async with client.stream(
