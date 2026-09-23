@@ -1,7 +1,6 @@
 """A remember call for an unregistered tool must not interrupt the run."""
 import asyncio
 
-import pytest
 from langgraph.checkpoint.memory import MemorySaver
 
 from harness.adapters.llm.fake import FakeLLMClient
@@ -46,4 +45,9 @@ async def test_no_interrupt_when_memory_tools_disabled():
 
 async def test_still_interrupts_when_memory_tools_enabled():
     result = await _run(memory_tools=True)
-    assert result.get("__interrupt__")
+    interrupts = result.get("__interrupt__")
+    assert interrupts
+    # Must be the memory-approval branch specifically: `remember` also has
+    # requires_approval=True, so the generic approval branch would interrupt
+    # too (with mode "approval") and would mask a broken memory branch.
+    assert interrupts[0].value["mode"] == "memory_proposal"
