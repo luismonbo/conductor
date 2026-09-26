@@ -34,6 +34,9 @@ embedding_dimension: 3072
 # --- Agent behavior --------------------------------------------------------
 system_prompt: "You are a helpful assistant for example.com."
 
+# Single-operator deployments can opt back into shared long-term memory.
+memory_tools_enabled: false
+
 # Using the openai_compatible backend (e.g. pointing at a LiteLLM proxy)
 # instead of azure? Use llm_base_url / llm_model / default_model here
 # instead of the azure_* fields above.

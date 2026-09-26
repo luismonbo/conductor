@@ -81,6 +81,13 @@ class Settings(BaseSettings):
     # Agent
     agent: str = "default"
     max_iterations: int = 8
+
+    # Long-term memory is a single shared store with no per-visitor partition,
+    # so remember/recall must stay off on any public deployment. Default-safe;
+    # a single-operator deployment opts in via its target file or
+    # HARNESS_MEMORY_TOOLS_ENABLED=true. See
+    # docs/superpowers/specs/2026-09-19-visitor-scoped-threads-design.md.
+    memory_tools_enabled: bool = False
     system_prompt: str = (
         "You are a helpful assistant. "
         "Use the calculator tool for any arithmetic operation or numeric "
@@ -103,6 +110,11 @@ class Settings(BaseSettings):
     # /docs, /openapi.json, /redoc).
     auth_enabled: bool = True
     api_key: str = ""
+
+    # Visitor session cookie (sid): Secure by default. Set false only for local
+    # development on a browser that does not treat http://localhost as a
+    # secure context.
+    session_cookie_secure: bool = True
 
     @model_validator(mode="after")
     def _require_api_key_when_auth_enabled(self) -> "Settings":

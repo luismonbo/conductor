@@ -20,6 +20,7 @@ async def clean_app_state(monkeypatch):
     """Reset all module-level state and force memory checkpointer before each test."""
     monkeypatch.setenv("HARNESS_CHECKPOINTER", "memory")
     monkeypatch.setenv("HARNESS_API_KEY", _TEST_API_KEY)
+    monkeypatch.setenv("HARNESS_MEMORY_TOOLS_ENABLED", "true")
     limiter.reset()
     _main._running.clear()
     _main._registry = None
@@ -27,10 +28,14 @@ async def clean_app_state(monkeypatch):
     _main._run_store_lock = None
     _main._checkpointer_conn = None
     yield
-    for task in list(_main._running.values()):
+    for _sid, task in list(_main._running.values()):
         if not task.done():
             task.cancel()
     _main._running.clear()
+    # Every checkpointer mode opens a run store (memory mode's is an in-process
+    # sqlite database), so there is always a connection to close.
+    if _main._run_store is not None:
+        await _main._run_store._conn.close()
     if _main._checkpointer_conn is not None:
         await _main._checkpointer_conn.close()
     _main._registry = None
@@ -56,7 +61,7 @@ async def client_with_fake(monkeypatch, tmp_path):
     transport = httpx2.ASGITransport(app=_main.app)
     async with httpx2.AsyncClient(
         transport=transport,
-        base_url="http://test",
+        base_url="https://test",
         headers={"Authorization": f"Bearer {_TEST_API_KEY}"},
     ) as client:
         yield client, fake
@@ -80,7 +85,7 @@ async def client_with_fake_azure_backend(monkeypatch, tmp_path):
     transport = httpx2.ASGITransport(app=_main.app)
     async with httpx2.AsyncClient(
         transport=transport,
-        base_url="http://test",
+        base_url="https://test",
         headers={"Authorization": f"Bearer {_TEST_API_KEY}"},
     ) as client:
         yield client, fake

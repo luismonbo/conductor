@@ -14,7 +14,7 @@ from harness.config.settings import get_settings
 @pytest.fixture
 async def client():
     transport = httpx2.ASGITransport(app=_main.app)
-    async with httpx2.AsyncClient(transport=transport, base_url="http://test") as c:
+    async with httpx2.AsyncClient(transport=transport, base_url="https://test") as c:
         yield c
 
 

@@ -24,9 +24,16 @@ CREATE TABLE IF NOT EXISTS runs (
 )
 """
 
+# CREATE TABLE IF NOT EXISTS will not add a column to a table that already
+# exists, so an existing database needs an explicit ALTER. Re-running it raises
+# "duplicate column name", which is the success case on every run after the
+# first. Legacy rows get NULL and therefore belong to no session — which is the
+# desired outcome: pre-existing local development threads become invisible.
+_ALTER_ADD_SESSION = "ALTER TABLE runs ADD COLUMN session_id TEXT"
+
 _INSERT = """
-INSERT INTO runs (run_id, thread_id, agent, backend, started_at)
-VALUES (?, ?, ?, ?, ?)
+INSERT INTO runs (run_id, thread_id, agent, backend, started_at, session_id)
+VALUES (?, ?, ?, ?, ?, ?)
 """
 
 _UPDATE = """
@@ -39,11 +46,13 @@ WHERE run_id = ?
 _LIST_THREADS = """
 SELECT thread_id, MAX(started_at) AS last_at, COUNT(*) AS runs
 FROM runs
-WHERE thread_id IS NOT NULL
+WHERE thread_id IS NOT NULL AND session_id = ?
 GROUP BY thread_id
 ORDER BY last_at DESC
 LIMIT ?
 """
+
+_OWNS_THREAD = "SELECT 1 FROM runs WHERE thread_id = ? AND session_id = ? LIMIT 1"
 
 
 class RunStore:
@@ -52,6 +61,11 @@ class RunStore:
 
     async def create_table(self) -> None:
         await self._conn.execute(_CREATE)
+        try:
+            await self._conn.execute(_ALTER_ADD_SESSION)
+        except aiosqlite.OperationalError as exc:
+            if "duplicate column name" not in str(exc).lower():
+                raise
         await self._conn.commit()
 
     async def start_run(
@@ -60,17 +74,20 @@ class RunStore:
         thread_id: str,
         agent: str,
         backend: str,
+        session_id: str,
     ) -> None:
         try:
             started_at = datetime.now(timezone.utc).isoformat()
-            await self._conn.execute(_INSERT, (run_id, thread_id, agent, backend, started_at))
+            await self._conn.execute(
+                _INSERT, (run_id, thread_id, agent, backend, started_at, session_id)
+            )
             await self._conn.commit()
         except Exception:
             logger.exception("RunStore.start_run failed for run_id=%s", run_id)
 
-    async def list_threads(self, limit: int = 50) -> list[dict]:
+    async def list_threads(self, session_id: str, limit: int = 50) -> list[dict]:
         try:
-            cur = await self._conn.execute(_LIST_THREADS, (limit,))
+            cur = await self._conn.execute(_LIST_THREADS, (session_id, limit))
             rows = await cur.fetchall()
             return [
                 {"thread_id": r[0], "last_at": r[1], "runs": r[2]} for r in rows
@@ -78,6 +95,18 @@ class RunStore:
         except Exception:
             logger.exception("RunStore.list_threads failed")
             return []
+
+    async def owns_thread(self, session_id: str, thread_id: str) -> bool:
+        """True only when this session started at least one run on this thread.
+
+        Returns False on any error: this gates access, so it must fail closed.
+        """
+        try:
+            cur = await self._conn.execute(_OWNS_THREAD, (thread_id, session_id))
+            return await cur.fetchone() is not None
+        except Exception:
+            logger.exception("RunStore.owns_thread failed for thread_id=%s", thread_id)
+            return False
 
     async def finish_run(
         self,

@@ -247,6 +247,7 @@ def build_agent_registry(
         default_collection=settings.rag_collection,
         default_k=settings.rag_k,
         collections=collections,
+        memory_tools=settings.memory_tools_enabled,
     )
     return {
         "default": build_default_graph(llm, checkpointer, registry=registry),

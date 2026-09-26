@@ -117,7 +117,14 @@ def build_graph(
         # NOTE: queue.put() is intentionally absent here — interrupt events are
         # emitted by _run_graph after ainvoke() returns so resume reruns of this
         # node don't fire a duplicate event into the new SSE stream.
-        memory_calls = [tc for tc in last.tool_calls if tc.name == "remember"]
+        # Keyed on the call name, so a hallucinated `remember` would reach this
+        # branch even when the tool is not registered. Require registration too,
+        # otherwise a public deployment can be made to pause on a tool that
+        # cannot execute.
+        memory_calls = [
+            tc for tc in last.tool_calls
+            if tc.name == "remember" and registry.get(tc.name) is not None
+        ]
         if memory_calls:
             tc = memory_calls[0]
             proposed = tc.arguments.get("text", "")

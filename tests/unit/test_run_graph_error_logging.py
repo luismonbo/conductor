@@ -15,6 +15,13 @@ class _RaisingGraph:
         raise self._exc
 
 
+class _NullRunStore:
+    """_run_graph always records the run's outcome; these tests only look at logging."""
+
+    async def finish_run(self, run_id, accumulator, stopped_reason) -> None:
+        pass
+
+
 async def _run(exc: Exception) -> tuple[list, list[str]]:
     queue: asyncio.Queue = asyncio.Queue()
     stopped_reason = [""]
@@ -27,7 +34,7 @@ async def _run(exc: Exception) -> tuple[list, list[str]]:
         event_queue=queue,
         accumulator=None,
         stopped_reason_holder=stopped_reason,
-        run_store=None,
+        run_store=_NullRunStore(),
     )
     events = []
     while not queue.empty():
