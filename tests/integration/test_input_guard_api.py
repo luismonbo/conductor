@@ -1,6 +1,7 @@
 """The input guard at the API boundary: blocked text never reaches the model."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from types import SimpleNamespace
 
@@ -216,3 +217,64 @@ async def test_previous_reply_skips_tool_call_only_turns():
 async def test_previous_reply_is_none_without_assistant_text():
     graph = _graph_with([Message(role=Role.USER, content="q")])
     assert await _main._last_assistant_text(graph, "t") is None
+
+
+class _GatedLLM:
+    """Streams one token, signals it, then waits on a gate; reports 600 tokens if released."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+        self.streaming = asyncio.Event()
+        self.gate = asyncio.Event()
+
+    @property
+    def model_id(self) -> str:
+        return "gated"
+
+    async def generate(self, messages, tools=None, model=None):
+        raise NotImplementedError
+
+    async def stream(self, messages, tools=None, model=None):
+        self.calls += 1
+        yield "partial "
+        self.streaming.set()
+        await self.gate.wait()
+        yield LLMResponse(text="partial answer", usage={"input_tokens": 500, "output_tokens": 100})
+
+
+async def _cancel_mid_reply(guarded, llm: _GatedLLM) -> str:
+    """Start a chat, cancel it after its first token (the UI's stop button), return its thread id."""
+    # ASGITransport buffers whole responses, so the chat runs as a task, and the
+    # sid cookie is primed first: a paused request's Set-Cookie never reaches the jar.
+    await guarded.client.get("/health")
+    chat = asyncio.create_task(guarded.client.post("/chat/stream", json={"message": "hello"}))
+    await asyncio.wait_for(llm.streaming.wait(), timeout=5)
+    [thread_id] = list(_main._running)
+    cancel = await guarded.client.post(f"/cancel/{thread_id}")
+    assert cancel.json()["status"] == "cancelled"
+    await asyncio.wait_for(chat, timeout=5)
+    llm.gate.set()  # later calls complete instead of hanging
+    return thread_id
+
+
+async def test_a_cancelled_reply_still_counts_against_the_daily_budget(guarded, monkeypatch):
+    llm = _GatedLLM()
+    monkeypatch.setattr(build_module, "build_llm", lambda settings, parser: llm)
+    guarded.install(limits=GuardLimits(daily_token_budget=1))
+    await _cancel_mid_reply(guarded, llm)
+
+    again = await guarded.client.post("/chat/stream", json={"message": "hello again"})
+    assert sse_frames(again)[0]["text"] == REFUSAL_DAILY_BUDGET
+
+
+async def test_resume_refuses_a_thread_with_no_pending_interrupt(guarded, monkeypatch):
+    """Resuming a cancelled run would re-run the model outside the guard's limits."""
+    llm = _GatedLLM()
+    monkeypatch.setattr(build_module, "build_llm", lambda settings, parser: llm)
+    thread_id = await _cancel_mid_reply(guarded, llm)
+
+    resumed = await guarded.client.post(
+        f"/resume/{thread_id}", json={"decision": {"approved": True}}
+    )
+    assert resumed.status_code == 409
+    assert llm.calls == 1

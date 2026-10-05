@@ -629,6 +629,12 @@ async def resume_run(request: Request, thread_id: str, req: ResumeRequest, _auth
     settings = get_settings()
     registry = await _get_registry()
     graph = registry[settings.agent]
+    # Only a run paused on an interrupt can be resumed. Resuming a thread whose
+    # last step was cancelled or failed would re-run the model, outside the
+    # input guard's limits.
+    snapshot = await graph.aget_state({"configurable": {"thread_id": thread_id}})
+    if not snapshot.interrupts:
+        raise HTTPException(status_code=409, detail="nothing to resume")
     run_id = str(uuid.uuid4())
 
     accumulator = TokenAccumulator()

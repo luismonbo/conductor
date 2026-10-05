@@ -37,8 +37,9 @@ from harness.agents.default.tools import build_registry
 from harness.core.llm.client import LLMClient
 from harness.core.llm.model_resolution import resolve_model
 from harness.core.tools.registry import ToolRegistry
-from harness.core.types import AgentEvent, LLMResponse, Message, Role
+from harness.core.types import AgentEvent, LLMResponse, Message, Role, ToolSpec
 from harness.observability.langfuse_tracing import langfuse_configured
+from harness.observability.token_accumulator import estimate_tokens
 
 
 class GraphState(TypedDict):
@@ -47,6 +48,14 @@ class GraphState(TypedDict):
     max_iterations: int
     decision: NotRequired[dict | None]  # populated on interrupt resume
     model_override: NotRequired[str | None]  # UI picker; pins beat it
+
+
+def _prompt_chars(msgs: list[Message], specs: list[ToolSpec]) -> int:
+    """Characters one model call sends: every message plus the tool definitions."""
+    message_chars = sum(
+        len(m.content) + sum(len(str(tc.arguments)) for tc in m.tool_calls) for m in msgs
+    )
+    return message_chars + sum(len(repr(spec)) for spec in specs)
 
 
 def build_graph(
@@ -78,18 +87,33 @@ def build_graph(
             agent_pin=model_pin,
             request_override=state.get("model_override"),
         )
+        specs = registry.specs()
         response: LLMResponse | None = None
-        async for item in llm.stream(msgs, registry.specs(), model=model):
-            if isinstance(item, str):
-                if item:
-                    await queue.put(AgentEvent(type="token", text=item))
-            else:
-                response = item
+        streamed: list[str] = []
+        accumulator = config["configurable"].get("token_accumulator")
+        try:
+            async for item in llm.stream(msgs, specs, model=model):
+                if isinstance(item, str):
+                    if item:
+                        streamed.append(item)
+                        await queue.put(AgentEvent(type="token", text=item))
+                else:
+                    response = item
+        except asyncio.CancelledError:
+            # A call cancelled mid-stream (the visitor pressed stop or left) is
+            # still billed, but the provider never reports its usage. Record an
+            # estimate, or the daily token budget never sees cancelled calls.
+            if accumulator:
+                accumulator.add(
+                    input_tokens=estimate_tokens(_prompt_chars(msgs, specs)),
+                    output_tokens=estimate_tokens(sum(len(t) for t in streamed)),
+                )
+            raise
 
         if response is None:
             response = LLMResponse(text="")
 
-        if accumulator := config["configurable"].get("token_accumulator"):
+        if accumulator:
             input_t, output_t = response.token_usage
             accumulator.add(input_tokens=input_t, output_tokens=output_t)
 
