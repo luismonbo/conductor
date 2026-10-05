@@ -43,6 +43,7 @@ def build_llm(settings: Settings, parser: ToolCallParser) -> LLMClient:
             api_version=settings.azure_api_version,
             parser=parser,
             api_key=settings.azure_api_key or None,
+            max_output_tokens=settings.max_output_tokens,
         )
     if settings.llm_backend == "openai_compatible":
         from harness.adapters.llm.openai_compatible import OpenAICompatibleClient
@@ -52,6 +53,7 @@ def build_llm(settings: Settings, parser: ToolCallParser) -> LLMClient:
             model=settings.default_model or settings.llm_model,
             parser=parser,
             api_key=settings.llm_api_key,
+            max_output_tokens=settings.max_output_tokens,
         )
     if settings.llm_backend == "fake":
         # Scripted in tests; here we return a trivial echo so the app boots.
