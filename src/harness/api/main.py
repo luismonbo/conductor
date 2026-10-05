@@ -14,6 +14,7 @@ import logging
 import os
 import uuid
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from typing import Any
 
 from dotenv import load_dotenv
@@ -36,7 +37,12 @@ from harness.core.types import AgentEvent, Message, Role
 from harness.observability.langfuse_tracing import langfuse_configured
 from harness.observability.run_store import RunStore
 from harness.observability.token_accumulator import TokenAccumulator
-from harness.orchestration.build import build_agent_registry
+from harness.orchestration.build import (
+    build_agent_registry,
+    build_input_guard,
+    resolve_system_prompt,
+)
+from harness.security.input_guard import GuardContext, InputGuard
 from harness.orchestration.checkpointer import build_checkpointer
 
 # Settings() reads HARNESS_-prefixed vars straight from .env itself, but this
@@ -50,14 +56,20 @@ load_dotenv(override=False)
 _run_store: RunStore | None = None
 _run_store_lock: asyncio.Lock | None = None
 _checkpointer_conn: aiosqlite.Connection | None = None
+_input_guard: InputGuard | None = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Validate settings at boot: fail fast here, not on the first request.
     get_settings()
+    # Build the guard now too, so a malformed TypeSafe key fails the boot.
+    _get_input_guard()
     yield
-    global _run_store, _checkpointer_conn
+    global _run_store, _checkpointer_conn, _input_guard
+    if _input_guard is not None:
+        await _input_guard.aclose()
+        _input_guard = None
     if _run_store is not None:
         await _run_store._conn.close()
     if _checkpointer_conn is not None:
@@ -190,6 +202,14 @@ async def _get_registry() -> dict[str, object]:
     return _registry
 
 
+def _get_input_guard() -> InputGuard:
+    """The process-wide input guard, built on first use (and at boot by lifespan)."""
+    global _input_guard
+    if _input_guard is None:
+        _input_guard = build_input_guard(get_settings())
+    return _input_guard
+
+
 # ---------------------------------------------------------------------------
 # Health
 # ---------------------------------------------------------------------------
@@ -266,6 +286,72 @@ async def _require_owned_thread(request: Request, thread_id: str) -> None:
     run_store = await _get_run_store()
     if not await run_store.owns_thread(request.state.sid, thread_id):
         raise HTTPException(status_code=404, detail="unknown thread")
+
+
+async def _last_assistant_text(graph: Any, thread_id: str) -> str | None:
+    """The most recent assistant message with text; tool-call-only turns are skipped."""
+    messages = await _thread_state_messages(graph, thread_id) or []
+    return next(
+        (m.content for m in reversed(messages) if m.role == Role.ASSISTANT and m.content),
+        None,
+    )
+
+
+def _utc_midnight_iso() -> str:
+    """Start of the current UTC day, in the same format as runs.started_at."""
+    now = datetime.now(timezone.utc)
+    return now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+
+
+async def _guard_context(
+    guard: InputGuard,
+    req: ChatRequest,
+    agent_name: str,
+    graph: Any,
+    run_store: RunStore,
+) -> GuardContext:
+    """Gather what the guard needs, querying only for the checks that are on."""
+    limits = guard.limits
+    previous_reply = (
+        await _last_assistant_text(graph, req.thread_id)
+        if req.thread_id and guard.classifier_enabled
+        else None
+    )
+    thread_turns = (
+        await run_store.count_thread_runs(req.thread_id)
+        if req.thread_id and limits.max_thread_turns
+        else 0
+    )
+    tokens_today = (
+        await run_store.tokens_since(_utc_midnight_iso())
+        if limits.daily_token_budget
+        else 0
+    )
+    return GuardContext(
+        message=req.message,
+        system_prompt=resolve_system_prompt(get_settings(), agent_name),
+        previous_reply=previous_reply,
+        thread_turns=thread_turns,
+        tokens_today=tokens_today,
+    )
+
+
+def _blocked_response(refusal: str) -> StreamingResponse:
+    """A blocked message's whole reply: one `final` frame and no thread_id frame.
+
+    Without a thread_id frame the frontend keeps the thread id it already has:
+    none for a first message, so the visitor's next message starts fresh.
+    """
+    event = AgentEvent(type="final", text=refusal, stopped_reason="blocked")
+
+    async def _one_frame():
+        yield f"data: {json.dumps(dataclasses.asdict(event))}\n\n"
+
+    return StreamingResponse(
+        _one_frame(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.get("/threads")
@@ -445,6 +531,10 @@ async def chat_stream(request: Request, req: ChatRequest, _auth: None = Depends(
     First SSE frame: ``{"thread_id": "<uuid>"}``
     Subsequent frames: each AgentEvent serialized with dataclasses.asdict().
     Stream ends after a ``final``, ``interrupt``, or ``error`` event.
+
+    A message the input guard blocks gets one ``final`` frame with the refusal
+    (``stopped_reason: "blocked"``) and nothing else: no thread_id frame, no
+    run, no checkpoint write.
     """
     if req.thread_id:
         # Thread ids are server-issued only: a caller may continue a thread
@@ -455,12 +545,35 @@ async def chat_stream(request: Request, req: ChatRequest, _auth: None = Depends(
         # start_run below would record it as an owner too.
         await _require_owned_thread(request, req.thread_id)
     settings = get_settings()
+    registry = await _get_registry()
+    # Resolved before screening: the guard judges the message against the
+    # prompt of the agent that will actually run, never a client-supplied name.
+    agent_name = req.agent if req.agent in registry else settings.agent
+    graph = registry[agent_name]
+    run_store = await _get_run_store()
     thread_id = req.thread_id or str(uuid.uuid4())
     run_id = str(uuid.uuid4())
-    agent_name = req.agent or settings.agent
 
-    registry = await _get_registry()
-    graph = registry.get(agent_name) or registry[settings.agent]
+    guard = _get_input_guard()
+    decision = await guard.screen(
+        await _guard_context(guard, req, agent_name, graph, run_store)
+    )
+    decision_id = None
+    if decision.stage != "none":
+        decision_id = await run_store.record_guard_decision(
+            decision,
+            session_id=request.state.sid,
+            thread_id=thread_id if decision.allowed else req.thread_id,
+            run_id=run_id if decision.allowed else None,
+            message=req.message,
+        )
+    if not decision.allowed:
+        # Never the message text or the sid: those live only in the database.
+        logging.getLogger(__name__).info(
+            "input guard blocked a message decision_id=%s reason=%s probabilities=%s",
+            decision_id, decision.reason, decision.probabilities,
+        )
+        return _blocked_response(decision.refusal or "")
 
     accumulator = TokenAccumulator()
     stopped_reason_holder: list[str] = ["unknown"]
@@ -484,7 +597,6 @@ async def chat_stream(request: Request, req: ChatRequest, _auth: None = Depends(
         "model_override": req.model if settings.llm_backend in _MODEL_OVERRIDE_SAFE_BACKENDS else None,
     }
 
-    run_store = await _get_run_store()
     await run_store.start_run(
         run_id, thread_id, agent_name, settings.llm_backend, request.state.sid
     )

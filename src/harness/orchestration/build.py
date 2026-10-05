@@ -25,6 +25,7 @@ from harness.core.memory.store import LongTermMemory
 from harness.core.rag.ingest import IngestionPipeline
 from harness.core.rag.ports import Embedder, Retriever as RetrieverPort, VectorStore
 from harness.core.rag.serve import DiversifiedRetriever, RagPipeline, Retriever
+from harness.security.input_guard import GuardLimits, InputGuard
 
 
 def build_parser(settings: Settings) -> ToolCallParser:
@@ -274,3 +275,36 @@ def build_agent_registry(
             system_prompt=resolve_system_prompt(settings, "default"),
         ),
     }
+
+
+def build_input_guard(settings: Settings) -> InputGuard:
+    """The input guard for chat requests (SL-2).
+
+    The fixed limits always apply (each off at 0); the TypeSafe classifier
+    only when input_guard_enabled, and only then is the SDK imported. The
+    SDK's own defaults (10 s per request, 2 retries, 30 s total) are far too
+    slow for a chat reply: InputGuard enforces guard_timeout_seconds as a hard
+    ceiling, and the SDK gets the same budget with at most one retry.
+    """
+    classifier = None
+    if settings.input_guard_enabled:
+        from typesafe_sdk import AsyncTypeSafeClient, RetryPolicy
+
+        from harness.adapters.guard.typesafe import TypeSafeClassifier
+
+        client = AsyncTypeSafeClient(
+            api_key=settings.typesafe_api_key,
+            model=settings.guard_model,
+            timeout=settings.guard_timeout_seconds,
+            retry=RetryPolicy(max_retries=1, timeout=settings.guard_timeout_seconds),
+        )
+        classifier = TypeSafeClassifier(client, model=settings.guard_model)
+    return InputGuard(
+        classifier=classifier,
+        limits=GuardLimits(
+            max_message_chars=settings.max_message_chars,
+            max_thread_turns=settings.max_thread_turns,
+            daily_token_budget=settings.daily_token_budget,
+        ),
+        timeout_seconds=settings.guard_timeout_seconds,
+    )

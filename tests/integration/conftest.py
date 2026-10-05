@@ -27,6 +27,7 @@ async def clean_app_state(monkeypatch):
     _main._run_store = None
     _main._run_store_lock = None
     _main._checkpointer_conn = None
+    _main._input_guard = None
     yield
     for _sid, task in list(_main._running.values()):
         if not task.done():
@@ -42,6 +43,7 @@ async def clean_app_state(monkeypatch):
     _main._run_store = None
     _main._run_store_lock = None
     _main._checkpointer_conn = None
+    _main._input_guard = None
 
 
 @pytest.fixture
