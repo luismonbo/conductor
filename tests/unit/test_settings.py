@@ -98,6 +98,41 @@ def test_real_env_var_still_beats_the_target_file(monkeypatch, tmp_path):
     assert settings.rag_collection == "explicit-collection"
 
 
+def _personal_target(monkeypatch, tmp_path, body: str) -> None:
+    monkeypatch.chdir(tmp_path)  # no .env here — isolates from the real one
+    (tmp_path / "config" / "targets").mkdir(parents=True)
+    (tmp_path / "config" / "targets" / "personal.yaml").write_text(body)
+    monkeypatch.setenv("HARNESS_TARGET", "personal")
+
+
+def test_a_target_file_can_turn_the_input_guard_off(monkeypatch, tmp_path):
+    # Only the target file says false: the suite-wide env default is removed.
+    monkeypatch.delenv("HARNESS_INPUT_GUARD_ENABLED", raising=False)
+    monkeypatch.delenv("HARNESS_TYPESAFE_API_KEY", raising=False)
+    monkeypatch.setenv("HARNESS_API_KEY", "test-key")
+    _personal_target(monkeypatch, tmp_path, "input_guard_enabled: false\n")
+
+    assert get_settings().input_guard_enabled is False
+
+
+def test_a_target_file_can_turn_auth_off(monkeypatch, tmp_path):
+    monkeypatch.delenv("HARNESS_AUTH_ENABLED", raising=False)
+    monkeypatch.delenv("HARNESS_API_KEY", raising=False)
+    _personal_target(monkeypatch, tmp_path, "auth_enabled: false\n")
+
+    assert get_settings().auth_enabled is False
+
+
+def test_an_explicit_env_var_beats_the_target_file_even_at_its_default(monkeypatch, tmp_path):
+    # true is also the field's default; an operator who sets it must still win.
+    monkeypatch.setenv("HARNESS_INPUT_GUARD_ENABLED", "true")
+    monkeypatch.setenv("HARNESS_TYPESAFE_API_KEY", "ts-key")
+    monkeypatch.setenv("HARNESS_API_KEY", "test-key")
+    _personal_target(monkeypatch, tmp_path, "input_guard_enabled: false\n")
+
+    assert get_settings().input_guard_enabled is True
+
+
 def test_unknown_field_in_target_file_raises(monkeypatch, tmp_path):
     monkeypatch.setenv("HARNESS_API_KEY", "test-key")
     monkeypatch.chdir(tmp_path)

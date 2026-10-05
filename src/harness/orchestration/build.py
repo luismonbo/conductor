@@ -25,6 +25,7 @@ from harness.core.memory.store import LongTermMemory
 from harness.core.rag.ingest import IngestionPipeline
 from harness.core.rag.ports import Embedder, Retriever as RetrieverPort, VectorStore
 from harness.core.rag.serve import DiversifiedRetriever, RagPipeline, Retriever
+from harness.security.input_guard import GuardLimits, InputGuard
 
 
 def build_parser(settings: Settings) -> ToolCallParser:
@@ -43,6 +44,7 @@ def build_llm(settings: Settings, parser: ToolCallParser) -> LLMClient:
             api_version=settings.azure_api_version,
             parser=parser,
             api_key=settings.azure_api_key or None,
+            max_output_tokens=settings.max_output_tokens,
         )
     if settings.llm_backend == "openai_compatible":
         from harness.adapters.llm.openai_compatible import OpenAICompatibleClient
@@ -52,6 +54,7 @@ def build_llm(settings: Settings, parser: ToolCallParser) -> LLMClient:
             model=settings.default_model or settings.llm_model,
             parser=parser,
             api_key=settings.llm_api_key,
+            max_output_tokens=settings.max_output_tokens,
         )
     if settings.llm_backend == "fake":
         # Scripted in tests; here we return a trivial echo so the app boots.
@@ -207,6 +210,21 @@ def build_rag_pipeline(
     return RagPipeline(retriever=cast(Retriever, retriever), llm=llm, tracer=tracer)
 
 
+def resolve_system_prompt(settings: Settings, agent_name: str) -> str:
+    """The system prompt the named agent actually runs with.
+
+    Settings.system_prompt overrides the deployment's own agent
+    (settings.agent) when non-empty; every other case uses the agent's own
+    prompt. The graph and the input guard both call this, so the prompt the
+    model obeys and the scope the guard enforces cannot disagree.
+    """
+    from harness.agents.default.prompt import SYSTEM_PROMPT
+
+    if settings.system_prompt and agent_name == settings.agent:
+        return settings.system_prompt
+    return SYSTEM_PROMPT
+
+
 def build_agent_registry(
     settings: Settings,
     checkpointer,
@@ -250,5 +268,43 @@ def build_agent_registry(
         memory_tools=settings.memory_tools_enabled,
     )
     return {
-        "default": build_default_graph(llm, checkpointer, registry=registry),
+        "default": build_default_graph(
+            llm,
+            checkpointer,
+            registry=registry,
+            system_prompt=resolve_system_prompt(settings, "default"),
+        ),
     }
+
+
+def build_input_guard(settings: Settings) -> InputGuard:
+    """The input guard for chat requests (SL-2).
+
+    The fixed limits always apply (each off at 0); the TypeSafe classifier
+    only when input_guard_enabled, and only then is the SDK imported. The
+    SDK's own defaults (10 s per request, 2 retries, 30 s total) are far too
+    slow for a chat reply: InputGuard enforces guard_timeout_seconds as a hard
+    ceiling, and the SDK gets the same budget with at most one retry.
+    """
+    classifier = None
+    if settings.input_guard_enabled:
+        from typesafe_sdk import AsyncTypeSafeClient, RetryPolicy
+
+        from harness.adapters.guard.typesafe import TypeSafeClassifier
+
+        client = AsyncTypeSafeClient(
+            api_key=settings.typesafe_api_key,
+            model=settings.guard_model,
+            timeout=settings.guard_timeout_seconds,
+            retry=RetryPolicy(max_retries=1, timeout=settings.guard_timeout_seconds),
+        )
+        classifier = TypeSafeClassifier(client, model=settings.guard_model)
+    return InputGuard(
+        classifier=classifier,
+        limits=GuardLimits(
+            max_message_chars=settings.max_message_chars,
+            max_thread_turns=settings.max_thread_turns,
+            daily_token_budget=settings.daily_token_budget,
+        ),
+        timeout_seconds=settings.guard_timeout_seconds,
+    )

@@ -130,17 +130,24 @@ class _OpenAIBaseClient(LLMClient):
     generate() and model_id for free with no duplication.
     """
 
+    # Request parameter that caps completion tokens. llama-server, vLLM and
+    # LiteLLM accept max_tokens; Azure's reasoning-model deployments require
+    # max_completion_tokens (AzureOpenAIClient overrides this).
+    _OUTPUT_LIMIT_PARAM = "max_tokens"
+
     def __init__(
         self,
         client: Any,
         model_id: str,
         parser: ToolCallParser,
         temperature: float,
+        max_output_tokens: int = 0,
     ) -> None:
         self._client = client
         self._model_id = model_id
         self._parser = parser
         self._temperature = temperature
+        self._max_output_tokens = max_output_tokens  # 0 = no limit sent
 
     @property
     def model_id(self) -> str:
@@ -161,6 +168,8 @@ class _OpenAIBaseClient(LLMClient):
         if tools:
             kwargs["tools"] = [spec_to_wire(s) for s in tools]
             kwargs["tool_choice"] = "auto"
+        if self._max_output_tokens:
+            kwargs[self._OUTPUT_LIMIT_PARAM] = self._max_output_tokens
         completion = await self._client.chat.completions.create(**kwargs)
         return parse_completion(completion)
 
@@ -182,6 +191,8 @@ class _OpenAIBaseClient(LLMClient):
             kwargs["tool_choice"] = "auto"
 
         kwargs["stream_options"] = {"include_usage": True}
+        if self._max_output_tokens:
+            kwargs[self._OUTPUT_LIMIT_PARAM] = self._max_output_tokens
 
         text_acc: list[str] = []
         tc_acc: dict[int, dict] = {}  # chunk index → accumulated data

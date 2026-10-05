@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import json
 import logging
+import uuid
 from datetime import datetime, timezone
 
 import aiosqlite
 
+from harness.core.guard import GuardDecision
 from harness.observability.token_accumulator import TokenAccumulator
 
 logger = logging.getLogger(__name__)
@@ -54,6 +57,57 @@ LIMIT ?
 
 _OWNS_THREAD = "SELECT 1 FROM runs WHERE thread_id = ? AND session_id = ? LIMIT 1"
 
+# Every chat message runs up to three lookups on runs (daily budget, thread
+# turns, ownership); without these each is a full table scan. IF NOT EXISTS
+# makes them idempotent, so existing databases gain them on the next start.
+_CREATE_RUN_INDEXES = (
+    "CREATE INDEX IF NOT EXISTS idx_runs_started_at ON runs(started_at)",
+    "CREATE INDEX IF NOT EXISTS idx_runs_thread_session ON runs(thread_id, session_id)",
+)
+
+# One row per screened chat message (input guard, SL-2). Created with IF NOT
+# EXISTS, so existing databases need no migration.
+_CREATE_GUARD_DECISIONS = """
+CREATE TABLE IF NOT EXISTS guard_decisions (
+    decision_id     TEXT PRIMARY KEY,
+    created_at      TEXT NOT NULL,
+    session_id      TEXT,
+    thread_id       TEXT,
+    run_id          TEXT,
+    allowed         INTEGER NOT NULL,
+    reason          TEXT,
+    stage           TEXT NOT NULL,
+    probabilities   TEXT,
+    battery_version TEXT,
+    model           TEXT,
+    request_id      TEXT,
+    latency_ms      INTEGER,
+    input_tokens    INTEGER,
+    error           TEXT,
+    message_chars   INTEGER NOT NULL,
+    message_text    TEXT NOT NULL
+)
+"""
+
+_INSERT_GUARD_DECISION = """
+INSERT INTO guard_decisions (
+    decision_id, created_at, session_id, thread_id, run_id, allowed, reason, stage,
+    probabilities, battery_version, model, request_id, latency_ms, input_tokens,
+    error, message_chars, message_text
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+"""
+
+_COUNT_THREAD_RUNS = "SELECT COUNT(*) FROM runs WHERE thread_id = ?"
+
+# Runs still in flight have NULL token counts and count as 0 until they finish.
+_TOKENS_SINCE = """
+SELECT COALESCE(SUM(COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0)), 0)
+FROM runs WHERE started_at >= ?
+"""
+
+# Decision rows keep this many characters of the screened message.
+GUARD_MESSAGE_TEXT_CHARS = 2000
+
 
 class RunStore:
     def __init__(self, conn: aiosqlite.Connection) -> None:
@@ -66,6 +120,9 @@ class RunStore:
         except aiosqlite.OperationalError as exc:
             if "duplicate column name" not in str(exc).lower():
                 raise
+        for create_index in _CREATE_RUN_INDEXES:  # after the ALTER: one indexes session_id
+            await self._conn.execute(create_index)
+        await self._conn.execute(_CREATE_GUARD_DECISIONS)
         await self._conn.commit()
 
     async def start_run(
@@ -132,3 +189,76 @@ class RunStore:
                 logger.warning("finish_run: no row updated for run_id=%s", run_id)
         except Exception:
             logger.exception("RunStore.finish_run failed for run_id=%s", run_id)
+
+    async def record_guard_decision(
+        self,
+        decision: GuardDecision,
+        *,
+        session_id: str,
+        thread_id: str | None,
+        run_id: str | None,
+        message: str,
+    ) -> str | None:
+        """Persist one input-guard decision; return its id, or None on failure.
+
+        Never raises: a failed write is logged and must not break the chat.
+        """
+        decision_id = str(uuid.uuid4())
+        probabilities = (
+            json.dumps(dict(decision.probabilities))
+            if decision.probabilities is not None
+            else None
+        )
+        try:
+            await self._conn.execute(
+                _INSERT_GUARD_DECISION,
+                (
+                    decision_id,
+                    datetime.now(timezone.utc).isoformat(),
+                    session_id,
+                    thread_id,
+                    run_id,
+                    int(decision.allowed),
+                    decision.reason,
+                    decision.stage,
+                    probabilities,
+                    decision.battery_version,
+                    decision.model,
+                    decision.request_id,
+                    decision.latency_ms,
+                    decision.input_tokens,
+                    decision.error,
+                    len(message),
+                    message[:GUARD_MESSAGE_TEXT_CHARS],
+                ),
+            )
+            await self._conn.commit()
+            return decision_id
+        except Exception:
+            logger.exception("RunStore.record_guard_decision failed")
+            return None
+
+    async def count_thread_runs(self, thread_id: str) -> int:
+        """Runs recorded on this thread. 0 on error, so the turn limit fails open."""
+        try:
+            cur = await self._conn.execute(_COUNT_THREAD_RUNS, (thread_id,))
+            row = await cur.fetchone()
+            return int(row[0]) if row else 0
+        except Exception:
+            logger.exception("RunStore.count_thread_runs failed for thread_id=%s", thread_id)
+            return 0
+
+    async def tokens_since(self, since_iso: str) -> int:
+        """Input + output tokens of runs started at or after since_iso (ISO-8601 UTC).
+
+        Plain string comparison is safe: every started_at is written by
+        datetime.now(timezone.utc).isoformat(). 0 on error, so the daily budget
+        fails open.
+        """
+        try:
+            cur = await self._conn.execute(_TOKENS_SINCE, (since_iso,))
+            row = await cur.fetchone()
+            return int(row[0]) if row else 0
+        except Exception:
+            logger.exception("RunStore.tokens_since failed")
+            return 0

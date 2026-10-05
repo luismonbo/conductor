@@ -2,6 +2,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+# Rough characters per token, for calls the provider never reports usage for
+# (a call cancelled mid-stream). About right for English text.
+_CHARS_PER_TOKEN = 4
+
+
+def estimate_tokens(chars: int) -> int:
+    """Rounded-up token estimate for `chars` characters of text."""
+    return -(-chars // _CHARS_PER_TOKEN)
+
 
 @dataclass
 class TokenAccumulator:

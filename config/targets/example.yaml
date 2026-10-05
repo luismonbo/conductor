@@ -32,10 +32,31 @@ pgvector_table: rag_chunks
 embedding_dimension: 3072
 
 # --- Agent behavior --------------------------------------------------------
-system_prompt: "You are a helpful assistant for example.com."
+# Replaces the default agent's own prompt. The input guard judges off-topic
+# messages against this exact text, so state what the assistant is for and
+# what it should decline. Leave it out to keep the agent's own prompt.
+system_prompt: >-
+  You are the assistant on example.com. You answer questions about the site
+  owner's professional background, projects and writing, using the knowledge
+  base and wiki you have access to. For anything else, briefly say what you
+  can help with.
 
 # Single-operator deployments can opt back into shared long-term memory.
 memory_tools_enabled: false
+
+# --- Input guard -------------------------------------------------------------
+# TypeSafe (Jev) screens every chat message before the agent sees it. The key
+# is a secret: HARNESS_TYPESAFE_API_KEY in the environment, never here.
+input_guard_enabled: true
+guard_model: jev-1.13.0          # pinned: thresholds are calibrated against it
+guard_timeout_seconds: 3.0
+
+# Fixed limits, each off at 0. A single-operator deployment sets all four to 0
+# and input_guard_enabled to false.
+max_message_chars: 2000
+max_output_tokens: 1500
+max_thread_turns: 20
+daily_token_budget: 33000        # provider monthly token quota / 30
 
 # Using the openai_compatible backend (e.g. pointing at a LiteLLM proxy)
 # instead of azure? Use llm_base_url / llm_model / default_model here
