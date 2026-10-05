@@ -11,7 +11,12 @@ from __future__ import annotations
 import os
 
 from pydantic import model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import (
+    BaseSettings,
+    DotEnvSettingsSource,
+    EnvSettingsSource,
+    SettingsConfigDict,
+)
 
 from harness.config.targets import resolve_target_overrides
 
@@ -158,17 +163,10 @@ def get_settings() -> Settings:
             f"Target {target_name!r} sets unknown field(s): {sorted(unknown_fields)}"
         )
 
-    base = Settings()
-    field_defaults = {name: field.default for name, field in Settings.model_fields.items()}
-    merged = base.model_dump()
-    for key, value in overrides.items():
-        # A real env var already beat the class default here (base's value
-        # differs from the field default) — that value must keep winning
-        # over the target file. Trade-off: this can't distinguish
-        # "explicitly set to the default value" from "never set at all," so
-        # an env var pinned to a field's own default loses to the target
-        # file in that one narrow case.
-        if merged[key] == field_defaults[key]:
-            merged[key] = value
-
-    return Settings(_env_file=None, **merged)
+    # A field the environment sets (a real env var or .env, even to the field's
+    # own default) keeps that value; the target file fills in the rest.
+    # Settings is built once, from the merged values, so the fail-closed checks
+    # (auth, input guard) see a target file's `false` instead of rejecting the
+    # environment-only defaults first.
+    explicit = EnvSettingsSource(Settings)().keys() | DotEnvSettingsSource(Settings)().keys()
+    return Settings(**{key: value for key, value in overrides.items() if key not in explicit})
