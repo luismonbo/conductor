@@ -55,11 +55,15 @@ def build_graph(
     sub_agents: dict[str, Any] = {},
     registry: ToolRegistry | None = None,
     model_pin: str | None = None,
+    system_prompt: str = SYSTEM_PROMPT,
 ) -> Any:
     """Compile and return the default agent graph.
 
     `registry` is exposed for testing — tests can inject a registry with
     tools that have requires_approval=True without patching module globals.
+    `system_prompt` is the prompt this agent runs with;
+    orchestration.build.resolve_system_prompt picks it (a deployment override
+    or this agent's own).
     """
     if registry is None:
         registry = build_registry()
@@ -68,7 +72,7 @@ def build_graph(
         queue: asyncio.Queue = config["configurable"]["event_queue"]
         msgs = list(state["messages"])
         if not msgs or msgs[0].role != Role.SYSTEM:
-            msgs = [Message(role=Role.SYSTEM, content=SYSTEM_PROMPT)] + msgs
+            msgs = [Message(role=Role.SYSTEM, content=system_prompt)] + msgs
 
         model = resolve_model(
             agent_pin=model_pin,

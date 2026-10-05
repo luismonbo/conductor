@@ -207,6 +207,21 @@ def build_rag_pipeline(
     return RagPipeline(retriever=cast(Retriever, retriever), llm=llm, tracer=tracer)
 
 
+def resolve_system_prompt(settings: Settings, agent_name: str) -> str:
+    """The system prompt the named agent actually runs with.
+
+    Settings.system_prompt overrides the deployment's own agent
+    (settings.agent) when non-empty; every other case uses the agent's own
+    prompt. The graph and the input guard both call this, so the prompt the
+    model obeys and the scope the guard enforces cannot disagree.
+    """
+    from harness.agents.default.prompt import SYSTEM_PROMPT
+
+    if settings.system_prompt and agent_name == settings.agent:
+        return settings.system_prompt
+    return SYSTEM_PROMPT
+
+
 def build_agent_registry(
     settings: Settings,
     checkpointer,
@@ -250,5 +265,10 @@ def build_agent_registry(
         memory_tools=settings.memory_tools_enabled,
     )
     return {
-        "default": build_default_graph(llm, checkpointer, registry=registry),
+        "default": build_default_graph(
+            llm,
+            checkpointer,
+            registry=registry,
+            system_prompt=resolve_system_prompt(settings, "default"),
+        ),
     }
