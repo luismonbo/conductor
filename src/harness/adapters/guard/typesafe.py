@@ -18,9 +18,8 @@ from typing import Any
 from typesafe_sdk import (
     Noul,
     NoulCriteria,
-    TypeSafeAuthenticationError,
+    TypeSafeAPIConnectionError,
     TypeSafeError,
-    TypeSafePermissionDeniedError,
 )
 
 from harness.core.guard import (
@@ -45,19 +44,18 @@ class TypeSafeClassifier:
             response = await self._client.system_one(
                 dict(state), questions, model=self._model
             )
-        except (TypeSafeAuthenticationError, TypeSafePermissionDeniedError) as exc:
-            raise GuardClassifierError(
-                str(exc), cause=type(exc).__name__, misconfigured=True
-            ) from exc
         except TypeSafeError as exc:
-            raise GuardClassifierError(str(exc), cause=type(exc).__name__) from exc
+            raise GuardClassifierError(
+                str(exc), cause=type(exc).__name__, misconfigured=not _is_transient(exc)
+            ) from exc
 
         probabilities: dict[str, float] = {}
         for check in checks:
             answer = response.nouls.get(check.id)
             if answer is None:
                 raise GuardClassifierError(
-                    f"no answer for check {check.id!r}", cause="MissingAnswer"
+                    f"no answer for check {check.id!r}", cause="MissingAnswer",
+                    misconfigured=True,
                 )
             probabilities[check.id] = float(answer.noul)
         return ClassifierResult(
@@ -69,6 +67,18 @@ class TypeSafeClassifier:
 
     async def aclose(self) -> None:
         await self._client.aclose()
+
+
+def _is_transient(exc: TypeSafeError) -> bool:
+    """True for failures that clear up on their own: the set the SDK itself retries.
+
+    Everything else (a rejected key, a retired model id, a request or response
+    that no longer fits the API) recurs on every call until someone fixes it.
+    """
+    if isinstance(exc, TypeSafeAPIConnectionError):  # includes timeouts
+        return True
+    status = getattr(exc, "status", None)
+    return status is not None and (status in (408, 429) or status >= 500)
 
 
 def _noul(check: GuardCheck) -> Noul:

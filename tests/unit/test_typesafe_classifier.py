@@ -7,9 +7,16 @@ import httpx2
 import pytest
 from typesafe_sdk import (
     TypeSafeAPIConnectionError,
+    TypeSafeAPIError,
+    TypeSafeAPIResponseValidationError,
+    TypeSafeAPITimeoutError,
     TypeSafeAuthenticationError,
+    TypeSafeBadRequestError,
+    TypeSafeInternalServerError,
+    TypeSafeNotFoundError,
     TypeSafePermissionDeniedError,
     TypeSafeRateLimitError,
+    TypeSafeUnprocessableEntityError,
 )
 
 from harness.adapters.guard.typesafe import TypeSafeClassifier
@@ -111,6 +118,7 @@ async def test_a_missing_answer_raises():
             {}, [CHECK_A, CHECK_B]
         )
     assert info.value.cause == "MissingAnswer"
+    assert info.value.misconfigured is True
 
 
 @pytest.mark.parametrize(
@@ -118,9 +126,15 @@ async def test_a_missing_answer_raises():
     [
         _api_error(TypeSafeAuthenticationError, 401),
         _api_error(TypeSafePermissionDeniedError, 403),
+        _api_error(TypeSafeBadRequestError, 400),
+        _api_error(TypeSafeNotFoundError, 404),  # e.g. a retired pinned model
+        _api_error(TypeSafeUnprocessableEntityError, 422),
+        TypeSafeAPIResponseValidationError(
+            status=200, body=None, headers=httpx2.Headers(), field_path="nouls"
+        ),
     ],
 )
-async def test_a_rejected_key_is_wrapped_as_misconfigured(error):
+async def test_failures_that_recur_on_every_call_are_misconfigured(error):
     with pytest.raises(GuardClassifierError) as info:
         await TypeSafeClassifier(_StubClient(error=error), model="m").classify({}, [CHECK_A])
     assert info.value.cause == type(error).__name__
@@ -129,7 +143,14 @@ async def test_a_rejected_key_is_wrapped_as_misconfigured(error):
 
 @pytest.mark.parametrize(
     "error",
-    [_api_error(TypeSafeRateLimitError, 429), TypeSafeAPIConnectionError("unreachable")],
+    [
+        _api_error(TypeSafeRateLimitError, 429),
+        _api_error(TypeSafeInternalServerError, 503),
+        _api_error(TypeSafeInternalServerError, 529),  # overloaded
+        _api_error(TypeSafeAPIError, 408),
+        TypeSafeAPIConnectionError("unreachable"),
+        TypeSafeAPITimeoutError(timeout=3.0),
+    ],
 )
 async def test_transient_errors_are_wrapped_as_not_misconfigured(error):
     with pytest.raises(GuardClassifierError) as info:

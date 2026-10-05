@@ -66,8 +66,8 @@ class GuardClassifierError(Exception):
     """A classifier call failed.
 
     `cause` names the underlying failure (usually an exception class name).
-    `misconfigured` marks failures only a human can fix, such as a rejected
-    API key.
+    `misconfigured` marks failures that recur on every call until a human
+    fixes something, such as a rejected API key or a retired model id.
     """
 
     def __init__(self, message: str, *, cause: str, misconfigured: bool = False) -> None:
