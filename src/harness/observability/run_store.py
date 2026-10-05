@@ -57,6 +57,14 @@ LIMIT ?
 
 _OWNS_THREAD = "SELECT 1 FROM runs WHERE thread_id = ? AND session_id = ? LIMIT 1"
 
+# Every chat message runs up to three lookups on runs (daily budget, thread
+# turns, ownership); without these each is a full table scan. IF NOT EXISTS
+# makes them idempotent, so existing databases gain them on the next start.
+_CREATE_RUN_INDEXES = (
+    "CREATE INDEX IF NOT EXISTS idx_runs_started_at ON runs(started_at)",
+    "CREATE INDEX IF NOT EXISTS idx_runs_thread_session ON runs(thread_id, session_id)",
+)
+
 # One row per screened chat message (input guard, SL-2). Created with IF NOT
 # EXISTS, so existing databases need no migration.
 _CREATE_GUARD_DECISIONS = """
@@ -112,6 +120,8 @@ class RunStore:
         except aiosqlite.OperationalError as exc:
             if "duplicate column name" not in str(exc).lower():
                 raise
+        for create_index in _CREATE_RUN_INDEXES:  # after the ALTER: one indexes session_id
+            await self._conn.execute(create_index)
         await self._conn.execute(_CREATE_GUARD_DECISIONS)
         await self._conn.commit()
 

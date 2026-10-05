@@ -7,6 +7,7 @@ from collections.abc import AsyncGenerator
 import aiosqlite
 import pytest
 
+import harness.observability.run_store as run_store_module
 from harness.core.guard import GuardDecision
 from harness.observability.run_store import GUARD_MESSAGE_TEXT_CHARS, RunStore
 
@@ -108,3 +109,16 @@ async def test_limit_queries_return_zero_when_the_store_fails():
     s = await _closed_store()
     assert await s.count_thread_runs("t-1") == 0
     assert await s.tokens_since("2026-10-04T00:00:00+00:00") == 0
+
+
+async def test_the_per_message_queries_search_an_index_instead_of_scanning(store):
+    """Every chat message runs these; a full scan of runs grows with every run stored."""
+    s, conn = store
+    for sql, args in [
+        (run_store_module._TOKENS_SINCE, ("2026-10-05T00:00:00+00:00",)),
+        (run_store_module._COUNT_THREAD_RUNS, ("t-1",)),
+        (run_store_module._OWNS_THREAD, ("t-1", "sid")),
+    ]:
+        async with conn.execute("EXPLAIN QUERY PLAN " + sql, args) as cur:
+            plan = " | ".join(row[-1] for row in await cur.fetchall())
+        assert plan.startswith("SEARCH runs USING") and "INDEX" in plan, plan
