@@ -54,6 +54,23 @@ def test_guard_and_limit_defaults(clean_env):
     assert s.system_prompt == ""
 
 
+@pytest.mark.parametrize(
+    "field", ["max_message_chars", "max_output_tokens", "max_thread_turns", "daily_token_budget"]
+)
+def test_a_limit_accepts_zero_to_switch_off_but_rejects_negatives(clean_env, field):
+    base = dict(_env_file=None, api_key="test-key", input_guard_enabled=False)
+    assert getattr(Settings(**base, **{field: 0}), field) == 0
+    with pytest.raises(ValueError, match=field):
+        Settings(**base, **{field: -1})
+
+
+def test_the_guard_timeout_must_be_positive(clean_env):
+    # At 0 every classifier call would time out at once: the guard silently off.
+    with pytest.raises(ValueError, match="guard_timeout_seconds"):
+        Settings(_env_file=None, api_key="test-key", input_guard_enabled=False,
+                 guard_timeout_seconds=0)
+
+
 def test_typesafe_key_is_rejected_in_a_target_file(tmp_path):
     (tmp_path / "site.yaml").write_text("typesafe_api_key: leaked\n")
     with pytest.raises(ValueError, match="typesafe_api_key"):

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import os
 
-from pydantic import model_validator
+from pydantic import Field, model_validator
 from pydantic_settings import (
     BaseSettings,
     DotEnvSettingsSource,
@@ -125,11 +125,11 @@ class Settings(BaseSettings):
     input_guard_enabled: bool = True
     typesafe_api_key: str = ""
     guard_model: str = "jev-1.13.0"  # pinned: thresholds are calibrated against it
-    guard_timeout_seconds: float = 3.0
-    max_message_chars: int = 2000
-    max_output_tokens: int = 1500  # per LLM call
-    max_thread_turns: int = 20  # runs per thread
-    daily_token_budget: int = 33000  # all visitors per UTC day: monthly quota / 30
+    guard_timeout_seconds: float = Field(3.0, gt=0)
+    max_message_chars: int = Field(2000, ge=0)
+    max_output_tokens: int = Field(1500, ge=0)  # per LLM call
+    max_thread_turns: int = Field(20, ge=0)  # runs per thread
+    daily_token_budget: int = Field(33000, ge=0)  # all visitors per UTC day: monthly quota / 30
 
     @model_validator(mode="after")
     def _require_api_key_when_auth_enabled(self) -> "Settings":
