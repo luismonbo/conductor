@@ -86,6 +86,7 @@ Configuration below), then API and frontend each in their own terminal:
 uv sync
 cp .env.example .env   # fill in provider keys for the profiles you'll use
 echo "HARNESS_API_KEY=$(openssl rand -hex 32)" >> .env   # required: auth fails closed with no key
+echo "HARNESS_INPUT_GUARD_ENABLED=false" >> .env         # local dev; a public deployment sets HARNESS_TYPESAFE_API_KEY instead
 
 make up     # infra: postgres, litellm
 make api    # FastAPI, reload
@@ -98,6 +99,7 @@ in a model profile fails fast instead of surfacing as an opaque proxy 400.
 Fallback — raw commands, no proxy/tracing, fake LLM, zero credentials:
 ```bash
 export HARNESS_API_KEY=$(openssl rand -hex 32)
+export HARNESS_INPUT_GUARD_ENABLED=false   # the input guard fails closed without a TypeSafe key
 uv run uvicorn harness.api.main:app --reload --app-dir src
 
 # health check (the one route auth never gates)
@@ -139,6 +141,14 @@ uv run pytest -q   # 354 tests
 | `HARNESS_RATE_LIMIT_DEFAULT` | `60/minute` | slowapi rate string; applies to all other rate-limited endpoints |
 | `HARNESS_AUTH_ENABLED` | `true` | `true` · `false` — fails closed: refuses to start if `true` with no `HARNESS_API_KEY` set |
 | `HARNESS_API_KEY` | — | shared bearer key gating every route except `/health`; generate with `openssl rand -hex 32` |
+| `HARNESS_INPUT_GUARD_ENABLED` | `true` | `true` · `false` — TypeSafe (Jev) screens every chat message for extraction, private-info and off-topic requests before the agent sees it; fails closed: refuses to start if `true` with no `HARNESS_TYPESAFE_API_KEY` |
+| `HARNESS_TYPESAFE_API_KEY` | — | TypeSafe API key; never run with `TYPESAFE_LOG_LEVEL=debug` in production (the SDK then logs visitor messages unredacted) |
+| `HARNESS_GUARD_MODEL` | `jev-1.13.0` | pinned Jev version the guard's thresholds are calibrated against |
+| `HARNESS_SYSTEM_PROMPT` | — | replaces the deployment agent's own prompt; the input guard judges off-topic messages against this text |
+| `HARNESS_MAX_MESSAGE_CHARS` | `2000` | integer; `0` = off |
+| `HARNESS_MAX_OUTPUT_TOKENS` | `1500` | integer, per LLM call; `0` = off |
+| `HARNESS_MAX_THREAD_TURNS` | `20` | integer, runs per thread; `0` = off |
+| `HARNESS_DAILY_TOKEN_BUDGET` | `33000` | integer, all visitors per UTC day; `0` = off |
 | `CORS_ORIGINS` | `http://localhost:5173` | comma-separated allowed browser origins; not `HARNESS_`-prefixed |
 | `HARNESS_EMBEDDING_BACKEND` | `fake` | `fake` · `openai_compatible` · `azure` (azure not yet wired) |
 | `HARNESS_EMBEDDING_MODEL` | `nomic-embed-text-v1.5` | any model your embedding endpoint serves |
