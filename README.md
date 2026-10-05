@@ -86,7 +86,15 @@ Configuration below), then API and frontend each in their own terminal:
 uv sync
 cp .env.example .env   # fill in provider keys for the profiles you'll use
 echo "HARNESS_API_KEY=$(openssl rand -hex 32)" >> .env   # required: auth fails closed with no key
-echo "HARNESS_INPUT_GUARD_ENABLED=false" >> .env         # local dev; a public deployment sets HARNESS_TYPESAFE_API_KEY instead
+# Local dev: the input guard (fails closed without a TypeSafe key) and the
+# public website's limits off. A public deployment keeps the defaults.
+cat >> .env <<'EOF'
+HARNESS_INPUT_GUARD_ENABLED=false
+HARNESS_MAX_MESSAGE_CHARS=0
+HARNESS_MAX_OUTPUT_TOKENS=0
+HARNESS_MAX_THREAD_TURNS=0
+HARNESS_DAILY_TOKEN_BUDGET=0
+EOF
 
 make up     # infra: postgres, litellm
 make api    # FastAPI, reload
