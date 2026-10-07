@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import pytest
 
+from harness.config.settings import Settings
 from harness.config.targets import SECRET_FIELDS, resolve_target_overrides
 
 
@@ -50,7 +51,20 @@ def test_secret_fields_is_exactly_the_expected_set():
         "pgvector_url",
         "checkpointer_url",
         "typesafe_api_key",
+        "api_key",
     }
+
+
+# Derived from Settings, not from SECRET_FIELDS: the lock above can't notice a
+# new credential field that never joined the set (the shared API key didn't).
+@pytest.mark.parametrize(
+    "field", sorted(name for name in Settings.model_fields if name.endswith("_key"))
+)
+def test_a_target_file_cannot_set_any_key_field(tmp_path, field):
+    (tmp_path / "acme.yaml").write_text(f"{field}: shh\n")
+
+    with pytest.raises(ValueError, match=field):
+        resolve_target_overrides("acme", base_dir=tmp_path)
 
 
 @pytest.mark.parametrize("field", sorted(SECRET_FIELDS))
