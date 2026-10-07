@@ -28,6 +28,7 @@ SECRET_FIELDS = frozenset(
         "pgvector_url",
         "checkpointer_url",
         "typesafe_api_key",
+        "api_key",
     }
 )
 
