@@ -152,8 +152,8 @@ def _make_hitl_registry_factory(scripted_responses):
     """Return a build_agent_registry replacement that uses an approvable calculator."""
     from harness.adapters.llm.fake import FakeLLMClient
     from harness.adapters.tools.calculator import CalculatorTool
-    from harness.agents.default.graph import build_graph
     from harness.core.tools.registry import ToolRegistry
+    from harness.orchestration.loop import build_graph
 
     class ApprovableCalculator(CalculatorTool):
         @property
@@ -164,7 +164,7 @@ def _make_hitl_registry_factory(scripted_responses):
         llm = FakeLLMClient(scripted_responses)
         registry = ToolRegistry()
         registry.register(ApprovableCalculator())
-        return {"default": build_graph(llm, checkpointer, registry=registry)}
+        return {"default": build_graph(llm, checkpointer, registry=registry, system_prompt="You are a test agent.")}
 
     return factory
 

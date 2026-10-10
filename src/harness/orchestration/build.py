@@ -237,7 +237,7 @@ def build_agent_registry(
     caller (the eval harness) pre-seed memory before building, enabling external memory
     initialization.
     """
-    from harness.agents.default.graph import build_graph as build_default_graph
+    from harness.orchestration.loop import build_graph as build_default_graph
     from harness.agents.default.tools import build_registry
 
     llm = build_llm(settings, build_parser(settings))

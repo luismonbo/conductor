@@ -6,6 +6,7 @@ from harness.adapters.tools.calculator import CalculatorTool
 from harness.adapters.tools.recall import RecallTool
 from harness.adapters.tools.remember import RememberTool
 from harness.adapters.tools.search_documents import SearchDocumentsTool
+from harness.agents.definition import ToolDeps
 from harness.core.memory.store import LongTermMemory
 from harness.core.rag.ports import Retriever, VectorStore
 from harness.core.tools.registry import ToolRegistry
@@ -32,3 +33,16 @@ def build_registry(
             retriever, vector_store, default_collection, default_k, collections,
         ))
     return registry
+
+
+def build_tools(deps: ToolDeps) -> ToolRegistry:
+    """The default agent's tools, drawn from the shared infrastructure."""
+    return build_registry(
+        long_term=deps.long_term,
+        retriever=deps.retriever,
+        vector_store=deps.vector_store,
+        default_collection=deps.settings.rag_collection,
+        default_k=deps.settings.rag_k,
+        collections=list(deps.collections),
+        memory_tools=deps.settings.memory_tools_enabled,
+    )

@@ -6,10 +6,11 @@ import asyncio
 import pytest
 from langgraph.checkpoint.memory import MemorySaver
 
-from harness.agents.default.graph import build_graph
 from harness.agents.default.prompt import SYSTEM_PROMPT
+from harness.core.tools.registry import ToolRegistry
 from harness.core.types import LLMResponse, Message, Role
 from harness.observability.token_accumulator import TokenAccumulator
+from harness.orchestration.loop import build_graph
 
 
 class _StalledLLM:
@@ -34,7 +35,10 @@ async def test_a_call_cancelled_mid_stream_records_an_estimate():
     config = {
         "configurable": {"thread_id": "t", "event_queue": queue, "token_accumulator": accumulator}
     }
-    graph = build_graph(llm=_StalledLLM(), checkpointer=MemorySaver())
+    graph = build_graph(
+        llm=_StalledLLM(), checkpointer=MemorySaver(),
+        registry=ToolRegistry(), system_prompt=SYSTEM_PROMPT,
+    )
     run = asyncio.create_task(graph.ainvoke(
         {"messages": [Message(role=Role.USER, content="hello")], "iteration": 0, "max_iterations": 3},
         config,

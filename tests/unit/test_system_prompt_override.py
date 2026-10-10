@@ -7,11 +7,12 @@ from langgraph.checkpoint.memory import MemorySaver
 
 import harness.orchestration.build as build_module
 from harness.adapters.llm.fake import FakeLLMClient
-from harness.agents.default.graph import build_graph
 from harness.agents.default.prompt import SYSTEM_PROMPT
 from harness.config.settings import Settings
+from harness.core.tools.registry import ToolRegistry
 from harness.core.types import LLMResponse, Message, Role
 from harness.orchestration.build import build_agent_registry, resolve_system_prompt
+from harness.orchestration.loop import build_graph
 
 
 def _settings(**overrides) -> Settings:
@@ -52,7 +53,7 @@ def test_the_override_does_not_leak_into_other_agents():
 
 async def test_the_graph_sends_the_system_prompt_it_was_built_with():
     fake = FakeLLMClient([LLMResponse(text="ok")])
-    graph = build_graph(llm=fake, checkpointer=MemorySaver(), system_prompt="Custom prompt.")
+    graph = build_graph(llm=fake, checkpointer=MemorySaver(), registry=ToolRegistry(), system_prompt="Custom prompt.")
     await graph.ainvoke(_input(), _config())
     assert fake.calls[0][0] == Message(role=Role.SYSTEM, content="Custom prompt.")
 

@@ -1,4 +1,4 @@
-"""Default LangGraph agent — seven-node StateGraph.
+"""The shared agent loop: the seven-node StateGraph every agent runs on.
 
 Topology:
   START → call_model
@@ -18,6 +18,10 @@ Topology:
 Event delivery: nodes push AgentEvent objects into an asyncio.Queue passed
 via config["configurable"]["event_queue"]. The API layer puts the None sentinel
 in its _run() finally block to close the SSE stream.
+
+Each agent supplies its prompt, tools and optional model pin through its
+AgentDefinition (harness.agents.definition); orchestration.build.build_agent
+compiles it here.
 """
 from __future__ import annotations
 
@@ -32,8 +36,6 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.graph import StateGraph, START, END
 from langgraph.types import interrupt
 
-from harness.agents.default.prompt import SYSTEM_PROMPT
-from harness.agents.default.tools import build_registry
 from harness.core.llm.client import LLMClient
 from harness.core.llm.model_resolution import resolve_model
 from harness.core.tools.registry import ToolRegistry
@@ -61,21 +63,16 @@ def _prompt_chars(msgs: list[Message], specs: list[ToolSpec]) -> int:
 def build_graph(
     llm: LLMClient,
     checkpointer: Any,
-    sub_agents: dict[str, Any] = {},
-    registry: ToolRegistry | None = None,
+    *,
+    registry: ToolRegistry,
+    system_prompt: str,
     model_pin: str | None = None,
-    system_prompt: str = SYSTEM_PROMPT,
 ) -> Any:
-    """Compile and return the default agent graph.
+    """Compile the loop for one agent: its tools, its prompt, its optional model pin.
 
-    `registry` is exposed for testing — tests can inject a registry with
-    tools that have requires_approval=True without patching module globals.
-    `system_prompt` is the prompt this agent runs with;
-    orchestration.build.resolve_system_prompt picks it (a deployment override
-    or this agent's own).
+    orchestration.build passes these from the agent's AgentDefinition; tests
+    pass them directly.
     """
-    if registry is None:
-        registry = build_registry()
 
     async def _call_model(state: GraphState, config: RunnableConfig) -> dict:
         queue: asyncio.Queue = config["configurable"]["event_queue"]
