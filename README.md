@@ -204,7 +204,9 @@ src/harness/agents/<name>/
 (`harness.agents.<name>.agent`), so there is no registry to edit, and only that agent is imported.
 Every agent runs the same loop, `orchestration/loop.py`. The API builds the entry agent once at
 startup; a name that doesn't resolve, or a backend the agent requires, stops the app before it
-serves. Prompts live only in `prompt.py`: never in `.env`, Settings or a target file.
+serves. Prompts live only in `prompt.py`: never in `.env`, Settings or a target file. An agent's
+`search_documents` searches only the collections its `tools.py` lists; any other collection the
+model names is refused.
 
 **Private agents.** An agent that shouldn't be public, such as a website's scoped assistant, is a
 gitignored folder under `src/harness/agents/`; the Dockerfile's `COPY src/ src/` bakes it into the

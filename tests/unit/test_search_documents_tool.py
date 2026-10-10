@@ -8,6 +8,8 @@ from harness.adapters.tools.search_documents import SearchDocumentsTool
 from harness.adapters.vectorstore.in_memory import InMemoryVectorStore
 from harness.core.rag.document import Chunk
 from harness.core.rag.serve import Retriever
+from harness.core.tools.registry import ToolRegistry
+from harness.core.types import ToolCall, ToolResult
 
 
 async def _seeded_store_and_retriever(chunks: list[Chunk]) -> tuple[InMemoryVectorStore, Retriever]:
@@ -105,3 +107,60 @@ async def test_schema_includes_collection_enum_with_multiple_collections():
     props = tool.spec.parameters["properties"]
     assert props["collection"]["enum"] == ["papers", "manuals"]
     assert props["collection"]["default"] == "papers"
+
+
+_PRIVATE = Chunk(
+    chunk_id="p1", document_id="d1", collection="papers",
+    text="private research notes", section_path=(),
+)
+_PUBLIC = Chunk(
+    chunk_id="w1", document_id="d2", collection="docs",
+    text="public project write-up", section_path=(),
+)
+
+
+async def _dispatch(tool: SearchDocumentsTool, arguments: dict) -> ToolResult:
+    """Run the tool the way the agent loop does, so a refusal arrives as the model sees it."""
+    registry = ToolRegistry()
+    registry.register(tool)
+    return await registry.dispatch(ToolCall(id="c1", name="search_documents", arguments=arguments))
+
+
+@pytest.mark.asyncio
+async def test_a_collection_outside_the_agents_list_is_refused():
+    # A model can name a collection its schema never offered (with one collection
+    # the schema has no collection parameter at all); those documents stay unreachable.
+    store, retriever = await _seeded_store_and_retriever([_PRIVATE, _PUBLIC])
+    tool = SearchDocumentsTool(retriever, store, default_collection="docs", collections=["docs"])
+
+    result = await _dispatch(tool, {"query": "research notes", "collection": "papers"})
+
+    assert result.is_error
+    assert "private research notes" not in result.content
+    assert "docs" in result.content  # tells the model what it can search instead
+
+
+@pytest.mark.asyncio
+async def test_a_collection_on_the_agents_list_can_be_searched():
+    store, retriever = await _seeded_store_and_retriever([_PRIVATE, _PUBLIC])
+    tool = SearchDocumentsTool(
+        retriever, store, default_collection="papers", collections=["papers", "docs"],
+    )
+
+    result = await _dispatch(tool, {"query": "write-up", "collection": "docs"})
+
+    assert not result.is_error
+    assert "public project write-up" in result.content
+
+
+@pytest.mark.asyncio
+async def test_the_agents_default_collection_stays_searchable_when_unlisted():
+    # The default agent's list comes from the ingest manifests; the collection its
+    # deployment configures as the default must stay searchable if they omit it.
+    store, retriever = await _seeded_store_and_retriever([_PRIVATE, _PUBLIC])
+    tool = SearchDocumentsTool(retriever, store, default_collection="papers", collections=["docs"])
+
+    result = await _dispatch(tool, {"query": "notes"})
+
+    assert not result.is_error
+    assert "private research notes" in result.content
