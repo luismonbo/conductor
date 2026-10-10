@@ -75,7 +75,9 @@ class SearchDocumentsTool:
     async def run(self, arguments: dict[str, Any]) -> str:
         query = arguments["query"]
         k = max(1, min(int(arguments.get("k", self._default_k)), _MAX_K))
-        collection = arguments.get("collection", self._default_collection)
+        # Missing, null or empty means the default: every vector store reads a
+        # None collection as "search everything", so None must never get through.
+        collection = arguments.get("collection") or self._default_collection
         if collection not in self._allowed:
             raise ValueError(
                 f"collection {collection!r} is not available; "

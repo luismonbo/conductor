@@ -127,17 +127,44 @@ async def _dispatch(tool: SearchDocumentsTool, arguments: dict) -> ToolResult:
 
 
 @pytest.mark.asyncio
-async def test_a_collection_outside_the_agents_list_is_refused():
+@pytest.mark.parametrize(
+    "collection",
+    ["papers", "Papers", " docs", "docs ", ["docs"], {"name": "docs"}, 7,
+     'docs" or collection_name != "'],
+    ids=repr,
+)
+async def test_a_collection_outside_the_agents_list_is_refused(collection):
     # A model can name a collection its schema never offered (with one collection
     # the schema has no collection parameter at all); those documents stay unreachable.
     store, retriever = await _seeded_store_and_retriever([_PRIVATE, _PUBLIC])
     tool = SearchDocumentsTool(retriever, store, default_collection="docs", collections=["docs"])
 
-    result = await _dispatch(tool, {"query": "research notes", "collection": "papers"})
+    result = await _dispatch(tool, {"query": "research notes", "collection": collection})
 
     assert result.is_error
     assert "private research notes" not in result.content
-    assert "docs" in result.content  # tells the model what it can search instead
+    assert "can search: docs" in result.content  # tells the model what it can search instead
+
+
+_ABSENT = object()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("collection", [_ABSENT, None, ""], ids=["missing", "null", "empty"])
+async def test_no_collection_searches_the_agents_default_and_nothing_else(collection):
+    # Small models send null for an optional parameter, and every vector store reads
+    # a None collection as "search everything": it must mean the agent's default.
+    store, retriever = await _seeded_store_and_retriever([_PRIVATE, _PUBLIC])
+    tool = SearchDocumentsTool(retriever, store, default_collection="docs", collections=["docs"])
+    arguments: dict = {"query": "notes"}
+    if collection is not _ABSENT:
+        arguments["collection"] = collection
+
+    result = await _dispatch(tool, arguments)
+
+    assert not result.is_error
+    assert "public project write-up" in result.content
+    assert "private research notes" not in result.content
 
 
 @pytest.mark.asyncio
