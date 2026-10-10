@@ -23,10 +23,10 @@ async def clean_app_state(monkeypatch):
     monkeypatch.setenv("HARNESS_MEMORY_TOOLS_ENABLED", "true")
     limiter.reset()
     _main._running.clear()
-    _main._registry = None
+    _main._runtime = None
+    _main._runtime_lock = None
     _main._run_store = None
     _main._run_store_lock = None
-    _main._checkpointer_conn = None
     _main._input_guard = None
     yield
     for _sid, task in list(_main._running.values()):
@@ -37,12 +37,14 @@ async def clean_app_state(monkeypatch):
     # sqlite database), so there is always a connection to close.
     if _main._run_store is not None:
         await _main._run_store._conn.close()
-    if _main._checkpointer_conn is not None:
-        await _main._checkpointer_conn.close()
-    _main._registry = None
+    if _main._runtime is not None:
+        conn = getattr(_main._runtime.checkpointer, "conn", None)
+        if conn is not None:
+            await conn.close()
+    _main._runtime = None
+    _main._runtime_lock = None
     _main._run_store = None
     _main._run_store_lock = None
-    _main._checkpointer_conn = None
     _main._input_guard = None
 
 

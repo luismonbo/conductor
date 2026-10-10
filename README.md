@@ -17,7 +17,7 @@ POST /chat/stream  →  LangGraph StateGraph  →  approval gate  →  tools  �
 Dependencies point **inward only**.
 
 ```
-api / agents ──► orchestration ──► adapters ──► core
+api ──► orchestration ──► agents ──► adapters ──► core
                                                   ↑
                                      no imports outward from here
 ```
@@ -50,9 +50,10 @@ api / agents ──► orchestration ──► adapters ──► core
 ```
 src/harness/
 ├── agents/
-│   └── default/          ← prompt, tools, LangGraph graph
+│   ├── definition.py     ← AgentDefinition + ToolDeps: the contract every agent folder implements
+│   └── default/          ← one folder per agent: prompt.py, tools.py, agent.py
 ├── api/                  ← FastAPI endpoints + SSE
-├── orchestration/        ← composition root, checkpointer factory
+├── orchestration/        ← shared agent loop, agent loader, composition root, checkpointer factory
 ├── adapters/
 │   ├── llm/              ← Azure, OpenAI-compatible, fake
 │   ├── tools/            ← calculator, recall
@@ -139,7 +140,7 @@ uv run pytest -q   # 354 tests
 |---------|---------|---------|
 | `HARNESS_LLM_BACKEND` | `fake` | `fake` · `openai_compatible` · `azure` |
 | `HARNESS_CHECKPOINTER` | `sqlite` | `memory` · `sqlite` · `postgres` (Phase 5) |
-| `HARNESS_AGENT` | `default` | agent name from registry |
+| `HARNESS_AGENT` | `default` | entry agent: a folder under `src/harness/agents/` (see [Agents](#agents)) |
 | `HARNESS_TOOL_PARSER` | `native` | `native` · `prompted` |
 | `HARNESS_MAX_ITERATIONS` | `8` | integer |
 | `HARNESS_MEMORY_TOOLS_ENABLED` | `false` | `true` · `false` — gates the shared `remember`/`recall` long-term memory tools; must stay off on a public deployment since that store is not partitioned per visitor |
@@ -185,6 +186,30 @@ export HARNESS_LLM_BASE_URL=http://localhost:4000/v1
 export HARNESS_LLM_API_KEY=$LITELLM_MASTER_KEY
 export HARNESS_DEFAULT_MODEL=ollama-gemma
 ```
+
+---
+
+## Agents
+
+An agent is a folder under `src/harness/agents/`:
+
+```
+src/harness/agents/<name>/
+├── prompt.py   ← SYSTEM_PROMPT
+├── tools.py    ← build_tools(deps) -> ToolRegistry, from the shared infrastructure (ToolDeps)
+└── agent.py    ← AGENT = AgentDefinition(name="<name>", prompt=SYSTEM_PROMPT, tools=build_tools)
+```
+
+`HARNESS_AGENT=<name>` picks the entry agent, the one that talks to users. It is loaded by name
+(`harness.agents.<name>.agent`), so there is no registry to edit, and only that agent is imported.
+Every agent runs the same loop, `orchestration/loop.py`. The API builds the entry agent once at
+startup; a name that doesn't resolve, or a backend the agent requires, stops the app before it
+serves. Prompts live only in `prompt.py`: never in `.env`, Settings or a target file.
+
+**Private agents.** An agent that shouldn't be public, such as a website's scoped assistant, is a
+gitignored folder under `src/harness/agents/`; the Dockerfile's `COPY src/ src/` bakes it into the
+image. That relies on the editable install `uv sync` performs (a `.pth` file pointing at `src/`):
+a non-editable wheel build drops gitignored files.
 
 ---
 

@@ -37,13 +37,8 @@ from harness.core.types import AgentEvent, Message, Role
 from harness.observability.langfuse_tracing import langfuse_configured
 from harness.observability.run_store import RunStore
 from harness.observability.token_accumulator import TokenAccumulator
-from harness.orchestration.build import (
-    build_agent_registry,
-    build_input_guard,
-    resolve_system_prompt,
-)
+from harness.orchestration.build import AgentRuntime, build_input_guard, build_runtime
 from harness.security.input_guard import GuardContext, InputGuard
-from harness.orchestration.checkpointer import build_checkpointer
 
 # Settings() reads HARNESS_-prefixed vars straight from .env itself, but this
 # module's own os.environ.get() calls (Langfuse keys in _build_callbacks)
@@ -55,25 +50,31 @@ load_dotenv(override=False)
 # Lazy-initialized module-level state
 _run_store: RunStore | None = None
 _run_store_lock: asyncio.Lock | None = None
-_checkpointer_conn: aiosqlite.Connection | None = None
+_runtime: AgentRuntime | None = None
+_runtime_lock: asyncio.Lock | None = None
 _input_guard: InputGuard | None = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Validate settings at boot: fail fast here, not on the first request.
-    get_settings()
+    # Build the entry agent at boot (settings, definition, checkpointer, tools,
+    # graph): a missing agent folder or an unavailable required backend stops
+    # startup, and /health only answers once the agent can serve.
+    await _get_runtime()
     # Build the guard now too, so a malformed TypeSafe key fails the boot.
     _get_input_guard()
     yield
-    global _run_store, _checkpointer_conn, _input_guard
+    global _run_store, _runtime, _input_guard
     if _input_guard is not None:
         await _input_guard.aclose()
         _input_guard = None
     if _run_store is not None:
         await _run_store._conn.close()
-    if _checkpointer_conn is not None:
-        await _checkpointer_conn.close()
+    if _runtime is not None:
+        conn = getattr(_runtime.checkpointer, "conn", None)
+        if conn is not None:
+            await conn.close()
+        _runtime = None
 
 
 app = FastAPI(title="Agent Harness", lifespan=lifespan)
@@ -147,10 +148,6 @@ _running: dict[str, tuple[str, asyncio.Task]] = {}
 # add it here. See docs/devlog/010.
 _MODEL_OVERRIDE_SAFE_BACKENDS = {"openai_compatible", "fake"}
 
-# Lazy-initialized agent registry (shared checkpointer keeps state across requests)
-_registry: dict[str, object] | None = None
-
-
 def _get_run_store_lock() -> asyncio.Lock:
     global _run_store_lock
     if _run_store_lock is None:
@@ -192,14 +189,24 @@ async def _get_run_store() -> RunStore:
         return _run_store
 
 
-async def _get_registry() -> dict[str, object]:
-    global _registry, _checkpointer_conn
-    if _registry is None:
-        settings = get_settings()
-        cp = await build_checkpointer(settings)
-        _checkpointer_conn = getattr(cp, "conn", None)
-        _registry = build_agent_registry(settings, cp)
-    return _registry
+def _get_runtime_lock() -> asyncio.Lock:
+    global _runtime_lock
+    if _runtime_lock is None:
+        _runtime_lock = asyncio.Lock()
+    return _runtime_lock
+
+
+async def _get_runtime() -> AgentRuntime:
+    """The entry agent's runtime, built once: at startup by lifespan, or by the
+    first request when no lifespan ran (tests). The lock makes concurrent first
+    callers share one build instead of each opening a checkpointer."""
+    global _runtime
+    if _runtime is not None:
+        return _runtime
+    async with _get_runtime_lock():
+        if _runtime is None:
+            _runtime = await build_runtime(get_settings())
+    return _runtime
 
 
 def _get_input_guard() -> InputGuard:
@@ -306,13 +313,13 @@ def _utc_midnight_iso() -> str:
 async def _guard_context(
     guard: InputGuard,
     req: ChatRequest,
-    graph: Any,
+    runtime: AgentRuntime,
     run_store: RunStore,
 ) -> GuardContext:
     """Gather what the guard needs, querying only for the checks that are on."""
     limits = guard.limits
     previous_reply = (
-        await _last_assistant_text(graph, req.thread_id)
+        await _last_assistant_text(runtime.graph, req.thread_id)
         if req.thread_id and guard.classifier_enabled
         else None
     )
@@ -328,7 +335,7 @@ async def _guard_context(
     )
     return GuardContext(
         message=req.message,
-        system_prompt=resolve_system_prompt(get_settings()),
+        system_prompt=runtime.definition.prompt,
         previous_reply=previous_reply,
         thread_turns=thread_turns,
         tokens_today=tokens_today,
@@ -357,9 +364,7 @@ def _blocked_response(refusal: str) -> StreamingResponse:
 @limiter.limit(default_limit)
 async def list_threads(request: Request, _auth: None = Depends(require_api_key)) -> dict:
     run_store = await _get_run_store()
-    settings = get_settings()
-    registry = await _get_registry()
-    graph = registry[settings.agent]
+    graph = (await _get_runtime()).graph
     rows = await run_store.list_threads(request.state.sid)
 
     async def _summarize(row: dict) -> dict:
@@ -378,9 +383,7 @@ async def list_threads(request: Request, _auth: None = Depends(require_api_key))
 @limiter.limit(default_limit)
 async def thread_messages(request: Request, thread_id: str, _auth: None = Depends(require_api_key)) -> dict:
     await _require_owned_thread(request, thread_id)
-    settings = get_settings()
-    registry = await _get_registry()
-    graph = registry[settings.agent]
+    graph = (await _get_runtime()).graph
     messages = await _thread_state_messages(graph, thread_id)
     if messages is None:
         raise HTTPException(status_code=404, detail="unknown thread")
@@ -543,19 +546,19 @@ async def chat_stream(request: Request, req: ChatRequest, _auth: None = Depends(
         # state) and hands this session co-ownership going forward, since
         # start_run below would record it as an owner too.
         await _require_owned_thread(request, req.thread_id)
-    settings = get_settings()
-    registry = await _get_registry()
-    # Resolved before screening: the guard judges the message against the
-    # prompt of the agent that will actually run, never a client-supplied name.
-    agent_name = req.agent if req.agent in registry else settings.agent
-    graph = registry[agent_name]
+    runtime = await _get_runtime()
+    # Everything below runs, screens and records against the one entry agent
+    # built at startup (HARNESS_AGENT), never a client-supplied name.
+    settings = runtime.settings
+    graph = runtime.graph
+    agent_name = settings.agent
     run_store = await _get_run_store()
     thread_id = req.thread_id or str(uuid.uuid4())
     run_id = str(uuid.uuid4())
 
     guard = _get_input_guard()
     decision = await guard.screen(
-        await _guard_context(guard, req, graph, run_store)
+        await _guard_context(guard, req, runtime, run_store)
     )
     decision_id = None
     if decision.stage != "none":
@@ -625,9 +628,9 @@ async def resume_run(request: Request, thread_id: str, req: ResumeRequest, _auth
     Response: same SSE stream as /chat/stream (starts with thread_id frame).
     """
     await _require_owned_thread(request, thread_id)
-    settings = get_settings()
-    registry = await _get_registry()
-    graph = registry[settings.agent]
+    runtime = await _get_runtime()
+    settings = runtime.settings
+    graph = runtime.graph
     # Only a run paused on an interrupt can be resumed. Resuming a thread whose
     # last step was cancelled or failed would re-run the model, outside the
     # input guard's limits.

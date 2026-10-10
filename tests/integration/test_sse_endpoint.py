@@ -148,8 +148,8 @@ async def test_token_events_appear_in_stream(monkeypatch):
 # HITL resume
 # ---------------------------------------------------------------------------
 
-def _make_hitl_registry_factory(scripted_responses):
-    """Return a build_agent_registry replacement that uses an approvable calculator."""
+def _make_hitl_agent_factory(scripted_responses):
+    """Return a build_agent replacement whose agent has an approvable calculator."""
     from harness.adapters.llm.fake import FakeLLMClient
     from harness.adapters.tools.calculator import CalculatorTool
     from harness.core.tools.registry import ToolRegistry
@@ -164,7 +164,9 @@ def _make_hitl_registry_factory(scripted_responses):
         llm = FakeLLMClient(scripted_responses)
         registry = ToolRegistry()
         registry.register(ApprovableCalculator())
-        return {"default": build_graph(llm, checkpointer, registry=registry, system_prompt="You are a test agent.")}
+        return build_graph(
+            llm, checkpointer, registry=registry, system_prompt="You are a test agent."
+        )
 
     return factory
 
@@ -181,8 +183,8 @@ async def test_hitl_resume_approved_produces_final(monkeypatch, tmp_path):
     monkeypatch.setenv("HARNESS_CHECKPOINTER", "sqlite")
     monkeypatch.setenv("HARNESS_CHECKPOINTER_URL", str(tmp_path / "hitl-approve.sqlite"))
     monkeypatch.setattr(
-        "harness.api.main.build_agent_registry",
-        _make_hitl_registry_factory([
+        "harness.orchestration.build.build_agent",
+        _make_hitl_agent_factory([
             LLMResponse(
                 text="",
                 tool_calls=(ToolCall(id="c1", name="calculator", arguments={"expression": "2+2"}),),
@@ -249,8 +251,8 @@ async def test_hitl_resume_rejected_agent_recovers(monkeypatch, tmp_path):
     monkeypatch.setenv("HARNESS_CHECKPOINTER", "sqlite")
     monkeypatch.setenv("HARNESS_CHECKPOINTER_URL", str(tmp_path / "hitl-reject.sqlite"))
     monkeypatch.setattr(
-        "harness.api.main.build_agent_registry",
-        _make_hitl_registry_factory([
+        "harness.orchestration.build.build_agent",
+        _make_hitl_agent_factory([
             LLMResponse(
                 text="",
                 tool_calls=(ToolCall(id="c1", name="calculator", arguments={"expression": "1+1"}),),

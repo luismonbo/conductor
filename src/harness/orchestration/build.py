@@ -9,8 +9,9 @@ means editing this file and nothing in core/.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import yaml
 
@@ -18,7 +19,7 @@ from harness.adapters.chunking.structure_aware import StructureAwareChunker
 from harness.adapters.embedding.fake import FakeEmbedder
 from harness.adapters.llm.parsers import NativeToolCallParser, PromptedToolCallParser
 from harness.adapters.memory.in_memory import InMemoryLongTerm
-from harness.agents.definition import ToolDeps
+from harness.agents.definition import AgentDefinition, ToolDeps
 from harness.config.settings import Settings
 from harness.core.llm.client import LLMClient
 from harness.core.llm.tool_parsing import ToolCallParser
@@ -27,6 +28,7 @@ from harness.core.rag.ingest import IngestionPipeline
 from harness.core.rag.ports import Embedder, Retriever as RetrieverPort, VectorStore
 from harness.core.rag.serve import DiversifiedRetriever, RagPipeline, Retriever
 from harness.orchestration.agents import load_agent
+from harness.orchestration.checkpointer import build_checkpointer
 from harness.security.input_guard import GuardLimits, InputGuard
 
 
@@ -282,29 +284,35 @@ def build_agent(
     )
 
 
-def build_agent_registry(
-    settings: Settings,
-    checkpointer,
-    long_term: LongTermMemory | None = None,
-) -> dict[str, object]:
-    """Build and return all compiled agent graphs keyed by name.
+@dataclass(frozen=True)
+class AgentRuntime:
+    """Everything the API needs to serve the entry agent, built once at startup.
 
-    The API routes to the agent named in ChatRequest.agent (default: settings.agent).
-    Adding a new agent means adding it here and in agents/<name>/. `long_term` lets a
-    caller (the eval harness) pre-seed memory before building, enabling external memory
-    initialization.
+    One immutable snapshot: the graph, the guard's prompt, the run rows' agent
+    name and every agent-related setting come from here, so they cannot drift
+    apart even if .env changes while the process runs.
     """
-    from harness.agents.default.prompt import SYSTEM_PROMPT
-    from harness.agents.default.tools import build_tools
-    from harness.orchestration.loop import build_graph as build_default_graph
 
-    llm = build_llm(settings, build_parser(settings))
-    deps = build_tool_deps(settings, long_term)
-    return {
-        "default": build_default_graph(
-            llm, checkpointer, registry=build_tools(deps), system_prompt=SYSTEM_PROMPT
-        ),
-    }
+    settings: Settings
+    definition: AgentDefinition
+    graph: Any
+    checkpointer: Any
+
+
+async def build_runtime(settings: Settings) -> AgentRuntime:
+    """Load the entry agent, open its checkpointer, compile it on the shared loop."""
+    definition = load_agent(settings.agent)
+    checkpointer = await build_checkpointer(settings)
+    try:
+        graph = build_agent(settings, checkpointer)
+    except BaseException:
+        conn = getattr(checkpointer, "conn", None)
+        if conn is not None:
+            await conn.close()
+        raise
+    return AgentRuntime(
+        settings=settings, definition=definition, graph=graph, checkpointer=checkpointer
+    )
 
 
 def build_input_guard(settings: Settings) -> InputGuard:
