@@ -57,24 +57,28 @@ _input_guard: InputGuard | None = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Build the entry agent at boot (settings, definition, checkpointer, tools,
-    # graph): a missing agent folder or an unavailable required backend stops
-    # startup, and /health only answers once the agent can serve.
-    await _get_runtime()
-    # Build the guard now too, so a malformed TypeSafe key fails the boot.
-    _get_input_guard()
-    yield
     global _run_store, _runtime, _input_guard
-    if _input_guard is not None:
-        await _input_guard.aclose()
-        _input_guard = None
-    if _run_store is not None:
-        await _run_store._conn.close()
-    if _runtime is not None:
-        conn = getattr(_runtime.checkpointer, "conn", None)
-        if conn is not None:
-            await conn.close()
-        _runtime = None
+    try:
+        # Build the entry agent at boot (settings, definition, checkpointer, tools,
+        # graph): a missing agent folder or an unavailable required backend stops
+        # startup, and /health only answers once the agent can serve.
+        await _get_runtime()
+        # Build the guard now too, so a malformed TypeSafe key fails the boot.
+        _get_input_guard()
+        yield
+    finally:
+        # Also after a failed startup: an open checkpointer connection (aiosqlite's
+        # worker thread is not a daemon) would keep the process from exiting.
+        if _input_guard is not None:
+            await _input_guard.aclose()
+            _input_guard = None
+        if _run_store is not None:
+            await _run_store._conn.close()
+        if _runtime is not None:
+            conn = getattr(_runtime.checkpointer, "conn", None)
+            if conn is not None:
+                await conn.close()
+            _runtime = None
 
 
 app = FastAPI(title="Agent Harness", lifespan=lifespan)

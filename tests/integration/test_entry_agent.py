@@ -88,3 +88,33 @@ async def test_startup_fails_when_the_entry_agent_is_missing(monkeypatch):
     with pytest.raises(AgentLoadError, match="no_such_agent"):
         async with _main.lifespan(_main.app):
             pass
+
+
+async def test_a_failed_startup_closes_the_checkpointer(monkeypatch, tmp_path):
+    # The runtime opens the sqlite checkpointer before the guard is built. If a
+    # later startup step fails, that connection's worker thread (not a daemon)
+    # would keep the process alive after uvicorn gives up.
+    monkeypatch.setenv("HARNESS_LLM_BACKEND", "fake")
+    monkeypatch.setenv("HARNESS_EMBEDDING_BACKEND", "fake")
+    monkeypatch.setenv("HARNESS_RAG_VECTOR_STORE_BACKEND", "in_memory")
+    monkeypatch.setenv("HARNESS_CHECKPOINTER", "sqlite")
+    monkeypatch.setenv("HARNESS_CHECKPOINTER_URL", str(tmp_path / "h.sqlite"))
+    savers = []
+    real_build_checkpointer = build_module.build_checkpointer
+
+    async def recording_build_checkpointer(settings):
+        savers.append(await real_build_checkpointer(settings))
+        return savers[-1]
+
+    def failing_guard(settings):
+        raise ValueError("malformed TypeSafe key")
+
+    monkeypatch.setattr(build_module, "build_checkpointer", recording_build_checkpointer)
+    monkeypatch.setattr(_main, "build_input_guard", failing_guard)
+
+    with pytest.raises(ValueError, match="malformed TypeSafe key"):
+        async with _main.lifespan(_main.app):
+            pass
+
+    with pytest.raises(ValueError, match="no active connection"):
+        await savers[0].conn.execute("select 1")

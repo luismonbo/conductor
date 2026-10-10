@@ -94,3 +94,29 @@ def test_an_agent_that_requires_rag_fails_with_the_backend_error(fixture_agents)
         build_module.build_agent(settings, MemorySaver())
     assert isinstance(excinfo.value.__cause__, ValueError)
     assert "not_a_real_backend" in str(excinfo.value.__cause__)
+
+
+async def test_a_failed_build_closes_the_checkpointer(monkeypatch, tmp_path, fixture_agents):
+    # An agent that cannot be built (here: RAG required but unavailable) must not
+    # leave the sqlite checkpointer open: its worker thread would keep the
+    # process from exiting after startup fails.
+    settings = _settings(
+        agent="needs_rag",
+        rag_vector_store_backend="not_a_real_backend",
+        checkpointer="sqlite",
+        checkpointer_url=str(tmp_path / "h.sqlite"),
+    )
+    savers = []
+    real_build_checkpointer = build_module.build_checkpointer
+
+    async def recording_build_checkpointer(s):
+        savers.append(await real_build_checkpointer(s))
+        return savers[-1]
+
+    monkeypatch.setattr(build_module, "build_checkpointer", recording_build_checkpointer)
+
+    with pytest.raises(RuntimeError, match="requires the RAG backend"):
+        await build_module.build_runtime(settings)
+
+    with pytest.raises(ValueError, match="no active connection"):
+        await savers[0].conn.execute("select 1")
