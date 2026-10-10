@@ -18,6 +18,7 @@ from harness.adapters.chunking.structure_aware import StructureAwareChunker
 from harness.adapters.embedding.fake import FakeEmbedder
 from harness.adapters.llm.parsers import NativeToolCallParser, PromptedToolCallParser
 from harness.adapters.memory.in_memory import InMemoryLongTerm
+from harness.agents.definition import ToolDeps
 from harness.config.settings import Settings
 from harness.core.llm.client import LLMClient
 from harness.core.llm.tool_parsing import ToolCallParser
@@ -220,6 +221,67 @@ def resolve_system_prompt(settings: Settings) -> str:
     return load_agent(settings.agent).prompt
 
 
+def build_tool_deps(settings: Settings, long_term: LongTermMemory | None = None) -> ToolDeps:
+    """The shared infrastructure every agent's tools draw from, built once.
+
+    RAG degrades gracefully: with its backend unavailable the retriever and
+    vector store are None, and rag_error holds the reason, so an agent that
+    cannot work without RAG fails with the real cause while the others simply
+    go without search_documents. `long_term` lets a caller (the eval harness)
+    pre-seed memory.
+    """
+    if long_term is None:
+        long_term = build_long_term(settings)
+    try:
+        vector_store = build_vector_store(settings, settings.rag_vector_store_backend)
+        retriever = build_retriever(settings, vector_store)
+        collections = list_collections()
+    except Exception as exc:
+        logging.getLogger(__name__).warning(
+            "RAG backend unavailable; search_documents tool disabled", exc_info=True
+        )
+        return ToolDeps(
+            settings=settings,
+            long_term=long_term,
+            retriever=None,
+            vector_store=None,
+            collections=(),
+            rag_error=exc,
+        )
+    return ToolDeps(
+        settings=settings,
+        long_term=long_term,
+        retriever=retriever,
+        vector_store=vector_store,
+        collections=tuple(collections),
+    )
+
+
+def build_agent(
+    settings: Settings,
+    checkpointer,
+    name: str | None = None,
+    long_term: LongTermMemory | None = None,
+):
+    """Compile one agent on the shared loop: the entry agent unless `name` says otherwise.
+
+    The prompt, tools and model pin all come from the agent's folder
+    (agents/<name>/agent.py); nothing about an agent comes from config.
+    """
+    # Deferred: callers that never run an agent (ingestion, the CLI) should not
+    # pay LangGraph's import cost.
+    from harness.orchestration.loop import build_graph
+
+    definition = load_agent(name or settings.agent)
+    return build_graph(
+        build_llm(settings, build_parser(settings)),
+        checkpointer,
+        registry=definition.tools(build_tool_deps(settings, long_term)),
+        system_prompt=definition.prompt,
+        model_pin=definition.model,
+    )
+
+
 def build_agent_registry(
     settings: Settings,
     checkpointer,
@@ -233,42 +295,14 @@ def build_agent_registry(
     initialization.
     """
     from harness.agents.default.prompt import SYSTEM_PROMPT
-    from harness.agents.default.tools import build_registry
+    from harness.agents.default.tools import build_tools
     from harness.orchestration.loop import build_graph as build_default_graph
 
     llm = build_llm(settings, build_parser(settings))
-    if long_term is None:
-        long_term = build_long_term(settings)
-
-    vector_store: VectorStore | None = None
-    retriever: RetrieverPort | None = None
-    collections: list[str] = []
-    try:
-        vector_store = build_vector_store(settings, settings.rag_vector_store_backend)
-        retriever = build_retriever(settings, vector_store)
-        collections = list_collections()
-    except Exception:
-        logging.getLogger(__name__).warning(
-            "RAG backend unavailable; search_documents tool disabled", exc_info=True
-        )
-        vector_store = None
-        retriever = None
-
-    registry = build_registry(
-        long_term=long_term,
-        retriever=retriever,
-        vector_store=vector_store,
-        default_collection=settings.rag_collection,
-        default_k=settings.rag_k,
-        collections=collections,
-        memory_tools=settings.memory_tools_enabled,
-    )
+    deps = build_tool_deps(settings, long_term)
     return {
         "default": build_default_graph(
-            llm,
-            checkpointer,
-            registry=registry,
-            system_prompt=SYSTEM_PROMPT,
+            llm, checkpointer, registry=build_tools(deps), system_prompt=SYSTEM_PROMPT
         ),
     }
 
