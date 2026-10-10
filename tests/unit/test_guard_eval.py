@@ -6,9 +6,14 @@ from pathlib import Path
 
 import pytest
 
+import evaluation.run_guard_eval as run_guard_eval
 from evaluation.guard.dataset import GuardCase, load_cases
 from evaluation.guard.scoring import score
+from harness.adapters.guard.fake import FakeClassifier
+from harness.agents.default.prompt import SYSTEM_PROMPT
+from harness.config.settings import Settings
 from harness.security.battery import BATTERY
+from harness.security.input_guard import GuardLimits, InputGuard
 
 THRESHOLDS = {"extraction": 0.7, "private_info": 0.7, "off_topic": 0.8}
 IDS = set(THRESHOLDS)
@@ -98,3 +103,23 @@ def test_the_dataset_never_reuses_the_batterys_own_examples():
     }
     cases = load_cases(_DATASET, {check.id for check in BATTERY}, owner="Sam")
     assert not battery_examples & {case.message for case in cases}
+
+
+async def test_a_live_report_names_the_agent_whose_prompt_it_judged(monkeypatch):
+    settings = Settings(
+        _env_file=None, api_key="k", input_guard_enabled=True,
+        typesafe_api_key="ts", agent="default",
+    )
+    monkeypatch.setattr(run_guard_eval, "get_settings", lambda: settings)
+    monkeypatch.setattr(
+        run_guard_eval,
+        "build_input_guard",
+        lambda s: InputGuard(FakeClassifier(), GuardLimits(), timeout_seconds=1.0),
+    )
+
+    report = await run_guard_eval._classify(
+        [GuardCase(id="hi", message="Hi", expected="allow")]
+    )
+
+    assert report["agent"] == "default"
+    assert report["system_prompt"] == SYSTEM_PROMPT

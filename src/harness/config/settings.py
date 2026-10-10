@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 
+from dotenv import dotenv_values
 from pydantic import Field, model_validator
 from pydantic_settings import (
     BaseSettings,
@@ -83,7 +84,8 @@ class Settings(BaseSettings):
     checkpointer: str = "sqlite"       # memory | sqlite | postgres
     checkpointer_url: str = "./harness.sqlite"
 
-    # Agent
+    # The entry agent: a folder under src/harness/agents/. Its prompt.py holds
+    # the prompt; prompts never come from config.
     agent: str = "default"
     max_iterations: int = 8
 
@@ -93,11 +95,6 @@ class Settings(BaseSettings):
     # HARNESS_MEMORY_TOOLS_ENABLED=true. See
     # docs/superpowers/specs/2026-09-19-visitor-scoped-threads-design.md.
     memory_tools_enabled: bool = False
-    # Replaces the deployment agent's (settings.agent) own system prompt when
-    # non-empty. The input guard judges off-topic messages against this same
-    # text, so a public deployment states its scope here. See
-    # orchestration.build.resolve_system_prompt.
-    system_prompt: str = ""
 
     # Rate limiting — see docs/superpowers/specs/2026-08-27-rate-limiting-design.md.
     # Strict tier covers the LLM-invoking endpoints (the cost driver if abused);
@@ -151,7 +148,25 @@ class Settings(BaseSettings):
         return self
 
 
+# Removed settings and where their job went. Settings ignores unknown
+# variables (extra="ignore"), so a leftover one would silently do nothing.
+_REMOVED_ENV_VARS = {
+    "HARNESS_SYSTEM_PROMPT": (
+        "HARNESS_SYSTEM_PROMPT was removed: the prompt lives in "
+        "src/harness/agents/<name>/prompt.py and HARNESS_AGENT picks the agent."
+    ),
+}
+
+
+def _reject_removed_env_vars(env_file: str = ".env") -> None:
+    dotenv = dotenv_values(env_file) if os.path.isfile(env_file) else {}
+    for name, message in _REMOVED_ENV_VARS.items():
+        if name in os.environ or name in dotenv:
+            raise ValueError(message)
+
+
 def get_settings() -> Settings:
+    _reject_removed_env_vars()
     target_name = os.environ.get("HARNESS_TARGET", "")
     if not target_name:
         return Settings()

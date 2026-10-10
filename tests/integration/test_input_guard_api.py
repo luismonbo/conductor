@@ -172,13 +172,13 @@ async def test_the_guard_receives_the_previous_reply_when_continuing(guarded):
     assert classifier.calls[0]["previous_assistant_reply"] == "Hello from fake!"
 
 
-async def test_the_guard_judges_against_the_resolved_agents_prompt(guarded, monkeypatch):
-    monkeypatch.setenv("HARNESS_SYSTEM_PROMPT", "You answer questions about the owner's work.")
+async def test_the_guard_judges_against_the_entry_agents_prompt(
+    guarded, monkeypatch, fixture_agents
+):
+    monkeypatch.setenv("HARNESS_AGENT", "good")
     classifier = guarded.install()
-    await guarded.client.post("/chat/stream", json={"message": "hi", "agent": "no-such-agent"})
-    assert classifier.calls[0]["assistant_system_prompt"] == (
-        "You answer questions about the owner's work."
-    )
+    await guarded.client.post("/chat/stream", json={"message": "hi"})
+    assert classifier.calls[0]["assistant_system_prompt"] == "You are the good fixture agent."
 
 
 async def test_the_block_log_line_carries_no_message_text_or_session_id(guarded, caplog):

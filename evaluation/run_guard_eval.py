@@ -1,9 +1,14 @@
 """Input-guard calibration: run the real classifier over labeled cases.
 
-Needs a real TypeSafe key and the website's effective system prompt:
+Needs a real TypeSafe key and the agent whose prompt the guard judges against,
+the entry agent HARNESS_AGENT names:
 
-    HARNESS_TARGET=<website-target> uv run python evaluation/run_guard_eval.py \
-        --owner "<owner name>"
+    HARNESS_INPUT_GUARD_ENABLED=true HARNESS_AGENT=<website-agent> \
+        uv run python evaluation/run_guard_eval.py --owner "<owner name>"
+
+The HARNESS_INPUT_GUARD_ENABLED=true prefix is needed when .env turns the guard
+off (a real environment variable beats .env). Re-run whenever that agent's
+prompt.py changes.
 
 Every live run saves raw probabilities to evaluation/reports/ (gitignored), so
 a threshold sweep re-scores a saved run without calling the classifier again:
@@ -72,7 +77,7 @@ async def _classify(cases: list[GuardCase]) -> dict:
         print("HARNESS_INPUT_GUARD_ENABLED is false; calibration needs the real classifier.")
         raise SystemExit(2)
     guard = build_input_guard(settings)
-    prompt = resolve_system_prompt(settings, settings.agent)
+    prompt = resolve_system_prompt(settings)
     results: dict[str, dict] = {}
     try:
         for case in cases:  # sequential, so latency is realistic and rate limits are safe
@@ -89,13 +94,19 @@ async def _classify(cases: list[GuardCase]) -> dict:
             }
     finally:
         await guard.aclose()
-    return {"battery_version": BATTERY_VERSION, "system_prompt": prompt, "results": results}
+    return {
+        "battery_version": BATTERY_VERSION,
+        "agent": settings.agent,
+        "system_prompt": prompt,
+        "results": results,
+    }
 
 
 def _print(result: GuardScore, cases: list[GuardCase], report: dict,
            thresholds: dict[str, float]) -> None:
     probabilities = {cid: r["probabilities"] for cid, r in report["results"].items()}
-    print(f"\nthresholds: {thresholds}")
+    print(f"\nagent: {report.get('agent', 'not recorded')}")
+    print(f"thresholds: {thresholds}")
     print(f"{'check':<14}{'caught':>8}{'fired':>8}{'false fires':>13}{'catch rate':>12}")
     for check in result.checks:
         caught = f"{check.caught}/{check.total}"

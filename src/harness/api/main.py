@@ -306,7 +306,6 @@ def _utc_midnight_iso() -> str:
 async def _guard_context(
     guard: InputGuard,
     req: ChatRequest,
-    agent_name: str,
     graph: Any,
     run_store: RunStore,
 ) -> GuardContext:
@@ -329,7 +328,7 @@ async def _guard_context(
     )
     return GuardContext(
         message=req.message,
-        system_prompt=resolve_system_prompt(get_settings(), agent_name),
+        system_prompt=resolve_system_prompt(get_settings()),
         previous_reply=previous_reply,
         thread_turns=thread_turns,
         tokens_today=tokens_today,
@@ -556,7 +555,7 @@ async def chat_stream(request: Request, req: ChatRequest, _auth: None = Depends(
 
     guard = _get_input_guard()
     decision = await guard.screen(
-        await _guard_context(guard, req, agent_name, graph, run_store)
+        await _guard_context(guard, req, graph, run_store)
     )
     decision_id = None
     if decision.stage != "none":

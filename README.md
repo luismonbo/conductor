@@ -152,7 +152,6 @@ uv run pytest -q   # 354 tests
 | `HARNESS_INPUT_GUARD_ENABLED` | `true` | `true` · `false` — TypeSafe (Jev) screens every chat message for extraction, private-info and off-topic requests before the agent sees it; fails closed: refuses to start if `true` with no `HARNESS_TYPESAFE_API_KEY` |
 | `HARNESS_TYPESAFE_API_KEY` | — | TypeSafe API key; never run with `TYPESAFE_LOG_LEVEL=debug` in production (the SDK then logs visitor messages unredacted) |
 | `HARNESS_GUARD_MODEL` | `jev-1.13.0` | pinned Jev version the guard's thresholds are calibrated against |
-| `HARNESS_SYSTEM_PROMPT` | — | replaces the deployment agent's own prompt; the input guard judges off-topic messages against this text |
 | `HARNESS_MAX_MESSAGE_CHARS` | `2000` | integer; `0` = off |
 | `HARNESS_MAX_OUTPUT_TOKENS` | `1500` | integer, per LLM call; `0` = off |
 | `HARNESS_MAX_THREAD_TURNS` | `20` | integer, runs per thread; `0` = off |

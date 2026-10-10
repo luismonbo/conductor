@@ -25,6 +25,7 @@ from harness.core.memory.store import LongTermMemory
 from harness.core.rag.ingest import IngestionPipeline
 from harness.core.rag.ports import Embedder, Retriever as RetrieverPort, VectorStore
 from harness.core.rag.serve import DiversifiedRetriever, RagPipeline, Retriever
+from harness.orchestration.agents import load_agent
 from harness.security.input_guard import GuardLimits, InputGuard
 
 
@@ -210,19 +211,13 @@ def build_rag_pipeline(
     return RagPipeline(retriever=cast(Retriever, retriever), llm=llm, tracer=tracer)
 
 
-def resolve_system_prompt(settings: Settings, agent_name: str) -> str:
-    """The system prompt the named agent actually runs with.
+def resolve_system_prompt(settings: Settings) -> str:
+    """The entry agent's prompt: the prompt.py of the agent settings.agent names.
 
-    Settings.system_prompt overrides the deployment's own agent
-    (settings.agent) when non-empty; every other case uses the agent's own
-    prompt. The graph and the input guard both call this, so the prompt the
-    model obeys and the scope the guard enforces cannot disagree.
+    For callers outside the API (run_guard_eval.py), which take the prompt from
+    the same definition the agent runs with. Prompts never come from config.
     """
-    from harness.agents.default.prompt import SYSTEM_PROMPT
-
-    if settings.system_prompt and agent_name == settings.agent:
-        return settings.system_prompt
-    return SYSTEM_PROMPT
+    return load_agent(settings.agent).prompt
 
 
 def build_agent_registry(
@@ -237,8 +232,9 @@ def build_agent_registry(
     caller (the eval harness) pre-seed memory before building, enabling external memory
     initialization.
     """
-    from harness.orchestration.loop import build_graph as build_default_graph
+    from harness.agents.default.prompt import SYSTEM_PROMPT
     from harness.agents.default.tools import build_registry
+    from harness.orchestration.loop import build_graph as build_default_graph
 
     llm = build_llm(settings, build_parser(settings))
     if long_term is None:
@@ -272,7 +268,7 @@ def build_agent_registry(
             llm,
             checkpointer,
             registry=registry,
-            system_prompt=resolve_system_prompt(settings, "default"),
+            system_prompt=SYSTEM_PROMPT,
         ),
     }
 
