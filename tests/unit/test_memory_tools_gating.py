@@ -32,7 +32,7 @@ def test_memory_tools_present_when_enabled():
 
 
 # The tests above call build_registry directly, so they cannot see the setting's
-# default or how build_agent_registry passes it through. These go through the
+# default or how build_agent passes it through. These go through the
 # real wiring and record what the model is actually offered.
 
 
@@ -59,7 +59,7 @@ async def _offered_tools(monkeypatch, **overrides) -> set[str]:
         memory_backend="in_memory",
         **overrides,
     )
-    graph = build_module.build_agent_registry(settings, MemorySaver())["default"]
+    graph = build_module.build_agent(settings, MemorySaver(), name="default")
     await graph.ainvoke(
         {"messages": [Message(role=Role.USER, content="hi")], "iteration": 0, "max_iterations": 2},
         {"configurable": {"thread_id": "t", "event_queue": asyncio.Queue()}},

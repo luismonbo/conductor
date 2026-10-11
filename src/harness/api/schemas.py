@@ -10,7 +10,6 @@ from pydantic import BaseModel, Field
 class ChatRequest(BaseModel):
     message: str
     thread_id: str | None = None   # generated server-side if absent
-    agent: str = "default"
     model: str | None = None       # UI picker override; pins beat it
 
 

@@ -38,6 +38,10 @@ htmlcov/
 config/targets/*.yaml
 !config/targets/example.yaml
 
+# Private agents: not in this public repo. The Dockerfile's COPY src/ src/
+# bakes them into the image (see the README's Agents section).
+src/harness/agents/website/
+
 # Eval reports (on-demand run outputs; commit selectively as benchmark snapshots)
 evaluation/reports/
 

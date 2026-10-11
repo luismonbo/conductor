@@ -9,9 +9,9 @@
 # Secrets always come from real environment variables / .env locally, or
 # the deployment's own environment in production.
 #
-# Precedence: a real environment variable always overrides the value set
-# here; anything not set here or by a real env var falls back to the
-# Settings field default (see src/harness/config/settings.py).
+# Precedence: an environment variable, real or a line in .env, overrides the
+# value set here (a real one beats .env); anything set in neither place falls
+# back to the Settings field default (see src/harness/config/settings.py).
 
 # --- Backend selection -------------------------------------------------
 llm_backend: azure              # fake | openai_compatible | azure
@@ -31,15 +31,12 @@ rag_vector_store_backend: pgvector   # pgvector | milvus | in_memory
 pgvector_table: rag_chunks
 embedding_dimension: 3072
 
-# --- Agent behavior --------------------------------------------------------
-# Replaces the default agent's own prompt. The input guard judges off-topic
-# messages against this exact text, so state what the assistant is for and
-# what it should decline. Leave it out to keep the agent's own prompt.
-system_prompt: >-
-  You are the assistant on example.com. You answer questions about the site
-  owner's professional background, projects and writing, using the knowledge
-  base and wiki you have access to. For anything else, briefly say what you
-  can help with.
+# --- Agent -----------------------------------------------------------------
+# The entry agent: a folder under src/harness/agents/ (see the README's Agents
+# section). Its prompt.py holds the prompt, and the input guard judges
+# off-topic messages against it. Prompts never go in a target file, .env or
+# Settings.
+agent: default
 
 # Single-operator deployments can opt back into shared long-term memory.
 memory_tools_enabled: false

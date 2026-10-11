@@ -4,9 +4,9 @@ import asyncio
 from langgraph.checkpoint.memory import MemorySaver
 
 from harness.adapters.llm.fake import FakeLLMClient
-from harness.agents.default.graph import build_graph
 from harness.agents.default.tools import build_registry
 from harness.core.types import LLMResponse, Message, Role, ToolCall
+from harness.orchestration.loop import build_graph
 
 
 def _hallucinating_llm() -> FakeLLMClient:
@@ -21,7 +21,7 @@ def _hallucinating_llm() -> FakeLLMClient:
 
 async def _run(memory_tools: bool) -> dict:
     registry = build_registry(memory_tools=memory_tools)
-    graph = build_graph(_hallucinating_llm(), MemorySaver(), registry=registry)
+    graph = build_graph(_hallucinating_llm(), MemorySaver(), registry=registry, system_prompt="You are a test agent.")
     config = {
         "configurable": {
             "thread_id": "t1",

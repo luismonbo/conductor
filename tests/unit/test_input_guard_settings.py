@@ -17,7 +17,6 @@ _GUARD_ENV = [
     "HARNESS_MAX_OUTPUT_TOKENS",
     "HARNESS_MAX_THREAD_TURNS",
     "HARNESS_DAILY_TOKEN_BUDGET",
-    "HARNESS_SYSTEM_PROMPT",
 ]
 
 
@@ -51,7 +50,6 @@ def test_guard_and_limit_defaults(clean_env):
     assert s.max_output_tokens == 1500
     assert s.max_thread_turns == 20
     assert s.daily_token_budget == 33000
-    assert s.system_prompt == ""
 
 
 @pytest.mark.parametrize(

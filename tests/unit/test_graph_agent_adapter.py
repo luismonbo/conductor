@@ -7,12 +7,14 @@ from langgraph.checkpoint.memory import MemorySaver
 
 from harness.adapters.llm.fake import FakeLLMClient
 from harness.adapters.tools.calculator import CalculatorTool
-from harness.agents.default.graph import build_graph
 from harness.core.tools.registry import ToolRegistry
 from harness.core.types import AgentState, LLMResponse, Message, Role, ToolCall
 from harness.observability.tracer import TraceCollector
+from harness.orchestration.loop import build_graph
 
 from evaluation.harness.graph_agent import GraphAgentAdapter
+
+_PROMPT = "You are a test agent."
 
 
 def _calculator_registry() -> ToolRegistry:
@@ -38,6 +40,7 @@ async def test_direct_answer_no_tools():
         llm=FakeLLMClient([LLMResponse(text="42")]),
         checkpointer=MemorySaver(),
         registry=_calculator_registry(),
+        system_prompt=_PROMPT,
     )
     adapter = GraphAgentAdapter(graph)
 
@@ -61,6 +64,7 @@ async def test_tool_then_answer_reports_correct_trace():
         ]),
         checkpointer=MemorySaver(),
         registry=_calculator_registry(),
+        system_prompt=_PROMPT,
     )
     tracer = TraceCollector()
     adapter = GraphAgentAdapter(graph, tracer=tracer)
@@ -107,6 +111,7 @@ async def test_run_reports_token_usage_on_the_tracer():
         ]),
         checkpointer=MemorySaver(),
         registry=_calculator_registry(),
+        system_prompt=_PROMPT,
     )
     tracer = TraceCollector()
     adapter = GraphAgentAdapter(graph, tracer=tracer)
@@ -130,6 +135,7 @@ async def test_max_iterations_reports_stopped_reason():
         llm=FakeLLMClient(responses),
         checkpointer=MemorySaver(),
         registry=_calculator_registry(),
+        system_prompt=_PROMPT,
     )
     adapter = GraphAgentAdapter(graph)
 
@@ -154,6 +160,7 @@ async def test_requires_approval_tool_raises_instead_of_hanging():
         ]),
         checkpointer=MemorySaver(),
         registry=_approvable_calculator_registry(),
+        system_prompt=_PROMPT,
     )
     adapter = GraphAgentAdapter(graph)
 

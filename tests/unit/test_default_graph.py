@@ -13,17 +13,27 @@ from langgraph.types import Command
 
 from harness.adapters.llm.fake import FakeLLMClient
 from harness.adapters.tools.calculator import CalculatorTool
-from harness.agents.default.graph import GraphState, build_graph
+from harness.orchestration.loop import GraphState, build_graph
 from harness.core.tools.registry import ToolRegistry
 from harness.core.types import AgentEvent, LLMResponse, Message, Role, ToolCall
 from harness.observability.token_accumulator import TokenAccumulator
+
+
+_PROMPT = "You are a test agent."
+
+
+def _calculator_registry() -> ToolRegistry:
+    registry = ToolRegistry()
+    registry.register(CalculatorTool())
+    return registry
 
 
 def _make_graph(responses: list[LLMResponse], registry: ToolRegistry | None = None):
     return build_graph(
         llm=FakeLLMClient(responses),
         checkpointer=MemorySaver(),
-        registry=registry,
+        registry=registry if registry is not None else _calculator_registry(),
+        system_prompt=_PROMPT,
     )
 
 
@@ -162,6 +172,7 @@ async def test_approval_gate_interrupt_then_resume_approved():
         ]),
         checkpointer=MemorySaver(),
         registry=registry,
+        system_prompt=_PROMPT,
     )
 
     # First invocation — expect interrupt event
@@ -196,6 +207,7 @@ async def test_approval_gate_interrupt_then_resume_rejected():
         ]),
         checkpointer=MemorySaver(),
         registry=registry,
+        system_prompt=_PROMPT,
     )
 
     # First invocation — expect interrupt
@@ -232,6 +244,7 @@ async def test_rejection_loop_hits_iteration_limit():
         llm=FakeLLMClient(looping_responses),
         checkpointer=MemorySaver(),
         registry=registry,
+        system_prompt=_PROMPT,
     )
 
     # First invocation — hits interrupt
