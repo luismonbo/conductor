@@ -1,7 +1,24 @@
 """Suite-wide test defaults."""
 from __future__ import annotations
 
+import logging
+
 import pytest
+
+from harness.observability.logging_setup import _PRIVATE_AT_DEBUG
+
+# The loggers whose levels configure_logging (run by the app's startup) sets.
+_CONFIGURED_LOGGERS = ("harness", *_PRIVATE_AT_DEBUG)
+
+
+@pytest.fixture(autouse=True)
+def _restore_logger_levels():
+    """Logger levels are process-wide: put back the ones the app's startup sets,
+    so no test inherits another test's logging setup."""
+    saved = {name: logging.getLogger(name).level for name in _CONFIGURED_LOGGERS}
+    yield
+    for name, level in saved.items():
+        logging.getLogger(name).setLevel(level)
 
 
 @pytest.fixture(autouse=True)

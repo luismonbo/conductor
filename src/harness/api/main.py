@@ -35,6 +35,7 @@ from harness.api.schemas import ChatRequest, ResumeRequest
 from harness.config.settings import get_settings
 from harness.core.types import AgentEvent, Message, Role
 from harness.observability.langfuse_tracing import langfuse_configured
+from harness.observability.logging_setup import configure_logging
 from harness.observability.run_store import RunStore
 from harness.observability.token_accumulator import TokenAccumulator
 from harness.orchestration.build import AgentRuntime, build_input_guard, build_runtime
@@ -59,6 +60,8 @@ _input_guard: InputGuard | None = None
 async def lifespan(app: FastAPI):
     global _run_store, _runtime, _input_guard
     try:
+        # Logging first, so everything startup logs below goes through it.
+        configure_logging(get_settings().log_level)
         # Build the entry agent at boot (settings, definition, checkpointer, tools,
         # graph): a missing agent folder or an unavailable required backend stops
         # startup, and /health only answers once the agent can serve.
