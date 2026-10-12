@@ -145,13 +145,14 @@ uv run pytest -q   # 354 tests
 | `HARNESS_MAX_ITERATIONS` | `8` | integer |
 | `HARNESS_MEMORY_TOOLS_ENABLED` | `false` | `true` · `false` — gates the shared `remember`/`recall` long-term memory tools; must stay off on a public deployment since that store is not partitioned per visitor |
 | `HARNESS_SESSION_COOKIE_SECURE` | `true` | `true` · `false` — marks the visitor `sid` cookie `Secure`, so browsers only send it over HTTPS; set `false` only for local development on a browser that does not treat `http://localhost` as a secure context |
+| `HARNESS_LOG_LEVEL` | `INFO` | `DEBUG` · `INFO` · `WARNING` · `ERROR` — level of the harness's own log lines (stderr); every other library stays at `WARNING`. Never set an SDK's own debug switch in production (`TYPESAFE_LOG_LEVEL=debug`, `OPENAI_LOG=debug`, `LANGFUSE_DEBUG=true`), nor run uvicorn with `--log-level trace`: they log visitor messages, the `sid` cookie or the API key |
 | `HARNESS_RATE_LIMIT_ENABLED` | `true` | `true` · `false` |
 | `HARNESS_RATE_LIMIT_STRICT` | `15/minute` | slowapi rate string; applies to LLM-invoking endpoints |
 | `HARNESS_RATE_LIMIT_DEFAULT` | `60/minute` | slowapi rate string; applies to all other rate-limited endpoints |
 | `HARNESS_AUTH_ENABLED` | `true` | `true` · `false` — fails closed: refuses to start if `true` with no `HARNESS_API_KEY` set |
 | `HARNESS_API_KEY` | — | shared bearer key gating every route except `/health`; generate with `openssl rand -hex 32` |
 | `HARNESS_INPUT_GUARD_ENABLED` | `true` | `true` · `false` — TypeSafe (Jev) screens every chat message for extraction, private-info and off-topic requests before the agent sees it; fails closed: refuses to start if `true` with no `HARNESS_TYPESAFE_API_KEY` |
-| `HARNESS_TYPESAFE_API_KEY` | — | TypeSafe API key; never run with `TYPESAFE_LOG_LEVEL=debug` in production (the SDK then logs visitor messages unredacted) |
+| `HARNESS_TYPESAFE_API_KEY` | — | TypeSafe API key |
 | `HARNESS_GUARD_MODEL` | `jev-1.13.0` | pinned Jev version the guard's thresholds are calibrated against |
 | `HARNESS_MAX_MESSAGE_CHARS` | `2000` | integer; `0` = off |
 | `HARNESS_MAX_OUTPUT_TOKENS` | `1500` | integer, per LLM call; `0` = off |

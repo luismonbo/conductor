@@ -14,6 +14,7 @@ from harness.adapters.guard.fake import FakeClassifier
 from harness.adapters.llm.fake import FakeLLMClient
 from harness.core.guard import GuardClassifierError
 from harness.core.types import LLMResponse, Message, Role, ToolCall
+from harness.observability.logging_setup import configure_logging
 from harness.security.battery import (
     REFUSAL_DAILY_BUDGET,
     REFUSAL_GENERIC,
@@ -191,6 +192,24 @@ async def test_the_block_log_line_carries_no_message_text_or_session_id(guarded,
     logged = "\n".join(record.getMessage() for record in caplog.records)
     assert "input guard blocked" in logged
     assert "home address" not in logged
+    assert sid and sid not in logged
+
+
+async def test_no_log_line_carries_message_text_or_session_id_even_at_debug(
+    guarded, caplog
+):
+    caplog.set_level(logging.DEBUG)  # a root-level DEBUG config
+    configure_logging("DEBUG")
+    guarded.install({"private_info": 0.99})
+    await guarded.client.post("/chat/stream", json={"message": "blocked words zq7"})
+    guarded.install()
+    await guarded.client.post("/chat/stream", json={"message": "allowed words xk4"})
+
+    sid = guarded.client.cookies.get("sid")
+    logged = caplog.text  # formatted lines, tracebacks included
+    assert "input guard blocked" in logged
+    assert "zq7" not in logged
+    assert "xk4" not in logged
     assert sid and sid not in logged
 
 

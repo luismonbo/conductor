@@ -9,9 +9,10 @@ config change, not a rewrite' promise is actually cashed in.
 from __future__ import annotations
 
 import os
+from typing import Literal
 
 from dotenv import dotenv_values
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import (
     BaseSettings,
     DotEnvSettingsSource,
@@ -96,6 +97,10 @@ class Settings(BaseSettings):
     # docs/superpowers/specs/2026-09-19-visitor-scoped-threads-design.md.
     memory_tools_enabled: bool = False
 
+    # Level of the harness's own log lines (harness.*); every other library
+    # stays at WARNING. See observability/logging_setup.py.
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
+
     # Rate limiting — see docs/superpowers/specs/2026-08-27-rate-limiting-design.md.
     # Strict tier covers the LLM-invoking endpoints (the cost driver if abused);
     # default tier covers everything else except /health, which is never limited.
@@ -127,6 +132,11 @@ class Settings(BaseSettings):
     max_output_tokens: int = Field(1500, ge=0)  # per LLM call
     max_thread_turns: int = Field(20, ge=0)  # runs per thread
     daily_token_budget: int = Field(33000, ge=0)  # all visitors per UTC day: monthly quota / 30
+
+    @field_validator("log_level", mode="before")
+    @classmethod
+    def _uppercase_log_level(cls, value: object) -> object:
+        return value.upper() if isinstance(value, str) else value
 
     @model_validator(mode="after")
     def _require_api_key_when_auth_enabled(self) -> "Settings":
