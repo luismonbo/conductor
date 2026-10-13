@@ -28,7 +28,7 @@ def parse_page(name: str, text: str) -> WikiPage:
     if closing is not None:
         try:
             meta = yaml.safe_load("".join(lines[1:closing]))
-        except yaml.YAMLError:
+        except Exception:  # YAMLError, or ValueError for a date such as 2026-02-30
             closing = None
     if closing is None:
         logger.warning("wiki page %r: its frontmatter doesn't parse; kept as text", name)

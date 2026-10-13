@@ -47,7 +47,11 @@ def test_a_page_with_windows_line_endings_still_loses_its_frontmatter():
 
 @pytest.mark.parametrize(
     "text",
-    ["---\ntitle: [unclosed\n---\nBody.\n", "---\ntitle: Never closed\nBody.\n"],
+    [
+        "---\ntitle: [unclosed\n---\nBody.\n",
+        "---\ntitle: Never closed\nBody.\n",
+        "---\ntitle: Broken\nupdated: 2026-02-30\n---\nBody.\n",  # PyYAML raises ValueError
+    ],
 )
 def test_frontmatter_that_does_not_parse_keeps_the_whole_page(text, caplog):
     with caplog.at_level(logging.WARNING, logger="harness.adapters.wiki.pages"):
