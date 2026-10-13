@@ -68,7 +68,7 @@ src/harness/
 │   └── ...               ← protocols + types, imports nothing outward
 ├── cli/                  ← ingest.py, rag_query.py
 ├── observability/        ← per-step tracer + token cost
-└── security/             ← input/content/output guards
+└── security/             ← input guard, egress filter (what may reach a browser)
 
 frontend/src/
 ├── hooks/useChatStream   ← reducer + stream consumer + resumeStream()
