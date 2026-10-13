@@ -142,3 +142,17 @@ def test_unknown_field_in_target_file_raises(monkeypatch, tmp_path):
 
     with pytest.raises(ValueError, match="not_a_real_field"):
         get_settings()
+
+
+def test_tool_details_stay_out_of_the_browser_by_default(monkeypatch):
+    monkeypatch.delenv("HARNESS_SHOW_TOOL_DETAILS", raising=False)
+    monkeypatch.setenv("HARNESS_API_KEY", "test-key")
+
+    assert Settings(_env_file=None).show_tool_details is False
+
+
+def test_tool_details_can_be_turned_on(monkeypatch):
+    monkeypatch.setenv("HARNESS_SHOW_TOOL_DETAILS", "true")
+    monkeypatch.setenv("HARNESS_API_KEY", "test-key")
+
+    assert Settings(_env_file=None).show_tool_details is True
