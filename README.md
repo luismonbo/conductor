@@ -210,10 +210,10 @@ serves. Prompts live only in `prompt.py`: never in `.env`, Settings or a target 
 `search_documents` searches only the collections its `tools.py` lists; any other collection the
 model names is refused.
 
-**Private agents.** An agent that shouldn't be public, such as a website's scoped assistant, is a
-gitignored folder under `src/harness/agents/`; the Dockerfile's `COPY src/ src/` bakes it into the
-image. That relies on the editable install `uv sync` performs (a `.pth` file pointing at `src/`):
-a non-editable wheel build drops gitignored files.
+**Private agents.** To keep an agent out of a public repo, gitignore its folder under
+`src/harness/agents/`; the Dockerfile's `COPY src/ src/` still bakes it into the image. That relies
+on the editable install `uv sync` performs (a `.pth` file pointing at `src/`): a non-editable wheel
+build drops gitignored files.
 
 ---
 

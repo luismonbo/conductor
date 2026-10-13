@@ -1,0 +1,37 @@
+# Deployment target for the public chatbot on luismonbo.com (Azure Container Apps,
+# West Europe). Build with: docker build --build-arg TARGET_NAME=luismonbo-com .
+#
+# Committed on purpose, unlike personal targets: CI can build the production image
+# only from what is in the repo. Only non-secret settings belong here; the loader
+# rejects credential fields (SECRET_FIELDS in src/harness/config/targets.py).
+# Secrets come from the Container App's environment: HARNESS_API_KEY,
+# HARNESS_TYPESAFE_API_KEY, HARNESS_CHECKPOINTER_URL (the Postgres DSN) and,
+# unless the app's managed identity is used, HARNESS_AZURE_API_KEY.
+#
+# Boots once wiki search and the Postgres checkpointer land. An environment
+# variable overrides any value here, e.g. HARNESS_CHECKPOINTER=sqlite for a local test.
+
+# --- Model -------------------------------------------------------------------
+llm_backend: azure
+azure_endpoint: https://aif-agent-harness-westeu-001.services.ai.azure.com
+azure_deployment: gpt-5.4-mini
+azure_api_version: "2024-10-21"  # quoted: unquoted, YAML parses this as a date
+
+# --- Agent -------------------------------------------------------------------
+agent: website
+
+# --- State -------------------------------------------------------------------
+# Threads and the run store live in Azure Database for PostgreSQL.
+checkpointer: postgres
+# Shared long-term memory stays off on a public site; in memory, it writes nothing.
+memory_backend: in_memory
+memory_tools_enabled: false
+
+# --- Public-site safety ------------------------------------------------------
+show_tool_details: false
+input_guard_enabled: true
+guard_model: jev-1.13.0          # pinned: thresholds are calibrated against it
+max_message_chars: 2000
+max_output_tokens: 1500
+max_thread_turns: 20
+daily_token_budget: 33000        # provider monthly token quota / 30
