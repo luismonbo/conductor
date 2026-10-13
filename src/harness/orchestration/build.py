@@ -19,6 +19,9 @@ from harness.adapters.chunking.structure_aware import StructureAwareChunker
 from harness.adapters.embedding.fake import FakeEmbedder
 from harness.adapters.llm.parsers import NativeToolCallParser, PromptedToolCallParser
 from harness.adapters.memory.in_memory import InMemoryLongTerm
+from harness.adapters.wiki.azure_blob import AzureBlobWikiSource
+from harness.adapters.wiki.local import LocalWikiSource
+from harness.adapters.wiki.pages import build_wiki
 from harness.agents.definition import AgentDefinition, ToolDeps
 from harness.config.settings import Settings
 from harness.core.llm.client import LLMClient
@@ -27,6 +30,7 @@ from harness.core.memory.store import LongTermMemory
 from harness.core.rag.ingest import IngestionPipeline
 from harness.core.rag.ports import Embedder, Retriever as RetrieverPort, VectorStore
 from harness.core.rag.serve import DiversifiedRetriever, RagPipeline, Retriever
+from harness.core.wiki import Wiki, WikiSource
 from harness.orchestration.agents import load_agent
 from harness.orchestration.checkpointer import build_checkpointer
 from harness.security.input_guard import GuardLimits, InputGuard
@@ -223,17 +227,42 @@ def resolve_system_prompt(settings: Settings) -> str:
     return load_agent(settings.agent).prompt
 
 
+def build_wiki_source(settings: Settings) -> WikiSource | None:
+    """The deployment's wiki source, or None when it has none (Settings allows one)."""
+    if settings.wiki_blob_account_url:
+        return AzureBlobWikiSource(
+            settings.wiki_blob_account_url, settings.wiki_blob_container, settings.wiki_blob_prefix
+        )
+    if settings.wiki_dir:
+        return LocalWikiSource(settings.wiki_dir)
+    return None
+
+
+def _load_wiki(settings: Settings) -> tuple[Wiki | None, BaseException | None]:
+    """The wiki, or why it failed to load. No source configured is not a failure."""
+    source = build_wiki_source(settings)
+    if source is None:
+        return None, None
+    try:
+        return build_wiki(source), None
+    except Exception as exc:
+        logging.getLogger(__name__).warning(
+            "Wiki unavailable; an agent that needs it will not start", exc_info=True
+        )
+        return None, exc
+
+
 def build_tool_deps(settings: Settings, long_term: LongTermMemory | None = None) -> ToolDeps:
     """The shared infrastructure every agent's tools draw from, built once.
 
-    RAG degrades gracefully: with its backend unavailable the retriever and
-    vector store are None, and rag_error holds the reason, so an agent that
-    cannot work without RAG fails with the real cause while the others simply
-    go without search_documents. `long_term` lets a caller (the eval harness)
-    pre-seed memory.
+    RAG and the wiki degrade gracefully: with a backend unavailable its value is
+    None and its error says why, so an agent that cannot work without it fails
+    with the real cause while the others simply go without. `long_term` lets a
+    caller (the eval harness) pre-seed memory.
     """
     if long_term is None:
         long_term = build_long_term(settings)
+    wiki, wiki_error = _load_wiki(settings)
     try:
         vector_store = build_vector_store(settings, settings.rag_vector_store_backend)
         retriever = build_retriever(settings, vector_store)
@@ -249,6 +278,8 @@ def build_tool_deps(settings: Settings, long_term: LongTermMemory | None = None)
             vector_store=None,
             collections=(),
             rag_error=exc,
+            wiki=wiki,
+            wiki_error=wiki_error,
         )
     return ToolDeps(
         settings=settings,
@@ -256,6 +287,8 @@ def build_tool_deps(settings: Settings, long_term: LongTermMemory | None = None)
         retriever=retriever,
         vector_store=vector_store,
         collections=tuple(collections),
+        wiki=wiki,
+        wiki_error=wiki_error,
     )
 
 

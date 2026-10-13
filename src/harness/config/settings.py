@@ -81,6 +81,15 @@ class Settings(BaseSettings):
     milvus_uri: str = "./data/milvus_papers.db"
     milvus_collection: str = "rag_chunks"
 
+    # Wiki: the website agent's knowledge, loaded into memory at startup. One
+    # source: a local folder, or a private Azure Blob container read with
+    # DefaultAzureCredential (the Container App's managed identity). See
+    # docs/superpowers/specs/2026-10-13-wiki-search-design.md.
+    wiki_dir: str = ""
+    wiki_blob_account_url: str = ""  # e.g. https://<account>.blob.core.windows.net
+    wiki_blob_container: str = ""
+    wiki_blob_prefix: str = ""  # optional folder inside the container, e.g. wiki/
+
     # Checkpointer
     checkpointer: str = "sqlite"       # memory | sqlite | postgres
     checkpointer_url: str = "./harness.sqlite"
@@ -160,6 +169,26 @@ class Settings(BaseSettings):
                 "HARNESS_INPUT_GUARD_ENABLED is true but HARNESS_TYPESAFE_API_KEY is "
                 "empty. Set HARNESS_TYPESAFE_API_KEY, or set "
                 "HARNESS_INPUT_GUARD_ENABLED=false."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _one_wiki_source(self) -> "Settings":
+        blob = (self.wiki_blob_account_url, self.wiki_blob_container)
+        if any(blob) and not all(blob):
+            raise ValueError(
+                "Set both HARNESS_WIKI_BLOB_ACCOUNT_URL and HARNESS_WIKI_BLOB_CONTAINER, "
+                "or neither."
+            )
+        if self.wiki_blob_prefix and not all(blob):
+            raise ValueError(
+                "HARNESS_WIKI_BLOB_PREFIX needs HARNESS_WIKI_BLOB_ACCOUNT_URL and "
+                "HARNESS_WIKI_BLOB_CONTAINER."
+            )
+        if self.wiki_dir and all(blob):
+            raise ValueError(
+                "Set one wiki source: HARNESS_WIKI_DIR, or the HARNESS_WIKI_BLOB_* "
+                "settings, not both."
             )
         return self
 
