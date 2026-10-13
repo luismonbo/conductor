@@ -150,5 +150,4 @@ export interface CancelResponse {
 // Health response
 export interface HealthResponse {
   readonly status: string;
-  readonly backend: string;
 }

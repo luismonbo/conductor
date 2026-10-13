@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useReducer, useRef } from 'react';
-import { streamChat, cancelChat, resumeChat, fetchThreadMessages } from '@/api';
+import {
+  streamChat,
+  cancelChat,
+  resumeChat,
+  fetchThreadMessages,
+  HttpError,
+  NETWORK_ERROR_TEXT,
+} from '@/api';
 import {
   isThreadIdPayload,
   type AgentEvent,
@@ -41,7 +48,7 @@ export const initialState: ChatState = {
 // Action union
 // ---------------------------------------------------------------------------
 
-type ChatAction =
+export type ChatAction =
   | { type: 'SET_INPUT'; value: string }
   | { type: 'SEND_USER_MESSAGE'; text: string; assistantId: string }
   | { type: 'SET_THREAD_ID'; id: string }
@@ -49,7 +56,7 @@ type ChatAction =
   | { type: 'ADD_TOOL_CALL'; name: string; args: Record<string, unknown>; call_id: string }
   | { type: 'ADD_TOOL_RESULT'; text: string; name: string; call_id: string; is_error: boolean }
   | { type: 'STREAM_FINAL'; text: string; stopped_reason: string }
-  | { type: 'STREAM_ERROR'; text: string }
+  | { type: 'STREAM_ERROR'; text: string; forgetThread?: boolean }
   | { type: 'STREAM_INTERRUPT'; payload: InterruptPayload }
   | { type: 'STREAM_CANCELLED' }
   | { type: 'LOAD_THREAD'; threadId: string; messages: ConversationMessage[] }
@@ -185,7 +192,16 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         ...msg,
         isStreaming: false,
       }));
-      return { ...state, messages, streamStatus: 'error', currentTool: null, errorMessage: action.text };
+      return {
+        ...state,
+        messages,
+        streamStatus: 'error',
+        currentTool: null,
+        errorMessage: action.text,
+        // The server can't continue this thread (it expired, or it holds a message
+        // the content filter refused): the next message starts a new one.
+        threadId: action.forgetThread ? null : state.threadId,
+      };
     }
 
     case 'STREAM_INTERRUPT': {
@@ -264,6 +280,32 @@ export function threadMessagesToConversation(
 }
 
 // ---------------------------------------------------------------------------
+// Failures
+// ---------------------------------------------------------------------------
+
+/** The action for an `error` frame. A content-filter refusal leaves the thread
+ *  holding a message the provider refuses, so the next message starts a new one. */
+export function errorFrameAction(event: AgentEvent): ChatAction {
+  return {
+    type: 'STREAM_ERROR',
+    text: event.text,
+    forgetThread: event.stopped_reason === 'content_filter',
+  };
+}
+
+/** The action for a request that failed before or while streaming. */
+export function streamFailureAction(err: unknown): ChatAction {
+  if (err instanceof DOMException && err.name === 'AbortError') {
+    return { type: 'STREAM_CANCELLED' };
+  }
+  if (err instanceof HttpError) {
+    // 404: the server no longer knows this thread, so the next message starts a new one.
+    return { type: 'STREAM_ERROR', text: err.message, forgetThread: err.status === 404 };
+  }
+  return { type: 'STREAM_ERROR', text: NETWORK_ERROR_TEXT };
+}
+
+// ---------------------------------------------------------------------------
 // Hook
 // ---------------------------------------------------------------------------
 
@@ -318,19 +360,12 @@ export function useChatStream() {
               break;
             }
             case 'error':
-              dispatch({ type: 'STREAM_ERROR', text: event.text });
+              dispatch(errorFrameAction(event));
               break;
           }
         }
       } catch (err) {
-        if (err instanceof DOMException && err.name === 'AbortError') {
-          dispatch({ type: 'STREAM_CANCELLED' });
-        } else {
-          dispatch({
-            type: 'STREAM_ERROR',
-            text: err instanceof Error ? err.message : 'Unknown error',
-          });
-        }
+        dispatch(streamFailureAction(err));
       }
     },
     [],

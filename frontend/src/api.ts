@@ -15,6 +15,35 @@ import {
 
 const BASE = import.meta.env.VITE_API_URL ?? '/api';
 
+// What a person reads when a request fails: fixed sentences, never a raw status
+// line. The site's chat widget (luismonbo.com) uses the same wording.
+export const NETWORK_ERROR_TEXT =
+  "Couldn't reach the assistant. Check your connection and try again.";
+
+export function describeHttpError(status: number): string {
+  switch (status) {
+    case 429:
+      return "You're sending messages too quickly. Please wait a minute and try again.";
+    case 413:
+      return 'That message is too long. Please shorten it.';
+    case 404:
+      return 'That conversation has expired. Your next message will start a new one.';
+    default:
+      return 'The assistant is unavailable right now. Please try again later.';
+  }
+}
+
+/** A non-OK response: `message` is the sentence to show, `status` decides what else happens. */
+export class HttpError extends Error {
+  readonly status: number;
+
+  constructor(status: number) {
+    super(describeHttpError(status));
+    this.name = 'HttpError';
+    this.status = status;
+  }
+}
+
 export async function* streamChat(
   payload: ChatRequest,
   signal: AbortSignal,
@@ -27,7 +56,7 @@ export async function* streamChat(
   });
 
   if (!response.ok) {
-    throw new Error(`Stream request failed: ${response.status} ${response.statusText}`);
+    throw new HttpError(response.status);
   }
 
   if (!response.body) {
@@ -55,7 +84,7 @@ export async function* resumeChat(
   });
 
   if (!response.ok) {
-    throw new Error(`Resume request failed: ${response.status} ${response.statusText}`);
+    throw new HttpError(response.status);
   }
 
   if (!response.body) {
@@ -72,7 +101,7 @@ export async function* resumeChat(
 export async function cancelChat(threadId: string): Promise<CancelResponse> {
   const response = await fetch(`${BASE}/cancel/${threadId}`, { method: 'POST' });
   if (!response.ok) {
-    throw new Error(`Cancel request failed: ${response.status} ${response.statusText}`);
+    throw new HttpError(response.status);
   }
   return response.json() as Promise<CancelResponse>;
 }
@@ -80,7 +109,7 @@ export async function cancelChat(threadId: string): Promise<CancelResponse> {
 export async function fetchModels(): Promise<ModelsResponse> {
   const response = await fetch(`${BASE}/models`);
   if (!response.ok) {
-    throw new Error(`Models request failed: ${response.status} ${response.statusText}`);
+    throw new HttpError(response.status);
   }
   return response.json() as Promise<ModelsResponse>;
 }
@@ -88,7 +117,7 @@ export async function fetchModels(): Promise<ModelsResponse> {
 export async function fetchThreads(): Promise<{ threads: ThreadSummary[] }> {
   const response = await fetch(`${BASE}/threads`);
   if (!response.ok) {
-    throw new Error(`Threads request failed: ${response.status} ${response.statusText}`);
+    throw new HttpError(response.status);
   }
   return response.json() as Promise<{ threads: ThreadSummary[] }>;
 }
@@ -96,7 +125,7 @@ export async function fetchThreads(): Promise<{ threads: ThreadSummary[] }> {
 export async function fetchThreadMessages(threadId: string): Promise<ThreadMessagesResponse> {
   const response = await fetch(`${BASE}/threads/${threadId}`);
   if (!response.ok) {
-    throw new Error(`Thread request failed: ${response.status} ${response.statusText}`);
+    throw new HttpError(response.status);
   }
   return response.json() as Promise<ThreadMessagesResponse>;
 }
@@ -104,7 +133,7 @@ export async function fetchThreadMessages(threadId: string): Promise<ThreadMessa
 export async function healthCheck(): Promise<HealthResponse> {
   const response = await fetch(`${BASE}/health`);
   if (!response.ok) {
-    throw new Error(`Health check failed: ${response.status} ${response.statusText}`);
+    throw new HttpError(response.status);
   }
   return response.json() as Promise<HealthResponse>;
 }

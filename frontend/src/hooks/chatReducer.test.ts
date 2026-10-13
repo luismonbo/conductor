@@ -1,6 +1,14 @@
 import { describe, it, expect } from 'vitest';
-import { chatReducer, initialState, threadMessagesToConversation } from '@/hooks/useChatStream';
+import { HttpError, NETWORK_ERROR_TEXT } from '@/api';
+import {
+  chatReducer,
+  errorFrameAction,
+  initialState,
+  streamFailureAction,
+  threadMessagesToConversation,
+} from '@/hooks/useChatStream';
 import type { ChatState } from '@/hooks/useChatStream';
+import type { AgentEvent } from '@/types';
 
 function withStreamingAssistant(): ChatState {
   return chatReducer(initialState, {
@@ -90,5 +98,59 @@ describe('threadMessagesToConversation', () => {
     }
     const last = out[2];
     if (last.role === 'assistant') expect(last.finalText).toBe('The answer is 4.');
+  });
+});
+
+describe('failures', () => {
+  const streaming = (): ChatState => ({ ...withStreamingAssistant(), threadId: 't-1' });
+  const errorFrame = (stopped_reason: string): AgentEvent => ({
+    type: 'error', text: 'sentence from the server', name: '', args: {},
+    call_id: '', is_error: false, stopped_reason,
+  });
+
+  it('a content-filter refusal forgets the thread but keeps the conversation', () => {
+    const before = streaming();
+    const after = chatReducer(before, errorFrameAction(errorFrame('content_filter')));
+
+    expect(after.threadId).toBeNull();
+    expect(after.messages).toHaveLength(before.messages.length);
+    expect(after.errorMessage).toBe('sentence from the server');
+  });
+
+  it('any other error frame keeps the thread', () => {
+    const after = chatReducer(streaming(), errorFrameAction(errorFrame('error')));
+
+    expect(after.threadId).toBe('t-1');
+  });
+
+  it('a 404 forgets the thread and shows its sentence', () => {
+    const after = chatReducer(streaming(), streamFailureAction(new HttpError(404)));
+
+    expect(after.threadId).toBeNull();
+    expect(after.errorMessage).toBe(
+      'That conversation has expired. Your next message will start a new one.',
+    );
+  });
+
+  it('a 429 keeps the thread', () => {
+    const after = chatReducer(streaming(), streamFailureAction(new HttpError(429)));
+
+    expect(after.threadId).toBe('t-1');
+    expect(after.errorMessage).toBe(
+      "You're sending messages too quickly. Please wait a minute and try again.",
+    );
+  });
+
+  it('a network failure shows the connection sentence, not the browser message', () => {
+    const after = chatReducer(streaming(), streamFailureAction(new TypeError('Failed to fetch')));
+
+    expect(after.errorMessage).toBe(NETWORK_ERROR_TEXT);
+    expect(after.threadId).toBe('t-1');
+  });
+
+  it('an abort is a cancel, not an error', () => {
+    expect(streamFailureAction(new DOMException('aborted', 'AbortError'))).toEqual({
+      type: 'STREAM_CANCELLED',
+    });
   });
 });
