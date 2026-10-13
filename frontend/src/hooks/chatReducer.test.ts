@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { HttpError, NETWORK_ERROR_TEXT } from '@/api';
+import { HttpError, NETWORK_ERROR_TEXT, UNAVAILABLE_TEXT } from '@/api';
 import {
   chatReducer,
   errorFrameAction,
@@ -124,7 +124,7 @@ describe('failures', () => {
   });
 
   it('a 404 forgets the thread and shows its sentence', () => {
-    const after = chatReducer(streaming(), streamFailureAction(new HttpError(404)));
+    const after = chatReducer(streaming(), streamFailureAction(new HttpError(404), 't-1'));
 
     expect(after.threadId).toBeNull();
     expect(after.errorMessage).toBe(
@@ -132,8 +132,16 @@ describe('failures', () => {
     );
   });
 
+  it('a 404 for a request that named no thread is a failure, not an expired thread', () => {
+    // e.g. no /api proxy deployed: nothing named a thread, so nothing expired.
+    const after = chatReducer(withStreamingAssistant(), streamFailureAction(new HttpError(404), null));
+
+    expect(after.errorMessage).toBe(UNAVAILABLE_TEXT);
+    expect(after.threadId).toBeNull();
+  });
+
   it('a 429 keeps the thread', () => {
-    const after = chatReducer(streaming(), streamFailureAction(new HttpError(429)));
+    const after = chatReducer(streaming(), streamFailureAction(new HttpError(429), 't-1'));
 
     expect(after.threadId).toBe('t-1');
     expect(after.errorMessage).toBe(
@@ -142,14 +150,16 @@ describe('failures', () => {
   });
 
   it('a network failure shows the connection sentence, not the browser message', () => {
-    const after = chatReducer(streaming(), streamFailureAction(new TypeError('Failed to fetch')));
+    const after = chatReducer(
+      streaming(), streamFailureAction(new TypeError('Failed to fetch'), 't-1'),
+    );
 
     expect(after.errorMessage).toBe(NETWORK_ERROR_TEXT);
     expect(after.threadId).toBe('t-1');
   });
 
   it('an abort is a cancel, not an error', () => {
-    expect(streamFailureAction(new DOMException('aborted', 'AbortError'))).toEqual({
+    expect(streamFailureAction(new DOMException('aborted', 'AbortError'), null)).toEqual({
       type: 'STREAM_CANCELLED',
     });
   });

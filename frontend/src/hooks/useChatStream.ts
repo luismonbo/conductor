@@ -6,6 +6,7 @@ import {
   fetchThreadMessages,
   HttpError,
   NETWORK_ERROR_TEXT,
+  UNAVAILABLE_TEXT,
 } from '@/api';
 import {
   isThreadIdPayload,
@@ -293,12 +294,17 @@ export function errorFrameAction(event: AgentEvent): ChatAction {
   };
 }
 
-/** The action for a request that failed before or while streaming. */
-export function streamFailureAction(err: unknown): ChatAction {
+/** The action for a request that failed before or while streaming;
+ *  `sentThreadId` is the thread the request named, if any. */
+export function streamFailureAction(err: unknown, sentThreadId: string | null): ChatAction {
   if (err instanceof DOMException && err.name === 'AbortError') {
     return { type: 'STREAM_CANCELLED' };
   }
   if (err instanceof HttpError) {
+    if (err.status === 404 && sentThreadId === null) {
+      // Nothing named a thread, so this 404 is a routing problem, not an expired thread.
+      return { type: 'STREAM_ERROR', text: UNAVAILABLE_TEXT };
+    }
     // 404: the server no longer knows this thread, so the next message starts a new one.
     return { type: 'STREAM_ERROR', text: err.message, forgetThread: err.status === 404 };
   }
@@ -314,7 +320,7 @@ export function useChatStream() {
   const abortRef = useRef<AbortController | null>(null);
 
   const _consumeStream = useCallback(
-    async (gen: AsyncGenerator<ThreadIdPayload | AgentEvent>) => {
+    async (gen: AsyncGenerator<ThreadIdPayload | AgentEvent>, sentThreadId: string | null) => {
       try {
         for await (const event of gen) {
           if (isThreadIdPayload(event)) {
@@ -365,7 +371,7 @@ export function useChatStream() {
           }
         }
       } catch (err) {
-        dispatch(streamFailureAction(err));
+        dispatch(streamFailureAction(err, sentThreadId));
       }
     },
     [],
@@ -388,6 +394,7 @@ export function useChatStream() {
           { message: text, thread_id: state.threadId ?? undefined, model },
           controller.signal,
         ),
+        state.threadId,
       );
     },
     [state.streamStatus, state.threadId, _consumeStream],
@@ -406,6 +413,7 @@ export function useChatStream() {
 
       await _consumeStream(
         resumeChat(state.threadId, decision, controller.signal),
+        state.threadId,
       );
     },
     [state.threadId, _consumeStream],

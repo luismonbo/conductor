@@ -19,6 +19,7 @@ const BASE = import.meta.env.VITE_API_URL ?? '/api';
 // line. The site's chat widget (luismonbo.com) uses the same wording.
 export const NETWORK_ERROR_TEXT =
   "Couldn't reach the assistant. Check your connection and try again.";
+export const UNAVAILABLE_TEXT = 'The assistant is unavailable right now. Please try again later.';
 
 export function describeHttpError(status: number): string {
   switch (status) {
@@ -29,7 +30,7 @@ export function describeHttpError(status: number): string {
     case 404:
       return 'That conversation has expired. Your next message will start a new one.';
     default:
-      return 'The assistant is unavailable right now. Please try again later.';
+      return UNAVAILABLE_TEXT;
   }
 }
 
