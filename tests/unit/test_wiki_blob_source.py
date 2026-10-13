@@ -16,17 +16,22 @@ _ACCOUNT = "https://wikistore.blob.core.windows.net"
 
 
 class _FakeLoader:
-    """Stands in for AzureBlobStorageLoader: records its arguments, yields Documents."""
+    """Stands in for AzureBlobStorageLoader: records its arguments and, like its
+    blob listing (name_starts_with), yields only the blobs that start with prefix."""
 
     created: list[tuple[tuple, dict]] = []
     blobs: dict[str, str] = {}
 
     def __init__(self, *args, **kwargs) -> None:
         _FakeLoader.created.append((args, kwargs))
+        self._prefix = kwargs.get("prefix") or ""
 
     def lazy_load(self):
         for name, text in _FakeLoader.blobs.items():
-            yield Document(page_content=text, metadata={"source": f"{_ACCOUNT}/wiki-pages/{name}"})
+            if name.startswith(self._prefix):
+                yield Document(
+                    page_content=text, metadata={"source": f"{_ACCOUNT}/wiki-pages/{name}"}
+                )
 
 
 @pytest.fixture
@@ -55,6 +60,15 @@ def test_strips_the_prefix_and_decodes_the_url(fake_loader):
 
 def test_a_prefix_without_its_slash_still_names_pages_from_the_wiki_root(fake_loader):
     fake_loader.blobs = {"wiki/index.md": "the index"}
+    assert AzureBlobWikiSource(_ACCOUNT, "wiki-pages", prefix="wiki").load() == {"index": "the index"}
+
+
+def test_a_prefix_without_its_slash_loads_only_that_folder(fake_loader):
+    fake_loader.blobs = {
+        "wiki/index.md": "the index",
+        "wiki-drafts/unpublished.md": "not public yet",
+        "wiki.md": "beside the folder, not in it",
+    }
     assert AzureBlobWikiSource(_ACCOUNT, "wiki-pages", prefix="wiki").load() == {"index": "the index"}
 
 

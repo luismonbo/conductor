@@ -17,7 +17,10 @@ class AzureBlobWikiSource:
     def __init__(self, account_url: str, container: str, prefix: str = "") -> None:
         self._account_url = account_url
         self._container = container
-        self._prefix = prefix
+        # A folder: "wiki" and "/wiki/" both list "wiki/", never a sibling such
+        # as "wiki-drafts/" (the listing matches names that start with the prefix).
+        folder = prefix.strip("/")
+        self._prefix = f"{folder}/" if folder else ""
         self.label = f"Azure Blob container {container!r}"
 
     def load(self) -> dict[str, str]:
