@@ -40,6 +40,10 @@ config/targets/*.yaml
 !config/targets/example.yaml
 !config/targets/luismonbo-com.yaml
 
+# The website agent's wiki (HARNESS_WIKI_DIR=wiki): local only. Production reads its
+# pages from a private Azure Blob container. Anchored, so adapters/wiki/ stays tracked.
+/wiki/
+
 # Eval reports (on-demand run outputs; commit selectively as benchmark snapshots)
 evaluation/reports/
 

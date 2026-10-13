@@ -10,7 +10,7 @@
 #
 # Boots once the Postgres checkpointer lands and the wiki's Blob container is set
 # (Wiki, below). An environment variable overrides any value here, e.g.
-# HARNESS_CHECKPOINTER=sqlite or HARNESS_WIKI_DIR=<folder> for a local test.
+# HARNESS_CHECKPOINTER=sqlite for a local test.
 
 # --- Model -------------------------------------------------------------------
 llm_backend: azure
