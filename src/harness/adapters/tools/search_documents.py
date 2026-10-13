@@ -8,8 +8,10 @@ fallback.
 """
 from __future__ import annotations
 
+from pathlib import PurePath
 from typing import Any
 
+from harness.core.rag.document import Chunk
 from harness.core.rag.ports import Retriever, VectorStore
 from harness.core.tools.base import ToolError
 from harness.core.types import ToolSpec
@@ -23,6 +25,12 @@ _DESCRIPTION = (
 )
 
 _MAX_K = 20
+
+
+def _cited_name(chunk: Chunk) -> str:
+    """What a citation names: the document's title, else its file name without
+    folder or extension. Never the path: the model repeats what it reads."""
+    return chunk.title or PurePath(chunk.source_path).stem or "untitled"
 
 
 class SearchDocumentsTool:
@@ -98,7 +106,7 @@ class SearchDocumentsTool:
         for i, sc in enumerate(hits, start=1):
             section = " > ".join(sc.chunk.section_path) or "n/a"
             lines.append(
-                f"[{i}] (score: {sc.score:.2f}, source: {sc.chunk.source_path}, "
+                f'[{i}] (score: {sc.score:.2f}, source: "{_cited_name(sc.chunk)}", '
                 f"section: {section})\n{sc.chunk.text}"
             )
         return "\n\n".join(lines)

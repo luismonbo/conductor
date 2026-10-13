@@ -22,21 +22,42 @@ async def _seeded_store_and_retriever(chunks: list[Chunk]) -> tuple[InMemoryVect
 
 
 @pytest.mark.asyncio
-async def test_formats_hits_with_score_source_and_section():
+async def test_cites_the_documents_title_never_its_path():
     chunk = Chunk(
         chunk_id="c1", document_id="d1", collection="papers",
         text="the model uses self-attention", section_path=("Method", "Ablations"),
-        source_path="papers/attn.pdf",
+        source_path="data/raw/papers/attn.pdf", title="Attention Is All You Need",
     )
     store, retriever = await _seeded_store_and_retriever([chunk])
     tool = SearchDocumentsTool(retriever, store, default_collection="papers")
 
     result = await tool.run({"query": "self-attention"})
 
-    assert "papers/attn.pdf" in result
-    assert "Method > Ablations" in result
+    assert result.startswith("[1] (score: ")
+    assert 'source: "Attention Is All You Need", section: Method > Ablations)' in result
     assert "the model uses self-attention" in result
-    assert result.startswith("[1] (score:")
+    assert "data/raw" not in result and "attn.pdf" not in result
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("source_path", "cited"),
+    [("data/raw/docs/010-azure-embeddings-adapter.md", "010-azure-embeddings-adapter"),
+     ("", "untitled")],
+)
+async def test_an_untitled_chunk_cites_its_file_name_without_folder_or_extension(source_path, cited):
+    # Chunks ingested before titles existed have title="".
+    chunk = Chunk(
+        chunk_id="c1", document_id="d1", collection="docs", text="body",
+        section_path=(), source_path=source_path,
+    )
+    store, retriever = await _seeded_store_and_retriever([chunk])
+    tool = SearchDocumentsTool(retriever, store, default_collection="docs")
+
+    result = await tool.run({"query": "body"})
+
+    assert f'source: "{cited}"' in result
+    assert "data/raw" not in result
 
 
 @pytest.mark.asyncio

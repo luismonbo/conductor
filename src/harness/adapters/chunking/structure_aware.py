@@ -47,6 +47,7 @@ class StructureAwareChunker:
                         page_start=section.page_start,
                         page_end=section.page_end,
                         source_path=document.source_path,
+                        title=document.title,
                         chunk_version=CHUNK_VERSION,
                         created_at=document.ingested_at,
                     )

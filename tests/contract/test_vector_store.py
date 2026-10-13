@@ -163,6 +163,7 @@ async def test_search_round_trips_every_chunk_field(store):
         page_start=3,
         page_end=4,
         source_path="papers/attn.pdf",
+        title="Attention Is All You Need",
         embedding_model="nomic-embed-text-v1.5",
         chunk_version=1,
         created_at="2026-07-25T00:00:00Z",
