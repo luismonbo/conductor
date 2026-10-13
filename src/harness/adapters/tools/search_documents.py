@@ -85,7 +85,7 @@ class SearchDocumentsTool:
         query = arguments.get("query")
         if not isinstance(query, str) or not query.strip():
             raise ToolError("query is required: say what to search for")
-        k = max(1, min(int(arguments.get("k", self._default_k)), _MAX_K))
+        k = self._k(arguments.get("k"))
         # Missing, null or empty means the default: every vector store reads a
         # None collection as "search everything", so None must never get through.
         collection = arguments.get("collection") or self._default_collection
@@ -110,3 +110,13 @@ class SearchDocumentsTool:
                 f"section: {section})\n{sc.chunk.text}"
             )
         return "\n\n".join(lines)
+
+    def _k(self, value: Any) -> int:
+        # Missing or null means the default: small models send null for an
+        # optional parameter.
+        if value is None:
+            return self._default_k
+        try:
+            return max(1, min(int(value), _MAX_K))
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ToolError(f"k must be a whole number from 1 to {_MAX_K}") from exc
