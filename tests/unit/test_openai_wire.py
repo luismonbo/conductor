@@ -188,38 +188,51 @@ _AZURE_FILTER_ERROR = {
 }
 
 
-def _bad_request(error: dict) -> openai.BadRequestError:
-    """The exception openai 2.x raises for a 400, built the way the SDK builds it."""
-    response = httpx.Response(
-        400,
-        json={"error": error},
-        request=httpx.Request("POST", "https://example.test/v1/chat/completions"),
-    )
-    return openai.BadRequestError(f"Error code: 400 - {{'error': {error}}}", response=response, body=error)
+# A real SDK client of each kind the adapters build: Azure's (the public site)
+# and the OpenAI-compatible one.
+_SDK_CLIENTS = {
+    "azure": lambda http: openai.AsyncAzureOpenAI(
+        api_key="test-key", api_version="2024-10-21", azure_endpoint="https://example.test",
+        http_client=http, max_retries=0,
+    ),
+    "openai": lambda http: openai.AsyncOpenAI(
+        api_key="test-key", base_url="https://example.test/v1", http_client=http, max_retries=0,
+    ),
+}
 
 
-def _client_raising(exc: Exception) -> SimpleNamespace:
-    return SimpleNamespace(
-        chat=SimpleNamespace(completions=SimpleNamespace(create=AsyncMock(side_effect=exc)))
-    )
+def _adapter_answering(sdk: str, error: dict) -> tuple[_OpenAIBaseClient, list[httpx.Request]]:
+    """The adapter over a real openai SDK client whose every request gets a 400
+    with this error object, from httpx.MockTransport. Nothing leaves the process
+    (no network, key or tokens), but the SDK builds its own exception from the
+    response, so an SDK upgrade that changes its .code or .body fails these tests."""
+    seen: list[httpx.Request] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(400, json={"error": error})
+
+    client = _SDK_CLIENTS[sdk](httpx.AsyncClient(transport=httpx.MockTransport(respond)))
+    return _OpenAIBaseClient(client, "m", NativeToolCallParser(), 0.0), seen
 
 
-async def test_a_filtered_prompt_becomes_content_filtered_from_generate():
-    original = _bad_request(_AZURE_FILTER_ERROR)
-    adapter = _OpenAIBaseClient(_client_raising(original), "m", NativeToolCallParser(), 0.0)
+@pytest.mark.parametrize("sdk", sorted(_SDK_CLIENTS))
+async def test_a_filtered_prompt_becomes_content_filtered_from_generate(sdk):
+    adapter, seen = _adapter_answering(sdk, _AZURE_FILTER_ERROR)
 
     with pytest.raises(ContentFiltered) as info:
         await adapter.generate([Message(Role.USER, "hi")])
 
+    assert len(seen) == 1  # the SDK sent its request, to the mock transport
     assert info.value.stage == "prompt"
     assert info.value.categories == ("jailbreak",)
-    assert info.value.__cause__ is original  # the server log keeps the provider's error
+    # Chained, so a traceback still shows the provider's error.
+    assert isinstance(info.value.__cause__, openai.BadRequestError)
 
 
-async def test_a_filtered_prompt_becomes_content_filtered_from_stream():
-    adapter = _OpenAIBaseClient(
-        _client_raising(_bad_request(_AZURE_FILTER_ERROR)), "m", NativeToolCallParser(), 0.0
-    )
+@pytest.mark.parametrize("sdk", sorted(_SDK_CLIENTS))
+async def test_a_filtered_prompt_becomes_content_filtered_from_stream(sdk):
+    adapter, _ = _adapter_answering(sdk, _AZURE_FILTER_ERROR)
 
     with pytest.raises(ContentFiltered) as info:
         async for _ in adapter.stream([Message(Role.USER, "hi")]):
@@ -228,10 +241,11 @@ async def test_a_filtered_prompt_becomes_content_filtered_from_stream():
     assert info.value.categories == ("jailbreak",)
 
 
-async def test_a_filter_error_without_verdicts_is_still_content_filtered():
+@pytest.mark.parametrize("sdk", sorted(_SDK_CLIENTS))
+async def test_a_filter_error_without_verdicts_is_still_content_filtered(sdk):
     bare = {"message": "The response was filtered", "type": None, "param": "prompt",
             "code": "content_filter", "status": 400}
-    adapter = _OpenAIBaseClient(_client_raising(_bad_request(bare)), "m", NativeToolCallParser(), 0.0)
+    adapter, _ = _adapter_answering(sdk, bare)
 
     with pytest.raises(ContentFiltered) as info:
         await adapter.generate([Message(Role.USER, "hi")])
@@ -239,15 +253,16 @@ async def test_a_filter_error_without_verdicts_is_still_content_filtered():
     assert info.value.categories == ()
 
 
-async def test_other_provider_errors_propagate_unchanged():
-    other = _bad_request({"message": "context too long", "type": None, "param": "messages",
-                          "code": "context_length_exceeded", "status": 400})
-    adapter = _OpenAIBaseClient(_client_raising(other), "m", NativeToolCallParser(), 0.0)
+@pytest.mark.parametrize("sdk", sorted(_SDK_CLIENTS))
+async def test_other_provider_errors_propagate_unchanged(sdk):
+    adapter, _ = _adapter_answering(sdk, {"message": "context too long", "type": None,
+                                          "param": "messages", "code": "context_length_exceeded",
+                                          "status": 400})
 
     with pytest.raises(openai.BadRequestError) as info:
         await adapter.generate([Message(Role.USER, "hi")])
 
-    assert info.value is other
+    assert info.value.code == "context_length_exceeded"
 
 
 def test_content_filtered_names_its_stage_and_categories_never_content():
