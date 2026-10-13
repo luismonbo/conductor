@@ -12,6 +12,17 @@ from typing import Any, Protocol, runtime_checkable
 from harness.core.types import ToolSpec
 
 
+class ToolError(Exception):
+    """A tool failure whose message the model may read.
+
+    Raise it for something the model can act on: a missing argument, a
+    collection it may not search. Any other exception from run() reaches the
+    model only as "Tool '<name>' failed." (ToolRegistry.dispatch): its text may
+    carry internals (a provider's error body, a path) the model could repeat
+    to a visitor.
+    """
+
+
 @runtime_checkable
 class Tool(Protocol):
     @property
@@ -23,7 +34,7 @@ class Tool(Protocol):
         return False
 
     async def run(self, arguments: dict[str, Any]) -> str:
-        """Execute and return a string result. Raise on hard failure; the
-        registry wraps exceptions into an error ToolResult so one bad tool
-        can't crash the agent loop."""
+        """Execute and return a string result. Raise ToolError for a failure the
+        model should read; the registry masks any other exception, so one bad
+        tool can't crash the agent loop or leak its internals."""
         ...

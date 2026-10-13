@@ -191,3 +191,17 @@ async def test_the_agents_default_collection_stays_searchable_when_unlisted():
 
     assert not result.is_error
     assert "private research notes" in result.content
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "arguments", [{}, {"query": ""}, {"query": "   "}, {"query": None}], ids=repr,
+)
+async def test_a_missing_query_is_explained_to_the_model(arguments):
+    store, retriever = await _seeded_store_and_retriever([_PUBLIC])
+    tool = SearchDocumentsTool(retriever, store, default_collection="docs", collections=["docs"])
+
+    result = await _dispatch(tool, arguments)
+
+    assert result.is_error
+    assert "query is required" in result.content

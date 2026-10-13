@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Any
 
 from harness.core.rag.ports import Retriever, VectorStore
+from harness.core.tools.base import ToolError
 from harness.core.types import ToolSpec
 
 _DESCRIPTION = (
@@ -73,13 +74,15 @@ class SearchDocumentsTool:
         )
 
     async def run(self, arguments: dict[str, Any]) -> str:
-        query = arguments["query"]
+        query = arguments.get("query")
+        if not isinstance(query, str) or not query.strip():
+            raise ToolError("query is required: say what to search for")
         k = max(1, min(int(arguments.get("k", self._default_k)), _MAX_K))
         # Missing, null or empty means the default: every vector store reads a
         # None collection as "search everything", so None must never get through.
         collection = arguments.get("collection") or self._default_collection
         if collection not in self._allowed:
-            raise ValueError(
+            raise ToolError(
                 f"collection {collection!r} is not available; "
                 f"this assistant can search: {', '.join(self._allowed)}"
             )
