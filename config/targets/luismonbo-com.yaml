@@ -8,8 +8,9 @@
 # HARNESS_TYPESAFE_API_KEY, HARNESS_CHECKPOINTER_URL (the Postgres DSN) and,
 # unless the app's managed identity is used, HARNESS_AZURE_API_KEY.
 #
-# Boots once wiki search and the Postgres checkpointer land. An environment
-# variable overrides any value here, e.g. HARNESS_CHECKPOINTER=sqlite for a local test.
+# Boots once the Postgres checkpointer lands and the wiki's Blob container is set
+# (Wiki, below). An environment variable overrides any value here, e.g.
+# HARNESS_CHECKPOINTER=sqlite or HARNESS_WIKI_DIR=<folder> for a local test.
 
 # --- Model -------------------------------------------------------------------
 llm_backend: azure
@@ -19,6 +20,12 @@ azure_api_version: "2024-10-21"  # quoted: unquoted, YAML parses this as a date
 
 # --- Agent -------------------------------------------------------------------
 agent: website
+
+# --- Wiki --------------------------------------------------------------------
+# The website agent's knowledge: a private Blob container, read at startup with
+# the Container App's managed identity (Storage Blob Data Reader on the container).
+# wiki_blob_account_url: https://<account>.blob.core.windows.net
+# wiki_blob_container: <container>
 
 # --- State -------------------------------------------------------------------
 # Threads and the run store live in Azure Database for PostgreSQL.
