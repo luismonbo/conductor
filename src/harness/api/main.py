@@ -33,12 +33,14 @@ from harness.api.rate_limit import default_limit, limiter, strict_limit
 from harness.api.session import attach as attach_session_cookie, read_or_mint
 from harness.api.schemas import ChatRequest, ResumeRequest
 from harness.config.settings import get_settings
+from harness.core.llm.errors import ContentFiltered
 from harness.core.types import AgentEvent, Message, Role
 from harness.observability.langfuse_tracing import langfuse_configured
 from harness.observability.logging_setup import configure_logging
 from harness.observability.run_store import RunStore
 from harness.observability.token_accumulator import TokenAccumulator
 from harness.orchestration.build import AgentRuntime, build_input_guard, build_runtime
+from harness.security import egress
 from harness.security.input_guard import GuardContext, InputGuard
 
 # Settings() reads HARNESS_-prefixed vars straight from .env itself, but this
@@ -230,7 +232,8 @@ def _get_input_guard() -> InputGuard:
 
 @app.get("/health")
 async def health() -> dict:
-    return {"status": "ok", "backend": get_settings().llm_backend}
+    # Unauthenticated and public, so it names nothing about the deployment (SL-3).
+    return {"status": "ok"}
 
 
 # ---------------------------------------------------------------------------
@@ -390,29 +393,20 @@ async def list_threads(request: Request, _auth: None = Depends(require_api_key))
 @limiter.limit(default_limit)
 async def thread_messages(request: Request, thread_id: str, _auth: None = Depends(require_api_key)) -> dict:
     await _require_owned_thread(request, thread_id)
-    graph = (await _get_runtime()).graph
-    messages = await _thread_state_messages(graph, thread_id)
+    runtime = await _get_runtime()
+    messages = await _thread_state_messages(runtime.graph, thread_id)
     if messages is None:
         raise HTTPException(status_code=404, detail="unknown thread")
-    out = [
-        {
-            "role": m.role.value,
-            "content": m.content,
-            "tool_calls": [
-                {"name": tc.name, "args": tc.arguments, "call_id": tc.id}
-                for tc in (m.tool_calls or ())
-            ],
-            "tool_call_id": m.tool_call_id or "",
-            "name": m.name or "",
-        }
-        for m in messages
-        if m.role != Role.SYSTEM
-    ]
-    return {"thread_id": thread_id, "messages": out}
+    return {
+        "thread_id": thread_id,
+        "messages": egress.transcript_for_browser(
+            messages, show_tool_details=runtime.settings.show_tool_details
+        ),
+    }
 
 
 # ---------------------------------------------------------------------------
-# Observability + error shaping
+# Observability
 # ---------------------------------------------------------------------------
 
 def _make_langfuse_handler() -> Any:
@@ -441,34 +435,17 @@ def _build_callbacks(thread_id: str, agent_name: str) -> tuple[list, dict]:
     }
 
 
-_CONNECTION_ERROR_NAMES = {"APIConnectionError", "APITimeoutError", "ConnectError"}
-
-# Provider-side auth/quota/rate-limit failures (e.g. an Azure spend cap or key
-# rotation tripping) — never echo these to the public chat widget: the detail
-# belongs in the server log (see _run_graph's except block), not the response.
-_PROVIDER_UNAVAILABLE_ERROR_NAMES = {
-    "RateLimitError",
-    "PermissionDeniedError",
-    "AuthenticationError",
-}
-
-
-def _friendly_error(exc: Exception) -> str:
-    if type(exc).__name__ in _CONNECTION_ERROR_NAMES:
-        return (
-            "LLM gateway unreachable — is the stack running? Try `make up`. "
-            f"({exc})"
-        )
-    if type(exc).__name__ in _PROVIDER_UNAVAILABLE_ERROR_NAMES:
-        return "The assistant is temporarily unavailable. Please try again later."
-    return str(exc)
-
-
 # ---------------------------------------------------------------------------
 # Shared SSE generator
 # ---------------------------------------------------------------------------
 
-def _make_sse_generator(thread_id: str, event_queue: asyncio.Queue, task: asyncio.Task):
+def _make_sse_generator(
+    thread_id: str,
+    event_queue: asyncio.Queue,
+    task: asyncio.Task,
+    *,
+    show_tool_details: bool,
+):
     async def _sse():
         try:
             yield f"data: {json.dumps({'thread_id': thread_id})}\n\n"
@@ -476,7 +453,10 @@ def _make_sse_generator(thread_id: str, event_queue: asyncio.Queue, task: asynci
                 item = await event_queue.get()
                 if item is None:
                     break
-                yield f"data: {json.dumps(dataclasses.asdict(item))}\n\n"
+                # Every frame passes the egress filter: only what a browser may see.
+                event = egress.to_browser(item, show_tool_details=show_tool_details)
+                if event is not None:
+                    yield f"data: {json.dumps(dataclasses.asdict(event))}\n\n"
         finally:
             if not task.done():
                 task.cancel()
@@ -507,12 +487,21 @@ async def _run_graph(
         stopped_reason_holder[0] = "cancelled"
         await event_queue.put(AgentEvent(type="error", text="cancelled"))
         raise
+    except ContentFiltered as exc:
+        # The provider's filter refused this visitor's message (or the answer
+        # to it): expected, so one line, never the message text or the sid.
+        logging.getLogger(__name__).warning(
+            "content filter stopped thread_id=%s run_id=%s stage=%s categories=%s",
+            thread_id, run_id, exc.stage, ",".join(exc.categories) or "-",
+        )
+        stopped_reason_holder[0] = "content_filter"
+        await event_queue.put(egress.error_event(exc))
     except Exception as exc:
         logging.getLogger(__name__).exception(
             "agent run failed for thread_id=%s run_id=%s", thread_id, run_id
         )
         stopped_reason_holder[0] = "error"
-        await event_queue.put(AgentEvent(type="error", text=_friendly_error(exc)))
+        await event_queue.put(egress.error_event(exc))
     finally:
         _running.pop(thread_id, None)
         # Shield finish_run so it completes even if the task is being cancelled
@@ -617,7 +606,9 @@ async def chat_stream(request: Request, req: ChatRequest, _auth: None = Depends(
     _running[thread_id] = (request.state.sid, task)
 
     return StreamingResponse(
-        _make_sse_generator(thread_id, event_queue, task),
+        _make_sse_generator(
+            thread_id, event_queue, task, show_tool_details=settings.show_tool_details
+        ),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
@@ -674,7 +665,9 @@ async def resume_run(request: Request, thread_id: str, req: ResumeRequest, _auth
     _running[thread_id] = (request.state.sid, task)
 
     return StreamingResponse(
-        _make_sse_generator(thread_id, event_queue, task),
+        _make_sse_generator(
+            thread_id, event_queue, task, show_tool_details=settings.show_tool_details
+        ),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
