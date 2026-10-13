@@ -1,6 +1,8 @@
 """The calculator explains a bad expression to the model instead of failing opaquely."""
 from __future__ import annotations
 
+import re
+
 import pytest
 
 from harness.adapters.tools.calculator import CalculatorTool
@@ -28,7 +30,8 @@ async def test_evaluates_an_expression():
         ("2 +", "invalid syntax"),
         ("abs(-1)", "unsupported expression"),
         ("'a' * 3", "non-numeric constant"),
-        ("2.0 ** 10000", "Result too large"),
+        # The C library words a float overflow: macOS, then glibc (CI).
+        ("2.0 ** 10000", "Result too large|Numerical result out of range"),
     ],
 )
 async def test_a_bad_expression_is_explained_to_the_model(expression, reason):
@@ -36,7 +39,7 @@ async def test_a_bad_expression_is_explained_to_the_model(expression, reason):
 
     assert result.is_error
     assert result.content.startswith(f"Tool 'calculator' failed: cannot evaluate {expression!r}")
-    assert reason in result.content
+    assert re.search(reason, result.content)
 
 
 @pytest.mark.parametrize("arguments", [{}, {"expression": ""}, {"expression": None}], ids=repr)
