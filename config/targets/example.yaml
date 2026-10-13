@@ -9,9 +9,9 @@
 # Secrets always come from real environment variables / .env locally, or
 # the deployment's own environment in production.
 #
-# Precedence: a real environment variable always overrides the value set
-# here; anything not set here or by a real env var falls back to the
-# Settings field default (see src/harness/config/settings.py).
+# Precedence: an environment variable, real or a line in .env, overrides the
+# value set here (a real one beats .env); anything set in neither place falls
+# back to the Settings field default (see src/harness/config/settings.py).
 
 # --- Backend selection -------------------------------------------------
 llm_backend: azure              # fake | openai_compatible | azure
@@ -31,8 +31,33 @@ rag_vector_store_backend: pgvector   # pgvector | milvus | in_memory
 pgvector_table: rag_chunks
 embedding_dimension: 3072
 
-# --- Agent behavior --------------------------------------------------------
-system_prompt: "You are a helpful assistant for example.com."
+# --- Agent -----------------------------------------------------------------
+# The entry agent: a folder under src/harness/agents/ (see the README's Agents
+# section). Its prompt.py holds the prompt, and the input guard judges
+# off-topic messages against it. Prompts never go in a target file, .env or
+# Settings.
+agent: default
+
+# Single-operator deployments can opt back into shared long-term memory.
+memory_tools_enabled: false
+
+# Tool arguments and results in the browser: a public site sends each tool's
+# name only. A single-operator deployment whose UI shows them sets true.
+show_tool_details: false
+
+# --- Input guard -------------------------------------------------------------
+# TypeSafe (Jev) screens every chat message before the agent sees it. The key
+# is a secret: HARNESS_TYPESAFE_API_KEY in the environment, never here.
+input_guard_enabled: true
+guard_model: jev-1.13.0          # pinned: thresholds are calibrated against it
+guard_timeout_seconds: 3.0
+
+# Fixed limits, each off at 0. A single-operator deployment sets all four to 0
+# and input_guard_enabled to false.
+max_message_chars: 2000
+max_output_tokens: 1500
+max_thread_turns: 20
+daily_token_budget: 33000        # provider monthly token quota / 30
 
 # Using the openai_compatible backend (e.g. pointing at a LiteLLM proxy)
 # instead of azure? Use llm_base_url / llm_model / default_model here

@@ -32,6 +32,7 @@ class OpenAICompatibleClient(_OpenAIBaseClient):
         parser: ToolCallParser,
         api_key: str = "",
         temperature: float = 0.0,
+        max_output_tokens: int = 0,
         client: Any | None = None,
     ) -> None:
         if client is None:
@@ -45,4 +46,4 @@ class OpenAICompatibleClient(_OpenAIBaseClient):
                 from openai import AsyncOpenAI
 
             client = AsyncOpenAI(base_url=base_url, api_key=api_key or _PLACEHOLDER_KEY)
-        super().__init__(client, model, parser, temperature)
+        super().__init__(client, model, parser, temperature, max_output_tokens)

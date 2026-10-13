@@ -1,4 +1,4 @@
-"""Default LangGraph agent — seven-node StateGraph.
+"""The shared agent loop: the seven-node StateGraph every agent runs on.
 
 Topology:
   START → call_model
@@ -18,6 +18,10 @@ Topology:
 Event delivery: nodes push AgentEvent objects into an asyncio.Queue passed
 via config["configurable"]["event_queue"]. The API layer puts the None sentinel
 in its _run() finally block to close the SSE stream.
+
+Each agent supplies its prompt, tools and optional model pin through its
+AgentDefinition (harness.agents.definition); orchestration.build.build_agent
+compiles it here.
 """
 from __future__ import annotations
 
@@ -32,13 +36,13 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.graph import StateGraph, START, END
 from langgraph.types import interrupt
 
-from harness.agents.default.prompt import SYSTEM_PROMPT
-from harness.agents.default.tools import build_registry
 from harness.core.llm.client import LLMClient
+from harness.core.llm.errors import ContentFiltered
 from harness.core.llm.model_resolution import resolve_model
 from harness.core.tools.registry import ToolRegistry
-from harness.core.types import AgentEvent, LLMResponse, Message, Role
+from harness.core.types import AgentEvent, LLMResponse, Message, Role, ToolSpec
 from harness.observability.langfuse_tracing import langfuse_configured
+from harness.observability.token_accumulator import estimate_tokens
 
 
 class GraphState(TypedDict):
@@ -49,45 +53,86 @@ class GraphState(TypedDict):
     model_override: NotRequired[str | None]  # UI picker; pins beat it
 
 
+def _prompt_chars(msgs: list[Message], specs: list[ToolSpec]) -> int:
+    """Characters one model call sends: every message plus the tool definitions."""
+    message_chars = sum(
+        len(m.content) + sum(len(str(tc.arguments)) for tc in m.tool_calls) for m in msgs
+    )
+    return message_chars + sum(len(repr(spec)) for spec in specs)
+
+
+def _estimated_usage(
+    msgs: list[Message], specs: list[ToolSpec], streamed: list[str]
+) -> tuple[int, int]:
+    """(input, output) tokens for a call the provider never reported usage for."""
+    return (
+        estimate_tokens(_prompt_chars(msgs, specs)),
+        estimate_tokens(sum(len(t) for t in streamed)),
+    )
+
+
 def build_graph(
     llm: LLMClient,
     checkpointer: Any,
-    sub_agents: dict[str, Any] = {},
-    registry: ToolRegistry | None = None,
+    *,
+    registry: ToolRegistry,
+    system_prompt: str,
     model_pin: str | None = None,
 ) -> Any:
-    """Compile and return the default agent graph.
+    """Compile the loop for one agent: its tools, its prompt, its optional model pin.
 
-    `registry` is exposed for testing — tests can inject a registry with
-    tools that have requires_approval=True without patching module globals.
+    orchestration.build passes these from the agent's AgentDefinition; tests
+    pass them directly.
     """
-    if registry is None:
-        registry = build_registry()
 
     async def _call_model(state: GraphState, config: RunnableConfig) -> dict:
         queue: asyncio.Queue = config["configurable"]["event_queue"]
         msgs = list(state["messages"])
         if not msgs or msgs[0].role != Role.SYSTEM:
-            msgs = [Message(role=Role.SYSTEM, content=SYSTEM_PROMPT)] + msgs
+            msgs = [Message(role=Role.SYSTEM, content=system_prompt)] + msgs
 
         model = resolve_model(
             agent_pin=model_pin,
             request_override=state.get("model_override"),
         )
+        specs = registry.specs()
         response: LLMResponse | None = None
-        async for item in llm.stream(msgs, registry.specs(), model=model):
-            if isinstance(item, str):
-                if item:
-                    await queue.put(AgentEvent(type="token", text=item))
-            else:
-                response = item
+        streamed: list[str] = []
+        accumulator = config["configurable"].get("token_accumulator")
+        try:
+            async for item in llm.stream(msgs, specs, model=model):
+                if isinstance(item, str):
+                    if item:
+                        streamed.append(item)
+                        await queue.put(AgentEvent(type="token", text=item))
+                else:
+                    response = item
+        except asyncio.CancelledError:
+            # A call cancelled mid-stream (the visitor pressed stop or left) is
+            # still billed, but the provider never reports its usage. Record an
+            # estimate, or the daily token budget never sees cancelled calls.
+            if accumulator:
+                input_t, output_t = _estimated_usage(msgs, specs, streamed)
+                accumulator.add(input_tokens=input_t, output_tokens=output_t)
+            raise
 
         if response is None:
             response = LLMResponse(text="")
 
-        if accumulator := config["configurable"].get("token_accumulator"):
+        filtered = response.finish_reason == "content_filter"
+        if accumulator:
             input_t, output_t = response.token_usage
+            if filtered and not (input_t or output_t):
+                # A filtered stream may end without a usage report; the call was
+                # still billed, so estimate it as a cancelled call is.
+                input_t, output_t = _estimated_usage(msgs, specs, streamed)
             accumulator.add(input_tokens=input_t, output_tokens=output_t)
+
+        if filtered:
+            # The provider's filter cut the answer off. Raising keeps the partial
+            # answer out of the checkpoint; the API turns this into the visitor's
+            # content-filter sentence (security/egress.py).
+            raise ContentFiltered("completion")
 
         for tc in response.tool_calls:
             await queue.put(AgentEvent(
@@ -117,7 +162,14 @@ def build_graph(
         # NOTE: queue.put() is intentionally absent here — interrupt events are
         # emitted by _run_graph after ainvoke() returns so resume reruns of this
         # node don't fire a duplicate event into the new SSE stream.
-        memory_calls = [tc for tc in last.tool_calls if tc.name == "remember"]
+        # Keyed on the call name, so a hallucinated `remember` would reach this
+        # branch even when the tool is not registered. Require registration too,
+        # otherwise a public deployment can be made to pause on a tool that
+        # cannot execute.
+        memory_calls = [
+            tc for tc in last.tool_calls
+            if tc.name == "remember" and registry.get(tc.name) is not None
+        ]
         if memory_calls:
             tc = memory_calls[0]
             proposed = tc.arguments.get("text", "")

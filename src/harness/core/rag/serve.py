@@ -133,6 +133,12 @@ class RagPipeline:
             )
         messages = assemble_prompt(query, retrieved)
         response = await self._llm.generate(messages)
+        if self._tracer is not None:
+            input_tokens, output_tokens = response.token_usage
+            await self._tracer(
+                "token_usage",
+                {"usage": {"input_tokens": input_tokens, "output_tokens": output_tokens}},
+            )
         return RagResult(
             answer=response.text,
             retrieved=tuple(retrieved),

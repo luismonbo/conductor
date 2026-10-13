@@ -71,6 +71,7 @@ class Chunk:
     page_start: int | None = None
     page_end: int | None = None
     source_path: str = ""
+    title: str = ""  # the document's title; citations name it instead of source_path
     embedding_model: str = ""  # filled in after embedding, not at chunk time
     chunk_version: int = 1
     created_at: str = ""

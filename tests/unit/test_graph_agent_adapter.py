@@ -7,12 +7,14 @@ from langgraph.checkpoint.memory import MemorySaver
 
 from harness.adapters.llm.fake import FakeLLMClient
 from harness.adapters.tools.calculator import CalculatorTool
-from harness.agents.default.graph import build_graph
 from harness.core.tools.registry import ToolRegistry
 from harness.core.types import AgentState, LLMResponse, Message, Role, ToolCall
 from harness.observability.tracer import TraceCollector
+from harness.orchestration.loop import build_graph
 
 from evaluation.harness.graph_agent import GraphAgentAdapter
+
+_PROMPT = "You are a test agent."
 
 
 def _calculator_registry() -> ToolRegistry:
@@ -38,6 +40,7 @@ async def test_direct_answer_no_tools():
         llm=FakeLLMClient([LLMResponse(text="42")]),
         checkpointer=MemorySaver(),
         registry=_calculator_registry(),
+        system_prompt=_PROMPT,
     )
     adapter = GraphAgentAdapter(graph)
 
@@ -61,6 +64,7 @@ async def test_tool_then_answer_reports_correct_trace():
         ]),
         checkpointer=MemorySaver(),
         registry=_calculator_registry(),
+        system_prompt=_PROMPT,
     )
     tracer = TraceCollector()
     adapter = GraphAgentAdapter(graph, tracer=tracer)
@@ -95,6 +99,30 @@ async def test_tool_then_answer_reports_correct_trace():
 
 
 @pytest.mark.asyncio
+async def test_run_reports_token_usage_on_the_tracer():
+    graph = build_graph(
+        llm=FakeLLMClient([
+            LLMResponse(
+                text="",
+                tool_calls=(ToolCall(id="tc_1", name="calculator", arguments={"expression": "2+2"}),),
+                usage={"input_tokens": 10, "output_tokens": 5},
+            ),
+            LLMResponse(text="The answer is 4.", usage={"input_tokens": 20, "output_tokens": 8}),
+        ]),
+        checkpointer=MemorySaver(),
+        registry=_calculator_registry(),
+        system_prompt=_PROMPT,
+    )
+    tracer = TraceCollector()
+    adapter = GraphAgentAdapter(graph, tracer=tracer)
+
+    await adapter.run(AgentState(messages=[Message(Role.USER, "what is 2+2?")]))
+
+    # Both LLM turns' usage accumulated, not just the tool-calling one.
+    assert tracer.usage_for("token_usage") == {"input_tokens": 30, "output_tokens": 13}
+
+
+@pytest.mark.asyncio
 async def test_max_iterations_reports_stopped_reason():
     responses = [
         LLMResponse(
@@ -107,6 +135,7 @@ async def test_max_iterations_reports_stopped_reason():
         llm=FakeLLMClient(responses),
         checkpointer=MemorySaver(),
         registry=_calculator_registry(),
+        system_prompt=_PROMPT,
     )
     adapter = GraphAgentAdapter(graph)
 
@@ -131,6 +160,7 @@ async def test_requires_approval_tool_raises_instead_of_hanging():
         ]),
         checkpointer=MemorySaver(),
         registry=_approvable_calculator_registry(),
+        system_prompt=_PROMPT,
     )
     adapter = GraphAgentAdapter(graph)
 

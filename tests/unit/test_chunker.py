@@ -117,3 +117,14 @@ def test_section_path_is_full_ancestor_breadcrumb():
 def test_untitled_leading_section_has_empty_breadcrumb():
     doc = _doc((DocumentSection(title="", level=0, text="lead", order=0),))
     assert StructureAwareChunker().chunk(doc)[0].section_path == ()
+
+
+def test_every_chunk_carries_its_documents_title():
+    doc = _doc((
+        DocumentSection(title="Intro", level=1, text="First.", order=0),
+        DocumentSection(title="Method", level=1, text="Second.", order=1),
+    ))
+
+    chunks = StructureAwareChunker().chunk(doc)
+
+    assert [c.title for c in chunks] == ["A Paper", "A Paper"]

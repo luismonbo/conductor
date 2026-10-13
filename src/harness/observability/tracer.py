@@ -33,6 +33,22 @@ class TraceCollector:
     def iterations(self) -> int:
         return sum(1 for _, e, _ in self.events if e == "iteration_start")
 
+    def usage_for(self, event: str) -> dict[str, int] | None:
+        """Summed (input_tokens, output_tokens) across all `event`-named
+        entries carrying a `usage` payload, or None if none do."""
+        input_tokens = output_tokens = 0
+        found = False
+        for _, e, d in self.events:
+            usage = d.get("usage") if e == event else None
+            if not usage:
+                continue
+            found = True
+            input_tokens += usage.get("input_tokens", 0)
+            output_tokens += usage.get("output_tokens", 0)
+        if not found:
+            return None
+        return {"input_tokens": input_tokens, "output_tokens": output_tokens}
+
     def summary(self) -> dict:
         return {
             "iterations": self.iterations,

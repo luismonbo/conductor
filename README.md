@@ -17,7 +17,7 @@ POST /chat/stream  →  LangGraph StateGraph  →  approval gate  →  tools  �
 Dependencies point **inward only**.
 
 ```
-api / agents ──► orchestration ──► adapters ──► core
+api ──► orchestration ──► agents ──► adapters ──► core
                                                   ↑
                                      no imports outward from here
 ```
@@ -50,9 +50,10 @@ api / agents ──► orchestration ──► adapters ──► core
 ```
 src/harness/
 ├── agents/
-│   └── default/          ← prompt, tools, LangGraph graph
+│   ├── definition.py     ← AgentDefinition + ToolDeps: the contract every agent folder implements
+│   └── default/          ← one folder per agent: prompt.py, tools.py, agent.py
 ├── api/                  ← FastAPI endpoints + SSE
-├── orchestration/        ← composition root, checkpointer factory
+├── orchestration/        ← shared agent loop, agent loader, composition root, checkpointer factory
 ├── adapters/
 │   ├── llm/              ← Azure, OpenAI-compatible, fake
 │   ├── tools/            ← calculator, recall
@@ -67,7 +68,7 @@ src/harness/
 │   └── ...               ← protocols + types, imports nothing outward
 ├── cli/                  ← ingest.py, rag_query.py
 ├── observability/        ← per-step tracer + token cost
-└── security/             ← input/content/output guards
+└── security/             ← input guard, egress filter (what may reach a browser)
 
 frontend/src/
 ├── hooks/useChatStream   ← reducer + stream consumer + resumeStream()
@@ -86,6 +87,15 @@ Configuration below), then API and frontend each in their own terminal:
 uv sync
 cp .env.example .env   # fill in provider keys for the profiles you'll use
 echo "HARNESS_API_KEY=$(openssl rand -hex 32)" >> .env   # required: auth fails closed with no key
+# Local dev: the input guard (fails closed without a TypeSafe key) and the
+# public website's limits off. A public deployment keeps the defaults.
+cat >> .env <<'EOF'
+HARNESS_INPUT_GUARD_ENABLED=false
+HARNESS_MAX_MESSAGE_CHARS=0
+HARNESS_MAX_OUTPUT_TOKENS=0
+HARNESS_MAX_THREAD_TURNS=0
+HARNESS_DAILY_TOKEN_BUDGET=0
+EOF
 
 make up     # infra: postgres, litellm
 make api    # FastAPI, reload
@@ -98,6 +108,7 @@ in a model profile fails fast instead of surfacing as an opaque proxy 400.
 Fallback — raw commands, no proxy/tracing, fake LLM, zero credentials:
 ```bash
 export HARNESS_API_KEY=$(openssl rand -hex 32)
+export HARNESS_INPUT_GUARD_ENABLED=false   # the input guard fails closed without a TypeSafe key
 uv run uvicorn harness.api.main:app --reload --app-dir src
 
 # health check (the one route auth never gates)
@@ -129,14 +140,25 @@ uv run pytest -q   # 354 tests
 |---------|---------|---------|
 | `HARNESS_LLM_BACKEND` | `fake` | `fake` · `openai_compatible` · `azure` |
 | `HARNESS_CHECKPOINTER` | `sqlite` | `memory` · `sqlite` · `postgres` (Phase 5) |
-| `HARNESS_AGENT` | `default` | agent name from registry |
+| `HARNESS_AGENT` | `default` | entry agent: a folder under `src/harness/agents/` (see [Agents](#agents)) |
 | `HARNESS_TOOL_PARSER` | `native` | `native` · `prompted` |
 | `HARNESS_MAX_ITERATIONS` | `8` | integer |
+| `HARNESS_MEMORY_TOOLS_ENABLED` | `false` | `true` · `false` — gates the shared `remember`/`recall` long-term memory tools; must stay off on a public deployment since that store is not partitioned per visitor |
+| `HARNESS_SHOW_TOOL_DETAILS` | `false` | `true` · `false` — whether tool arguments and results reach the browser (the chat stream and `GET /threads/{id}`); off, a browser gets each tool's name only. Keep it off on a public deployment |
+| `HARNESS_SESSION_COOKIE_SECURE` | `true` | `true` · `false` — marks the visitor `sid` cookie `Secure`, so browsers only send it over HTTPS; set `false` only for local development on a browser that does not treat `http://localhost` as a secure context |
+| `HARNESS_LOG_LEVEL` | `INFO` | `DEBUG` · `INFO` · `WARNING` · `ERROR` — level of the harness's own log lines (stderr); every other library stays at `WARNING`. Never set an SDK's own debug switch in production (`TYPESAFE_LOG_LEVEL=debug`, `OPENAI_LOG=debug`, `LANGFUSE_DEBUG=true`), nor run uvicorn with `--log-level trace`: they log visitor messages, the `sid` cookie or the API key |
 | `HARNESS_RATE_LIMIT_ENABLED` | `true` | `true` · `false` |
 | `HARNESS_RATE_LIMIT_STRICT` | `15/minute` | slowapi rate string; applies to LLM-invoking endpoints |
 | `HARNESS_RATE_LIMIT_DEFAULT` | `60/minute` | slowapi rate string; applies to all other rate-limited endpoints |
 | `HARNESS_AUTH_ENABLED` | `true` | `true` · `false` — fails closed: refuses to start if `true` with no `HARNESS_API_KEY` set |
 | `HARNESS_API_KEY` | — | shared bearer key gating every route except `/health`; generate with `openssl rand -hex 32` |
+| `HARNESS_INPUT_GUARD_ENABLED` | `true` | `true` · `false` — TypeSafe (Jev) screens every chat message for extraction, private-info and off-topic requests before the agent sees it; fails closed: refuses to start if `true` with no `HARNESS_TYPESAFE_API_KEY` |
+| `HARNESS_TYPESAFE_API_KEY` | — | TypeSafe API key |
+| `HARNESS_GUARD_MODEL` | `jev-1.13.0` | pinned Jev version the guard's thresholds are calibrated against |
+| `HARNESS_MAX_MESSAGE_CHARS` | `2000` | integer; `0` = off |
+| `HARNESS_MAX_OUTPUT_TOKENS` | `1500` | integer, per LLM call; `0` = off |
+| `HARNESS_MAX_THREAD_TURNS` | `20` | integer, runs per thread; `0` = off |
+| `HARNESS_DAILY_TOKEN_BUDGET` | `33000` | integer, all visitors per UTC day; `0` = off |
 | `CORS_ORIGINS` | `http://localhost:5173` | comma-separated allowed browser origins; not `HARNESS_`-prefixed |
 | `HARNESS_EMBEDDING_BACKEND` | `fake` | `fake` · `openai_compatible` · `azure` (azure not yet wired) |
 | `HARNESS_EMBEDDING_MODEL` | `nomic-embed-text-v1.5` | any model your embedding endpoint serves |
@@ -166,6 +188,32 @@ export HARNESS_LLM_BASE_URL=http://localhost:4000/v1
 export HARNESS_LLM_API_KEY=$LITELLM_MASTER_KEY
 export HARNESS_DEFAULT_MODEL=ollama-gemma
 ```
+
+---
+
+## Agents
+
+An agent is a folder under `src/harness/agents/`:
+
+```
+src/harness/agents/<name>/
+├── prompt.py   ← SYSTEM_PROMPT
+├── tools.py    ← build_tools(deps) -> ToolRegistry, from the shared infrastructure (ToolDeps)
+└── agent.py    ← AGENT = AgentDefinition(name="<name>", prompt=SYSTEM_PROMPT, tools=build_tools)
+```
+
+`HARNESS_AGENT=<name>` picks the entry agent, the one that talks to users. It is loaded by name
+(`harness.agents.<name>.agent`), so there is no registry to edit, and only that agent is imported.
+Every agent runs the same loop, `orchestration/loop.py`. The API builds the entry agent once at
+startup; a name that doesn't resolve, or a backend the agent requires, stops the app before it
+serves. Prompts live only in `prompt.py`: never in `.env`, Settings or a target file. An agent's
+`search_documents` searches only the collections its `tools.py` lists; any other collection the
+model names is refused.
+
+**Private agents.** An agent that shouldn't be public, such as a website's scoped assistant, is a
+gitignored folder under `src/harness/agents/`; the Dockerfile's `COPY src/ src/` bakes it into the
+image. That relies on the editable install `uv sync` performs (a `.pth` file pointing at `src/`):
+a non-editable wheel build drops gitignored files.
 
 ---
 

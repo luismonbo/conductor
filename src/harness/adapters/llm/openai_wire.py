@@ -16,6 +16,7 @@ import uuid
 from typing import Any, AsyncGenerator
 
 from harness.core.llm.client import LLMClient
+from harness.core.llm.errors import ContentFiltered
 from harness.core.llm.tool_parsing import ToolCallParser
 from harness.core.types import LLMResponse, Message, Role, ToolCall, ToolSpec
 
@@ -122,6 +123,34 @@ def parse_completion(completion: Any) -> LLMResponse:
     )
 
 
+def _content_filter_categories(error_body: Any) -> tuple[str, ...]:
+    """The categories a provider's content filter flagged, from the error object
+    of its 400 (Azure: innererror.content_filter_result); () when absent."""
+    inner = error_body.get("innererror") if isinstance(error_body, dict) else None
+    results = inner.get("content_filter_result") if isinstance(inner, dict) else None
+    if not isinstance(results, dict):
+        return ()
+    return tuple(
+        name
+        for name, verdict in results.items()
+        if isinstance(verdict, dict) and verdict.get("filtered")
+    )
+
+
+async def _create_completion(client: Any, kwargs: dict[str, Any]) -> Any:
+    """chat.completions.create, with a content-filter refusal raised as the
+    domain's ContentFiltered. Duck-typed like the rest of this module: the SDK's
+    API errors carry the provider's `code` and error `body`."""
+    try:
+        return await client.chat.completions.create(**kwargs)
+    except Exception as exc:
+        if getattr(exc, "code", None) == "content_filter":
+            raise ContentFiltered(
+                "prompt", _content_filter_categories(getattr(exc, "body", None))
+            ) from exc
+        raise
+
+
 class _OpenAIBaseClient(LLMClient):
     """Shared generate() body for all OpenAI Chat Completions-shaped adapters.
 
@@ -130,17 +159,24 @@ class _OpenAIBaseClient(LLMClient):
     generate() and model_id for free with no duplication.
     """
 
+    # Request parameter that caps completion tokens. llama-server, vLLM and
+    # LiteLLM accept max_tokens; Azure's reasoning-model deployments require
+    # max_completion_tokens (AzureOpenAIClient overrides this).
+    _OUTPUT_LIMIT_PARAM = "max_tokens"
+
     def __init__(
         self,
         client: Any,
         model_id: str,
         parser: ToolCallParser,
         temperature: float,
+        max_output_tokens: int = 0,
     ) -> None:
         self._client = client
         self._model_id = model_id
         self._parser = parser
         self._temperature = temperature
+        self._max_output_tokens = max_output_tokens  # 0 = no limit sent
 
     @property
     def model_id(self) -> str:
@@ -161,7 +197,9 @@ class _OpenAIBaseClient(LLMClient):
         if tools:
             kwargs["tools"] = [spec_to_wire(s) for s in tools]
             kwargs["tool_choice"] = "auto"
-        completion = await self._client.chat.completions.create(**kwargs)
+        if self._max_output_tokens:
+            kwargs[self._OUTPUT_LIMIT_PARAM] = self._max_output_tokens
+        completion = await _create_completion(self._client, kwargs)
         return parse_completion(completion)
 
     async def stream(
@@ -182,13 +220,15 @@ class _OpenAIBaseClient(LLMClient):
             kwargs["tool_choice"] = "auto"
 
         kwargs["stream_options"] = {"include_usage": True}
+        if self._max_output_tokens:
+            kwargs[self._OUTPUT_LIMIT_PARAM] = self._max_output_tokens
 
         text_acc: list[str] = []
         tc_acc: dict[int, dict] = {}  # chunk index → accumulated data
         finish_reason: str | None = None
         usage: dict[str, int] = {}
 
-        stream_obj = await self._client.chat.completions.create(**kwargs)
+        stream_obj = await _create_completion(self._client, kwargs)
         async for chunk in stream_obj:
             if getattr(chunk, "usage", None) and chunk.usage:
                 usage = {

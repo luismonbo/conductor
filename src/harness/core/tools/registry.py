@@ -4,12 +4,17 @@ agent' literally true.
 The agent asks the registry for specs() to show the model, then calls
 dispatch() with whatever the model requested. Unknown tools and tool
 exceptions become error ToolResults rather than crashing the loop — important
-with small models that hallucinate tool names.
+with small models that hallucinate tool names. Only a ToolError's message
+reaches the model.
 """
 from __future__ import annotations
 
-from harness.core.tools.base import Tool
+import logging
+
+from harness.core.tools.base import Tool, ToolError
 from harness.core.types import ToolCall, ToolResult, ToolSpec
+
+logger = logging.getLogger(__name__)
 
 
 class ToolRegistry:
@@ -46,10 +51,21 @@ class ToolRegistry:
         try:
             content = await tool.run(call.arguments)
             return ToolResult(call.id, call.name, content, is_error=False)
-        except Exception as exc:  # noqa: BLE001 - deliberately broad at boundary
+        except ToolError as exc:
+            # A failure the tool explained for the model: its message is meant to be read.
             return ToolResult(
                 tool_call_id=call.id,
                 name=call.name,
                 content=f"Tool '{call.name}' failed: {exc}",
+                is_error=True,
+            )
+        except Exception:  # noqa: BLE001 - deliberately broad at boundary
+            # Anything else may carry internals (a provider's error body, a path)
+            # the model could repeat to a visitor: the detail goes to the log only.
+            logger.exception("tool %s failed", call.name)
+            return ToolResult(
+                tool_call_id=call.id,
+                name=call.name,
+                content=f"Tool '{call.name}' failed.",
                 is_error=True,
             )

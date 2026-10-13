@@ -23,7 +23,7 @@ if str(_root) not in sys.path:
 from langgraph.checkpoint.memory import MemorySaver
 
 from harness.config.settings import get_settings
-from harness.orchestration.build import build_agent_registry, build_long_term
+from harness.orchestration.build import build_agent, build_long_term
 
 from evaluation.harness.dataset import Dataset
 from evaluation.harness.graph_agent import GraphAgentAdapter
@@ -73,6 +73,9 @@ def main() -> int:
         return 1
 
     settings = get_settings()
+    # The eval measures the agent's full capability; tool_use_v1.json contains
+    # recall/remember cases that would silently fail under the public default.
+    settings = settings.model_copy(update={"memory_tools_enabled": True})
     if args.backend:
         settings = settings.model_copy(update={"llm_backend": args.backend})
 
@@ -80,8 +83,10 @@ def main() -> int:
         memory = build_long_term(settings)
         for fact in (memory_seed or []):
             await memory.write(fact)
-        registry = build_agent_registry(settings, MemorySaver(), long_term=memory)
-        return GraphAgentAdapter(registry["default"], tracer=tracer)
+        # The tool-use dataset exercises the default agent's tools, whatever
+        # HARNESS_AGENT names.
+        graph = build_agent(settings, MemorySaver(), name="default", long_term=memory)
+        return GraphAgentAdapter(graph, tracer=tracer)
 
     dataset = Dataset.load(dataset_path).filter_by_tags(args.tags)
     if not dataset.cases:

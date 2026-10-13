@@ -26,6 +26,11 @@ async def test_registry_with_retriever_includes_search_documents():
     assert "search_documents" in registry.names()
 
 
-def test_registry_always_includes_existing_tools():
+def test_registry_always_includes_calculator():
     registry = build_registry()
-    assert {"calculator", "recall", "remember"} <= set(registry.names())
+    assert "calculator" in registry.names()
+
+
+def test_registry_includes_memory_tools_only_when_enabled():
+    assert {"recall", "remember"}.isdisjoint(build_registry().names())
+    assert {"recall", "remember"} <= set(build_registry(memory_tools=True).names())

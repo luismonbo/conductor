@@ -35,6 +35,7 @@ class _ScriptedAgent:
     )  # (name, content, is_error)
     stopped_reason: str = "final_answer"
     tracer: object = None
+    usage: dict[str, int] | None = None
 
     async def run(self, state: AgentState) -> AgentResult:
         if self.tracer is not None:
@@ -53,6 +54,8 @@ class _ScriptedAgent:
                     "tool_result",
                     {"name": name, "content": content, "is_error": is_error},
                 )
+            if self.usage is not None:
+                await self.tracer("token_usage", {"usage": self.usage})
         return AgentResult(
             output=self.output, state=state, stopped_reason=self.stopped_reason
         )
@@ -75,6 +78,13 @@ def _make_direct_agent(tracer, memory_seed=None):
     return _ScriptedAgent(output="Hello there!", tracer=tracer)
 
 
+def _make_agent_with_usage(tracer, memory_seed=None):
+    """Build a scripted agent that reports token usage, no tool calls."""
+    return _ScriptedAgent(
+        output="Hello there!", tracer=tracer, usage={"input_tokens": 12, "output_tokens": 4}
+    )
+
+
 class TestNoToolCallMetricSmoke:
     def test_direct_case_passes_no_tool_call_metric(self):
         case = EvalCase(
@@ -94,6 +104,22 @@ class TestNoToolCallMetricSmoke:
         case_report = report.cases[0]
         for mr in case_report.metric_results:
             assert mr.passed, f"{mr.name} failed: {mr.reason}"
+
+
+class TestEvalRunnerCaseReportTokens:
+    def test_case_report_carries_system_tokens_from_the_tracer(self):
+        case = EvalCase(
+            id="direct_smoke",
+            description="smoke",
+            input="say hello",
+            tags=["smoke"],
+            expected=Expected(no_tool_call=True, output_contains=["Hello"]),
+        )
+        dataset = Dataset([case])
+        runner = EvalRunner(_make_agent_with_usage)
+        report = runner.run(dataset, metrics=[], dataset_name="inline")
+
+        assert report.cases[0].system_tokens == {"input_tokens": 12, "output_tokens": 4}
 
 
 class TestEvalRunnerSmoke:

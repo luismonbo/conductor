@@ -89,4 +89,5 @@ class EvalRunner:
             output=run_result.output,
             passed=passed,
             metric_results=metric_results,
+            system_tokens=tracer.usage_for("token_usage"),
         )

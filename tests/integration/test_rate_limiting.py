@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 
 import pytest
-from httpx import ASGITransport, AsyncClient
+from httpx2 import ASGITransport, AsyncClient
 
 from harness.api.main import app
 from harness.config.settings import get_settings
@@ -32,7 +32,7 @@ async def test_strict_tier_limits_chat_stream(monkeypatch):
     transport = ASGITransport(app=app)
     async with AsyncClient(
         transport=transport,
-        base_url="http://test",
+        base_url="https://test",
         headers={"Authorization": f"Bearer {get_settings().api_key}"},
     ) as client:
         for _ in range(15):
@@ -55,7 +55,7 @@ async def test_default_tier_limits_threads():
     transport = ASGITransport(app=app)
     async with AsyncClient(
         transport=transport,
-        base_url="http://test",
+        base_url="https://test",
         headers={"Authorization": f"Bearer {get_settings().api_key}"},
     ) as client:
         for _ in range(60):
@@ -74,7 +74,7 @@ async def test_health_never_rate_limited():
     transport = ASGITransport(app=app)
     async with AsyncClient(
         transport=transport,
-        base_url="http://test",
+        base_url="https://test",
         headers={"Authorization": f"Bearer {get_settings().api_key}"},
     ) as client:
         for _ in range(70):
@@ -90,7 +90,7 @@ async def test_tiers_are_independent(monkeypatch):
     transport = ASGITransport(app=app)
     async with AsyncClient(
         transport=transport,
-        base_url="http://test",
+        base_url="https://test",
         headers={"Authorization": f"Bearer {get_settings().api_key}"},
     ) as client:
         for _ in range(15):
@@ -116,7 +116,7 @@ async def test_rate_limit_disabled_via_setting(monkeypatch):
     transport = ASGITransport(app=app)
     async with AsyncClient(
         transport=transport,
-        base_url="http://test",
+        base_url="https://test",
         headers={"Authorization": f"Bearer {get_settings().api_key}"},
     ) as client:
         for _ in range(20):  # well past the normal 15/minute strict threshold

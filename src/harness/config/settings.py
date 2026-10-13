@@ -9,9 +9,16 @@ config change, not a rewrite' promise is actually cashed in.
 from __future__ import annotations
 
 import os
+from typing import Literal
 
-from pydantic import model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from dotenv import dotenv_values
+from pydantic import Field, field_validator, model_validator
+from pydantic_settings import (
+    BaseSettings,
+    DotEnvSettingsSource,
+    EnvSettingsSource,
+    SettingsConfigDict,
+)
 
 from harness.config.targets import resolve_target_overrides
 
@@ -78,18 +85,27 @@ class Settings(BaseSettings):
     checkpointer: str = "sqlite"       # memory | sqlite | postgres
     checkpointer_url: str = "./harness.sqlite"
 
-    # Agent
+    # The entry agent: a folder under src/harness/agents/. Its prompt.py holds
+    # the prompt; prompts never come from config.
     agent: str = "default"
     max_iterations: int = 8
-    system_prompt: str = (
-        "You are a helpful assistant. "
-        "Use the calculator tool for any arithmetic operation or numeric "
-        "computation — even when the answer seems obvious. "
-        "For questions about the user's personal information (name, location, "
-        "job title, preferences, ongoing projects), always call the recall "
-        "tool; never guess. "
-        "For world knowledge questions (facts, history, science), answer directly."
-    )
+
+    # Long-term memory is a single shared store with no per-visitor partition,
+    # so remember/recall must stay off on any public deployment. Default-safe;
+    # a single-operator deployment opts in via its target file or
+    # HARNESS_MEMORY_TOOLS_ENABLED=true. See
+    # docs/superpowers/specs/2026-09-19-visitor-scoped-threads-design.md.
+    memory_tools_enabled: bool = False
+
+    # Tool arguments and results reach a browser (the SSE stream and
+    # GET /threads/{id}) only when true; off, a browser gets each tool's name
+    # only. Default-safe for a public site; the owner's own UI turns it on. See
+    # security/egress.py and docs/superpowers/specs/2026-10-13-egress-hardening-design.md.
+    show_tool_details: bool = False
+
+    # Level of the harness's own log lines (harness.*); every other library
+    # stays at WARNING. See observability/logging_setup.py.
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
 
     # Rate limiting — see docs/superpowers/specs/2026-08-27-rate-limiting-design.md.
     # Strict tier covers the LLM-invoking endpoints (the cost driver if abused);
@@ -104,6 +120,30 @@ class Settings(BaseSettings):
     auth_enabled: bool = True
     api_key: str = ""
 
+    # Visitor session cookie (sid): Secure by default. Set false only for local
+    # development on a browser that does not treat http://localhost as a
+    # secure context.
+    session_cookie_secure: bool = True
+
+    # Input guard (SL-2) — see docs/superpowers/specs/2026-09-27-input-guard-design.md.
+    # input_guard_enabled gates only the TypeSafe (Jev) checks and fails closed
+    # without a key (validator below). The four limits are independent of it
+    # and each is off at 0. Defaults are the public website's values; a
+    # single-operator deployment turns all of it off in its target file.
+    input_guard_enabled: bool = True
+    typesafe_api_key: str = ""
+    guard_model: str = "jev-1.13.0"  # pinned: thresholds are calibrated against it
+    guard_timeout_seconds: float = Field(3.0, gt=0)
+    max_message_chars: int = Field(2000, ge=0)
+    max_output_tokens: int = Field(1500, ge=0)  # per LLM call
+    max_thread_turns: int = Field(20, ge=0)  # runs per thread
+    daily_token_budget: int = Field(33000, ge=0)  # all visitors per UTC day: monthly quota / 30
+
+    @field_validator("log_level", mode="before")
+    @classmethod
+    def _uppercase_log_level(cls, value: object) -> object:
+        return value.upper() if isinstance(value, str) else value
+
     @model_validator(mode="after")
     def _require_api_key_when_auth_enabled(self) -> "Settings":
         if self.auth_enabled and not self.api_key:
@@ -113,8 +153,36 @@ class Settings(BaseSettings):
             )
         return self
 
+    @model_validator(mode="after")
+    def _require_typesafe_key_when_guard_enabled(self) -> "Settings":
+        if self.input_guard_enabled and not self.typesafe_api_key:
+            raise ValueError(
+                "HARNESS_INPUT_GUARD_ENABLED is true but HARNESS_TYPESAFE_API_KEY is "
+                "empty. Set HARNESS_TYPESAFE_API_KEY, or set "
+                "HARNESS_INPUT_GUARD_ENABLED=false."
+            )
+        return self
+
+
+# Removed settings and where their job went. Settings ignores unknown
+# variables (extra="ignore"), so a leftover one would silently do nothing.
+_REMOVED_ENV_VARS = {
+    "HARNESS_SYSTEM_PROMPT": (
+        "HARNESS_SYSTEM_PROMPT was removed: the prompt lives in "
+        "src/harness/agents/<name>/prompt.py and HARNESS_AGENT picks the agent."
+    ),
+}
+
+
+def _reject_removed_env_vars(env_file: str = ".env") -> None:
+    dotenv = dotenv_values(env_file) if os.path.isfile(env_file) else {}
+    for name, message in _REMOVED_ENV_VARS.items():
+        if name in os.environ or name in dotenv:
+            raise ValueError(message)
+
 
 def get_settings() -> Settings:
+    _reject_removed_env_vars()
     target_name = os.environ.get("HARNESS_TARGET", "")
     if not target_name:
         return Settings()
@@ -126,17 +194,10 @@ def get_settings() -> Settings:
             f"Target {target_name!r} sets unknown field(s): {sorted(unknown_fields)}"
         )
 
-    base = Settings()
-    field_defaults = {name: field.default for name, field in Settings.model_fields.items()}
-    merged = base.model_dump()
-    for key, value in overrides.items():
-        # A real env var already beat the class default here (base's value
-        # differs from the field default) — that value must keep winning
-        # over the target file. Trade-off: this can't distinguish
-        # "explicitly set to the default value" from "never set at all," so
-        # an env var pinned to a field's own default loses to the target
-        # file in that one narrow case.
-        if merged[key] == field_defaults[key]:
-            merged[key] = value
-
-    return Settings(_env_file=None, **merged)
+    # A field the environment sets (a real env var or .env, even to the field's
+    # own default) keeps that value; the target file fills in the rest.
+    # Settings is built once, from the merged values, so the fail-closed checks
+    # (auth, input guard) see a target file's `false` instead of rejecting the
+    # environment-only defaults first.
+    explicit = EnvSettingsSource(Settings)().keys() | DotEnvSettingsSource(Settings)().keys()
+    return Settings(**{key: value for key, value in overrides.items() if key not in explicit})

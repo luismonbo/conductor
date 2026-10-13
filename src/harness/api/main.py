@@ -14,12 +14,15 @@ import logging
 import os
 import uuid
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from typing import Any
 
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
+from starlette.middleware.base import RequestResponseEndpoint
+from starlette.responses import Response
 from langgraph.types import Command
 from slowapi.errors import RateLimitExceeded
 
@@ -27,14 +30,18 @@ import aiosqlite
 
 from harness.api.auth import require_api_key
 from harness.api.rate_limit import default_limit, limiter, strict_limit
+from harness.api.session import attach as attach_session_cookie, read_or_mint
 from harness.api.schemas import ChatRequest, ResumeRequest
 from harness.config.settings import get_settings
+from harness.core.llm.errors import ContentFiltered
 from harness.core.types import AgentEvent, Message, Role
 from harness.observability.langfuse_tracing import langfuse_configured
+from harness.observability.logging_setup import configure_logging
 from harness.observability.run_store import RunStore
 from harness.observability.token_accumulator import TokenAccumulator
-from harness.orchestration.build import build_agent_registry
-from harness.orchestration.checkpointer import build_checkpointer
+from harness.orchestration.build import AgentRuntime, build_input_guard, build_runtime
+from harness.security import egress
+from harness.security.input_guard import GuardContext, InputGuard
 
 # Settings() reads HARNESS_-prefixed vars straight from .env itself, but this
 # module's own os.environ.get() calls (Langfuse keys in _build_callbacks)
@@ -46,16 +53,37 @@ load_dotenv(override=False)
 # Lazy-initialized module-level state
 _run_store: RunStore | None = None
 _run_store_lock: asyncio.Lock | None = None
+_runtime: AgentRuntime | None = None
+_runtime_lock: asyncio.Lock | None = None
+_input_guard: InputGuard | None = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Validate settings at boot: fail fast here, not on the first request.
-    get_settings()
-    yield
-    global _run_store
-    if _run_store is not None:
-        await _run_store._conn.close()
+    global _run_store, _runtime, _input_guard
+    try:
+        # Logging first, so everything startup logs below goes through it.
+        configure_logging(get_settings().log_level)
+        # Build the entry agent at boot (settings, definition, checkpointer, tools,
+        # graph): a missing agent folder or an unavailable required backend stops
+        # startup, and /health only answers once the agent can serve.
+        await _get_runtime()
+        # Build the guard now too, so a malformed TypeSafe key fails the boot.
+        _get_input_guard()
+        yield
+    finally:
+        # Also after a failed startup: an open checkpointer connection (aiosqlite's
+        # worker thread is not a daemon) would keep the process from exiting.
+        if _input_guard is not None:
+            await _input_guard.aclose()
+            _input_guard = None
+        if _run_store is not None:
+            await _run_store._conn.close()
+        if _runtime is not None:
+            conn = getattr(_runtime.checkpointer, "conn", None)
+            if conn is not None:
+                await conn.close()
+            _runtime = None
 
 
 app = FastAPI(title="Agent Harness", lifespan=lifespan)
@@ -73,6 +101,26 @@ app.add_middleware(
     expose_headers=["Retry-After"],
     allow_credentials=False,
 )
+
+
+@app.middleware("http")
+async def _visitor_session(
+    request: Request, call_next: RequestResponseEndpoint
+) -> Response:
+    """Attach an opaque visitor id to every request; issue the cookie once.
+
+    Middleware, not a dependency: FastAPI drops a dependency-set Set-Cookie
+    header when the endpoint returns a Response directly (see session.py).
+    """
+    sid, minted = read_or_mint(request)
+    request.state.sid = sid
+    response = await call_next(request)
+    if minted:
+        attach_session_cookie(
+            response, sid, secure=get_settings().session_cookie_secure
+        )
+    return response
+
 
 app.state.limiter = limiter
 
@@ -96,7 +144,8 @@ async def _rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONR
 
 app.add_exception_handler(RateLimitExceeded, _rate_limit_handler)
 
-_running: dict[str, asyncio.Task] = {}
+# thread_id -> (session_id of the visitor who started it, task)
+_running: dict[str, tuple[str, asyncio.Task]] = {}
 
 # Backends where a client-supplied ChatRequest.model is safe to honor:
 # openai_compatible routes per-model through a proxy by design; fake never
@@ -108,10 +157,6 @@ _running: dict[str, asyncio.Task] = {}
 # add it here. See docs/devlog/010.
 _MODEL_OVERRIDE_SAFE_BACKENDS = {"openai_compatible", "fake"}
 
-# Lazy-initialized agent registry (shared checkpointer keeps state across requests)
-_registry: dict[str, object] | None = None
-
-
 def _get_run_store_lock() -> asyncio.Lock:
     global _run_store_lock
     if _run_store_lock is None:
@@ -119,28 +164,66 @@ def _get_run_store_lock() -> asyncio.Lock:
     return _run_store_lock
 
 
-async def _get_run_store() -> RunStore | None:
+async def _get_run_store() -> RunStore:
+    """The process-wide run store, opened on first use.
+
+    Every checkpointer mode has one, because thread ownership is checked
+    against it. Memory mode keeps it in an in-process sqlite database, which
+    lives exactly as long as this one connection: the process.
+
+    Cached only once its schema is in place. A store cached before
+    create_table() succeeded would lack the session_id column, so every
+    continued thread would 404 until restart.
+    """
     global _run_store
     if _run_store is not None:
         return _run_store
     settings = get_settings()
-    if settings.checkpointer == "memory":
-        return None
     async with _get_run_store_lock():
         if _run_store is None:
-            conn = await aiosqlite.connect(settings.checkpointer_url)
-            _run_store = RunStore(conn)
-            await _run_store.create_table()
-    return _run_store
+            path = (
+                ":memory:"
+                if settings.checkpointer == "memory"
+                else settings.checkpointer_url
+            )
+            conn = await aiosqlite.connect(path)
+            store = RunStore(conn)
+            try:
+                await store.create_table()
+            except BaseException:
+                # Not cached, so the next request retries on a fresh connection.
+                await conn.close()
+                raise
+            _run_store = store
+        return _run_store
 
 
-async def _get_registry() -> dict[str, object]:
-    global _registry
-    if _registry is None:
-        settings = get_settings()
-        cp = await build_checkpointer(settings)
-        _registry = build_agent_registry(settings, cp)
-    return _registry
+def _get_runtime_lock() -> asyncio.Lock:
+    global _runtime_lock
+    if _runtime_lock is None:
+        _runtime_lock = asyncio.Lock()
+    return _runtime_lock
+
+
+async def _get_runtime() -> AgentRuntime:
+    """The entry agent's runtime, built once: at startup by lifespan, or by the
+    first request when no lifespan ran (tests). The lock makes concurrent first
+    callers share one build instead of each opening a checkpointer."""
+    global _runtime
+    if _runtime is not None:
+        return _runtime
+    async with _get_runtime_lock():
+        if _runtime is None:
+            _runtime = await build_runtime(get_settings())
+    return _runtime
+
+
+def _get_input_guard() -> InputGuard:
+    """The process-wide input guard, built on first use (and at boot by lifespan)."""
+    global _input_guard
+    if _input_guard is None:
+        _input_guard = build_input_guard(get_settings())
+    return _input_guard
 
 
 # ---------------------------------------------------------------------------
@@ -149,7 +232,8 @@ async def _get_registry() -> dict[str, object]:
 
 @app.get("/health")
 async def health() -> dict:
-    return {"status": "ok", "backend": get_settings().llm_backend}
+    # Unauthenticated and public, so it names nothing about the deployment (SL-3).
+    return {"status": "ok"}
 
 
 # ---------------------------------------------------------------------------
@@ -209,16 +293,89 @@ def _title_from(messages: list[Message]) -> str:
     return (first_user.content[:60] if first_user else "")
 
 
+async def _require_owned_thread(request: Request, thread_id: str) -> None:
+    """404 unless this visitor's session owns thread_id.
+
+    Enforced identically in every checkpointer mode: there is always a run
+    store to check against (see _get_run_store). 404 rather than 403, so a
+    thread that is not yours is indistinguishable from one that does not exist.
+    """
+    run_store = await _get_run_store()
+    if not await run_store.owns_thread(request.state.sid, thread_id):
+        raise HTTPException(status_code=404, detail="unknown thread")
+
+
+async def _last_assistant_text(graph: Any, thread_id: str) -> str | None:
+    """The most recent assistant message with text; tool-call-only turns are skipped."""
+    messages = await _thread_state_messages(graph, thread_id) or []
+    return next(
+        (m.content for m in reversed(messages) if m.role == Role.ASSISTANT and m.content),
+        None,
+    )
+
+
+def _utc_midnight_iso() -> str:
+    """Start of the current UTC day, in the same format as runs.started_at."""
+    now = datetime.now(timezone.utc)
+    return now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+
+
+async def _guard_context(
+    guard: InputGuard,
+    req: ChatRequest,
+    runtime: AgentRuntime,
+    run_store: RunStore,
+) -> GuardContext:
+    """Gather what the guard needs, querying only for the checks that are on."""
+    limits = guard.limits
+    previous_reply = (
+        await _last_assistant_text(runtime.graph, req.thread_id)
+        if req.thread_id and guard.classifier_enabled
+        else None
+    )
+    thread_turns = (
+        await run_store.count_thread_runs(req.thread_id)
+        if req.thread_id and limits.max_thread_turns
+        else 0
+    )
+    tokens_today = (
+        await run_store.tokens_since(_utc_midnight_iso())
+        if limits.daily_token_budget
+        else 0
+    )
+    return GuardContext(
+        message=req.message,
+        system_prompt=runtime.definition.prompt,
+        previous_reply=previous_reply,
+        thread_turns=thread_turns,
+        tokens_today=tokens_today,
+    )
+
+
+def _blocked_response(refusal: str) -> StreamingResponse:
+    """A blocked message's whole reply: one `final` frame and no thread_id frame.
+
+    Without a thread_id frame the frontend keeps the thread id it already has:
+    none for a first message, so the visitor's next message starts fresh.
+    """
+    event = AgentEvent(type="final", text=refusal, stopped_reason="blocked")
+
+    async def _one_frame():
+        yield f"data: {json.dumps(dataclasses.asdict(event))}\n\n"
+
+    return StreamingResponse(
+        _one_frame(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 @app.get("/threads")
 @limiter.limit(default_limit)
 async def list_threads(request: Request, _auth: None = Depends(require_api_key)) -> dict:
     run_store = await _get_run_store()
-    if run_store is None:
-        return {"threads": []}
-    settings = get_settings()
-    registry = await _get_registry()
-    graph = registry[settings.agent]
-    rows = await run_store.list_threads()
+    graph = (await _get_runtime()).graph
+    rows = await run_store.list_threads(request.state.sid)
 
     async def _summarize(row: dict) -> dict:
         try:
@@ -235,31 +392,21 @@ async def list_threads(request: Request, _auth: None = Depends(require_api_key))
 @app.get("/threads/{thread_id}")
 @limiter.limit(default_limit)
 async def thread_messages(request: Request, thread_id: str, _auth: None = Depends(require_api_key)) -> dict:
-    settings = get_settings()
-    registry = await _get_registry()
-    graph = registry[settings.agent]
-    messages = await _thread_state_messages(graph, thread_id)
+    await _require_owned_thread(request, thread_id)
+    runtime = await _get_runtime()
+    messages = await _thread_state_messages(runtime.graph, thread_id)
     if messages is None:
         raise HTTPException(status_code=404, detail="unknown thread")
-    out = [
-        {
-            "role": m.role.value,
-            "content": m.content,
-            "tool_calls": [
-                {"name": tc.name, "args": tc.arguments, "call_id": tc.id}
-                for tc in (m.tool_calls or ())
-            ],
-            "tool_call_id": m.tool_call_id or "",
-            "name": m.name or "",
-        }
-        for m in messages
-        if m.role != Role.SYSTEM
-    ]
-    return {"thread_id": thread_id, "messages": out}
+    return {
+        "thread_id": thread_id,
+        "messages": egress.transcript_for_browser(
+            messages, show_tool_details=runtime.settings.show_tool_details
+        ),
+    }
 
 
 # ---------------------------------------------------------------------------
-# Observability + error shaping
+# Observability
 # ---------------------------------------------------------------------------
 
 def _make_langfuse_handler() -> Any:
@@ -288,23 +435,17 @@ def _build_callbacks(thread_id: str, agent_name: str) -> tuple[list, dict]:
     }
 
 
-_CONNECTION_ERROR_NAMES = {"APIConnectionError", "APITimeoutError", "ConnectError"}
-
-
-def _friendly_error(exc: Exception) -> str:
-    if type(exc).__name__ in _CONNECTION_ERROR_NAMES:
-        return (
-            "LLM gateway unreachable — is the stack running? Try `make up`. "
-            f"({exc})"
-        )
-    return str(exc)
-
-
 # ---------------------------------------------------------------------------
 # Shared SSE generator
 # ---------------------------------------------------------------------------
 
-def _make_sse_generator(thread_id: str, event_queue: asyncio.Queue, task: asyncio.Task):
+def _make_sse_generator(
+    thread_id: str,
+    event_queue: asyncio.Queue,
+    task: asyncio.Task,
+    *,
+    show_tool_details: bool,
+):
     async def _sse():
         try:
             yield f"data: {json.dumps({'thread_id': thread_id})}\n\n"
@@ -312,7 +453,10 @@ def _make_sse_generator(thread_id: str, event_queue: asyncio.Queue, task: asynci
                 item = await event_queue.get()
                 if item is None:
                     break
-                yield f"data: {json.dumps(dataclasses.asdict(item))}\n\n"
+                # Every frame passes the egress filter: only what a browser may see.
+                event = egress.to_browser(item, show_tool_details=show_tool_details)
+                if event is not None:
+                    yield f"data: {json.dumps(dataclasses.asdict(event))}\n\n"
         finally:
             if not task.done():
                 task.cancel()
@@ -329,7 +473,7 @@ async def _run_graph(
     event_queue: asyncio.Queue,
     accumulator: TokenAccumulator,
     stopped_reason_holder: list[str],
-    run_store: RunStore | None,
+    run_store: RunStore,
 ) -> None:
     try:
         result = await graph.ainvoke(invoke_arg, config)
@@ -343,22 +487,33 @@ async def _run_graph(
         stopped_reason_holder[0] = "cancelled"
         await event_queue.put(AgentEvent(type="error", text="cancelled"))
         raise
+    except ContentFiltered as exc:
+        # The provider's filter refused this visitor's message (or the answer
+        # to it): expected, so one line, never the message text or the sid.
+        logging.getLogger(__name__).warning(
+            "content filter stopped thread_id=%s run_id=%s stage=%s categories=%s",
+            thread_id, run_id, exc.stage, ",".join(exc.categories) or "-",
+        )
+        stopped_reason_holder[0] = "content_filter"
+        await event_queue.put(egress.error_event(exc))
     except Exception as exc:
+        logging.getLogger(__name__).exception(
+            "agent run failed for thread_id=%s run_id=%s", thread_id, run_id
+        )
         stopped_reason_holder[0] = "error"
-        await event_queue.put(AgentEvent(type="error", text=_friendly_error(exc)))
+        await event_queue.put(egress.error_event(exc))
     finally:
         _running.pop(thread_id, None)
-        if run_store:
-            # Shield finish_run so it completes even if the task is being cancelled
-            # (the SSE generator's finally block calls task.cancel() once it sees None).
-            # finish_run must land before we send the sentinel so the task is already
-            # done by the time the generator can cancel it.
-            try:
-                await asyncio.shield(
-                    run_store.finish_run(run_id, accumulator, stopped_reason_holder[0])
-                )
-            except asyncio.CancelledError:
-                pass
+        # Shield finish_run so it completes even if the task is being cancelled
+        # (the SSE generator's finally block calls task.cancel() once it sees None).
+        # finish_run must land before we send the sentinel so the task is already
+        # done by the time the generator can cancel it.
+        try:
+            await asyncio.shield(
+                run_store.finish_run(run_id, accumulator, stopped_reason_holder[0])
+            )
+        except asyncio.CancelledError:
+            pass
         await event_queue.put(None)
 
 
@@ -374,14 +529,49 @@ async def chat_stream(request: Request, req: ChatRequest, _auth: None = Depends(
     First SSE frame: ``{"thread_id": "<uuid>"}``
     Subsequent frames: each AgentEvent serialized with dataclasses.asdict().
     Stream ends after a ``final``, ``interrupt``, or ``error`` event.
+
+    A message the input guard blocks gets one ``final`` frame with the refusal
+    (``stopped_reason: "blocked"``) and nothing else: no thread_id frame, no
+    run, no checkpoint write.
     """
-    settings = get_settings()
+    if req.thread_id:
+        # Thread ids are server-issued only: a caller may continue a thread
+        # this session started, but not name one it doesn't already own.
+        # Without this, a guessed/shared thread_id both leaks another
+        # visitor's history into this response (it feeds the graph as prior
+        # state) and hands this session co-ownership going forward, since
+        # start_run below would record it as an owner too.
+        await _require_owned_thread(request, req.thread_id)
+    runtime = await _get_runtime()
+    # Everything below runs, screens and records against the one entry agent
+    # built at startup (HARNESS_AGENT), never a client-supplied name.
+    settings = runtime.settings
+    graph = runtime.graph
+    agent_name = settings.agent
+    run_store = await _get_run_store()
     thread_id = req.thread_id or str(uuid.uuid4())
     run_id = str(uuid.uuid4())
-    agent_name = req.agent or settings.agent
 
-    registry = await _get_registry()
-    graph = registry.get(agent_name) or registry[settings.agent]
+    guard = _get_input_guard()
+    decision = await guard.screen(
+        await _guard_context(guard, req, runtime, run_store)
+    )
+    decision_id = None
+    if decision.stage != "none":
+        decision_id = await run_store.record_guard_decision(
+            decision,
+            session_id=request.state.sid,
+            thread_id=thread_id if decision.allowed else req.thread_id,
+            run_id=run_id if decision.allowed else None,
+            message=req.message,
+        )
+    if not decision.allowed:
+        # Never the message text or the sid: those live only in the database.
+        logging.getLogger(__name__).info(
+            "input guard blocked a message decision_id=%s reason=%s probabilities=%s",
+            decision_id, decision.reason, decision.probabilities,
+        )
+        return _blocked_response(decision.refusal or "")
 
     accumulator = TokenAccumulator()
     stopped_reason_holder: list[str] = ["unknown"]
@@ -405,18 +595,20 @@ async def chat_stream(request: Request, req: ChatRequest, _auth: None = Depends(
         "model_override": req.model if settings.llm_backend in _MODEL_OVERRIDE_SAFE_BACKENDS else None,
     }
 
-    run_store = await _get_run_store()
-    if run_store:
-        await run_store.start_run(run_id, thread_id, agent_name, settings.llm_backend)
+    await run_store.start_run(
+        run_id, thread_id, agent_name, settings.llm_backend, request.state.sid
+    )
 
     task = asyncio.create_task(_run_graph(
         graph, input_state, config, thread_id, run_id,
         event_queue, accumulator, stopped_reason_holder, run_store,
     ))
-    _running[thread_id] = task
+    _running[thread_id] = (request.state.sid, task)
 
     return StreamingResponse(
-        _make_sse_generator(thread_id, event_queue, task),
+        _make_sse_generator(
+            thread_id, event_queue, task, show_tool_details=settings.show_tool_details
+        ),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
@@ -433,9 +625,16 @@ async def resume_run(request: Request, thread_id: str, req: ResumeRequest, _auth
 
     Response: same SSE stream as /chat/stream (starts with thread_id frame).
     """
-    settings = get_settings()
-    registry = await _get_registry()
-    graph = registry[settings.agent]
+    await _require_owned_thread(request, thread_id)
+    runtime = await _get_runtime()
+    settings = runtime.settings
+    graph = runtime.graph
+    # Only a run paused on an interrupt can be resumed. Resuming a thread whose
+    # last step was cancelled or failed would re-run the model, outside the
+    # input guard's limits.
+    snapshot = await graph.aget_state({"configurable": {"thread_id": thread_id}})
+    if not snapshot.interrupts:
+        raise HTTPException(status_code=409, detail="nothing to resume")
     run_id = str(uuid.uuid4())
 
     accumulator = TokenAccumulator()
@@ -455,17 +654,20 @@ async def resume_run(request: Request, thread_id: str, req: ResumeRequest, _auth
     }
 
     run_store = await _get_run_store()
-    if run_store:
-        await run_store.start_run(run_id, thread_id, settings.agent, settings.llm_backend)
+    await run_store.start_run(
+        run_id, thread_id, settings.agent, settings.llm_backend, request.state.sid
+    )
 
     task = asyncio.create_task(_run_graph(
         graph, Command(resume=req.decision), config, thread_id, run_id,
         event_queue, accumulator, stopped_reason_holder, run_store,
     ))
-    _running[thread_id] = task
+    _running[thread_id] = (request.state.sid, task)
 
     return StreamingResponse(
-        _make_sse_generator(thread_id, event_queue, task),
+        _make_sse_generator(
+            thread_id, event_queue, task, show_tool_details=settings.show_tool_details
+        ),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
@@ -479,8 +681,10 @@ async def resume_run(request: Request, thread_id: str, req: ResumeRequest, _auth
 @limiter.limit(default_limit)
 async def cancel_run(request: Request, thread_id: str, _auth: None = Depends(require_api_key)) -> dict:
     """Cancel a running streaming agent task by thread_id."""
-    task = _running.get(thread_id)
-    if task and not task.done():
-        task.cancel()
-        return {"status": "cancelled", "thread_id": thread_id}
+    entry = _running.get(thread_id)
+    if entry is not None:
+        owner, task = entry
+        if owner == request.state.sid and not task.done():
+            task.cancel()
+            return {"status": "cancelled", "thread_id": thread_id}
     return {"status": "not_found", "thread_id": thread_id}

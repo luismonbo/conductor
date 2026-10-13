@@ -21,6 +21,8 @@ from harness.observability.langfuse_tracing import langfuse_configured
 
 
 class AzureOpenAIClient(_OpenAIBaseClient):
+    _OUTPUT_LIMIT_PARAM = "max_completion_tokens"
+
     def __init__(
         self,
         deployment: str,
@@ -29,6 +31,7 @@ class AzureOpenAIClient(_OpenAIBaseClient):
         parser: ToolCallParser,
         api_key: str | None = None,
         temperature: float = 0.0,
+        max_output_tokens: int = 0,
         client: Any | None = None,
     ) -> None:
         if client is None:
@@ -64,4 +67,4 @@ class AzureOpenAIClient(_OpenAIBaseClient):
                     azure_endpoint=endpoint,
                     azure_ad_token_provider=token_provider,
                 )
-        super().__init__(client, deployment, parser, temperature)
+        super().__init__(client, deployment, parser, temperature, max_output_tokens)

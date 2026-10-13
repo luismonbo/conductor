@@ -9,8 +9,9 @@ means editing this file and nothing in core/.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import yaml
 
@@ -18,6 +19,7 @@ from harness.adapters.chunking.structure_aware import StructureAwareChunker
 from harness.adapters.embedding.fake import FakeEmbedder
 from harness.adapters.llm.parsers import NativeToolCallParser, PromptedToolCallParser
 from harness.adapters.memory.in_memory import InMemoryLongTerm
+from harness.agents.definition import AgentDefinition, ToolDeps
 from harness.config.settings import Settings
 from harness.core.llm.client import LLMClient
 from harness.core.llm.tool_parsing import ToolCallParser
@@ -25,6 +27,9 @@ from harness.core.memory.store import LongTermMemory
 from harness.core.rag.ingest import IngestionPipeline
 from harness.core.rag.ports import Embedder, Retriever as RetrieverPort, VectorStore
 from harness.core.rag.serve import DiversifiedRetriever, RagPipeline, Retriever
+from harness.orchestration.agents import load_agent
+from harness.orchestration.checkpointer import build_checkpointer
+from harness.security.input_guard import GuardLimits, InputGuard
 
 
 def build_parser(settings: Settings) -> ToolCallParser:
@@ -43,6 +48,7 @@ def build_llm(settings: Settings, parser: ToolCallParser) -> LLMClient:
             api_version=settings.azure_api_version,
             parser=parser,
             api_key=settings.azure_api_key or None,
+            max_output_tokens=settings.max_output_tokens,
         )
     if settings.llm_backend == "openai_compatible":
         from harness.adapters.llm.openai_compatible import OpenAICompatibleClient
@@ -52,6 +58,7 @@ def build_llm(settings: Settings, parser: ToolCallParser) -> LLMClient:
             model=settings.default_model or settings.llm_model,
             parser=parser,
             api_key=settings.llm_api_key,
+            max_output_tokens=settings.max_output_tokens,
         )
     if settings.llm_backend == "fake":
         # Scripted in tests; here we return a trivial echo so the app boots.
@@ -207,47 +214,135 @@ def build_rag_pipeline(
     return RagPipeline(retriever=cast(Retriever, retriever), llm=llm, tracer=tracer)
 
 
-def build_agent_registry(
-    settings: Settings,
-    checkpointer,
-    long_term: LongTermMemory | None = None,
-) -> dict[str, object]:
-    """Build and return all compiled agent graphs keyed by name.
+def resolve_system_prompt(settings: Settings) -> str:
+    """The entry agent's prompt: the prompt.py of the agent settings.agent names.
 
-    The API routes to the agent named in ChatRequest.agent (default: settings.agent).
-    Adding a new agent means adding it here and in agents/<name>/. `long_term` lets a
-    caller (the eval harness) pre-seed memory before building, enabling external memory
-    initialization.
+    For callers outside the API (run_guard_eval.py), which take the prompt from
+    the same definition the agent runs with. Prompts never come from config.
     """
-    from harness.agents.default.graph import build_graph as build_default_graph
-    from harness.agents.default.tools import build_registry
+    return load_agent(settings.agent).prompt
 
-    llm = build_llm(settings, build_parser(settings))
+
+def build_tool_deps(settings: Settings, long_term: LongTermMemory | None = None) -> ToolDeps:
+    """The shared infrastructure every agent's tools draw from, built once.
+
+    RAG degrades gracefully: with its backend unavailable the retriever and
+    vector store are None, and rag_error holds the reason, so an agent that
+    cannot work without RAG fails with the real cause while the others simply
+    go without search_documents. `long_term` lets a caller (the eval harness)
+    pre-seed memory.
+    """
     if long_term is None:
         long_term = build_long_term(settings)
-
-    vector_store: VectorStore | None = None
-    retriever: RetrieverPort | None = None
-    collections: list[str] = []
     try:
         vector_store = build_vector_store(settings, settings.rag_vector_store_backend)
         retriever = build_retriever(settings, vector_store)
         collections = list_collections()
-    except Exception:
+    except Exception as exc:
         logging.getLogger(__name__).warning(
             "RAG backend unavailable; search_documents tool disabled", exc_info=True
         )
-        vector_store = None
-        retriever = None
-
-    registry = build_registry(
+        return ToolDeps(
+            settings=settings,
+            long_term=long_term,
+            retriever=None,
+            vector_store=None,
+            collections=(),
+            rag_error=exc,
+        )
+    return ToolDeps(
+        settings=settings,
         long_term=long_term,
         retriever=retriever,
         vector_store=vector_store,
-        default_collection=settings.rag_collection,
-        default_k=settings.rag_k,
-        collections=collections,
+        collections=tuple(collections),
     )
-    return {
-        "default": build_default_graph(llm, checkpointer, registry=registry),
-    }
+
+
+def build_agent(
+    settings: Settings,
+    checkpointer,
+    name: str | None = None,
+    long_term: LongTermMemory | None = None,
+):
+    """Compile one agent on the shared loop: the entry agent unless `name` says otherwise.
+
+    The prompt, tools and model pin all come from the agent's folder
+    (agents/<name>/agent.py); nothing about an agent comes from config.
+    """
+    # Deferred: callers that never run an agent (ingestion, the CLI) should not
+    # pay LangGraph's import cost.
+    from harness.orchestration.loop import build_graph
+
+    definition = load_agent(name or settings.agent)
+    return build_graph(
+        build_llm(settings, build_parser(settings)),
+        checkpointer,
+        registry=definition.tools(build_tool_deps(settings, long_term)),
+        system_prompt=definition.prompt,
+        model_pin=definition.model,
+    )
+
+
+@dataclass(frozen=True)
+class AgentRuntime:
+    """Everything the API needs to serve the entry agent, built once at startup.
+
+    One immutable snapshot: the graph, the guard's prompt, the run rows' agent
+    name and every agent-related setting come from here, so they cannot drift
+    apart even if .env changes while the process runs.
+    """
+
+    settings: Settings
+    definition: AgentDefinition
+    graph: Any
+    checkpointer: Any
+
+
+async def build_runtime(settings: Settings) -> AgentRuntime:
+    """Load the entry agent, open its checkpointer, compile it on the shared loop."""
+    definition = load_agent(settings.agent)
+    checkpointer = await build_checkpointer(settings)
+    try:
+        graph = build_agent(settings, checkpointer)
+    except BaseException:
+        conn = getattr(checkpointer, "conn", None)
+        if conn is not None:
+            await conn.close()
+        raise
+    return AgentRuntime(
+        settings=settings, definition=definition, graph=graph, checkpointer=checkpointer
+    )
+
+
+def build_input_guard(settings: Settings) -> InputGuard:
+    """The input guard for chat requests (SL-2).
+
+    The fixed limits always apply (each off at 0); the TypeSafe classifier
+    only when input_guard_enabled, and only then is the SDK imported. The
+    SDK's own defaults (10 s per request, 2 retries, 30 s total) are far too
+    slow for a chat reply: InputGuard enforces guard_timeout_seconds as a hard
+    ceiling, and the SDK gets the same budget with at most one retry.
+    """
+    classifier = None
+    if settings.input_guard_enabled:
+        from typesafe_sdk import AsyncTypeSafeClient, RetryPolicy
+
+        from harness.adapters.guard.typesafe import TypeSafeClassifier
+
+        client = AsyncTypeSafeClient(
+            api_key=settings.typesafe_api_key,
+            model=settings.guard_model,
+            timeout=settings.guard_timeout_seconds,
+            retry=RetryPolicy(max_retries=1, timeout=settings.guard_timeout_seconds),
+        )
+        classifier = TypeSafeClassifier(client, model=settings.guard_model)
+    return InputGuard(
+        classifier=classifier,
+        limits=GuardLimits(
+            max_message_chars=settings.max_message_chars,
+            max_thread_turns=settings.max_thread_turns,
+            daily_token_budget=settings.daily_token_budget,
+        ),
+        timeout_seconds=settings.guard_timeout_seconds,
+    )

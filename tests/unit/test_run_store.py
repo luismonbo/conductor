@@ -24,7 +24,7 @@ async def test_start_and_finish_run(store):
     acc = TokenAccumulator()
     acc.add(input_tokens=100, output_tokens=50)
 
-    await s.start_run("run-1", "thread-1", "default", "fake")
+    await s.start_run("run-1", "thread-1", "default", "fake", "session-1")
     await s.finish_run("run-1", acc, "final_answer")
 
     async with conn.execute("SELECT * FROM runs WHERE run_id = 'run-1'") as cur:
@@ -59,7 +59,7 @@ async def test_finish_run_unknown_id_logs_warning(store, caplog):
 
 async def test_start_run_records_started_at(store):
     s, conn = store
-    await s.start_run("run-2", "thread-2", "default", "fake")
+    await s.start_run("run-2", "thread-2", "default", "fake", "session-2")
 
     async with conn.execute("SELECT started_at, finished_at FROM runs WHERE run_id = 'run-2'") as cur:
         row = await cur.fetchone()

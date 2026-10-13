@@ -29,6 +29,7 @@ dependencies = [
     "langsmith>=0.8.18",
     "setuptools>=78.1.1",
     "slowapi>=0.1.10",
+    "typesafe-sdk>=0.7.2",
 ]
 
 [project.optional-dependencies]
@@ -68,6 +69,9 @@ explicit = true
 asyncio_mode = "auto"
 testpaths = ["tests"]
 pythonpath = ["src", "."]
+markers = [
+    "unit: fast, isolated unit tests",
+]
 
 [tool.ruff]
 line-length = 90
@@ -88,6 +92,7 @@ build-backend = "hatchling.build"
 
 [dependency-groups]
 dev = [
+    "httpx2>=2.0.0",
     "mypy>=2.1.0",
     "pytest>=9.0.3",
     "pytest-asyncio>=1.4.0",

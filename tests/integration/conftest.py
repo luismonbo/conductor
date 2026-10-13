@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 
-import httpx
+import httpx2
 import pytest
 
 import harness.api.main as _main
@@ -20,19 +20,32 @@ async def clean_app_state(monkeypatch):
     """Reset all module-level state and force memory checkpointer before each test."""
     monkeypatch.setenv("HARNESS_CHECKPOINTER", "memory")
     monkeypatch.setenv("HARNESS_API_KEY", _TEST_API_KEY)
+    monkeypatch.setenv("HARNESS_MEMORY_TOOLS_ENABLED", "true")
     limiter.reset()
     _main._running.clear()
-    _main._registry = None
+    _main._runtime = None
+    _main._runtime_lock = None
     _main._run_store = None
     _main._run_store_lock = None
+    _main._input_guard = None
     yield
-    for task in list(_main._running.values()):
+    for _sid, task in list(_main._running.values()):
         if not task.done():
             task.cancel()
     _main._running.clear()
-    _main._registry = None
+    # Every checkpointer mode opens a run store (memory mode's is an in-process
+    # sqlite database), so there is always a connection to close.
+    if _main._run_store is not None:
+        await _main._run_store._conn.close()
+    if _main._runtime is not None:
+        conn = getattr(_main._runtime.checkpointer, "conn", None)
+        if conn is not None:
+            await conn.close()
+    _main._runtime = None
+    _main._runtime_lock = None
     _main._run_store = None
     _main._run_store_lock = None
+    _main._input_guard = None
 
 
 @pytest.fixture
@@ -49,10 +62,10 @@ async def client_with_fake(monkeypatch, tmp_path):
     fake = FakeLLMClient([LLMResponse(text="Hello from fake!")])
     monkeypatch.setattr(build_module, "build_llm", lambda settings, parser: fake)
 
-    transport = httpx.ASGITransport(app=_main.app)
-    async with httpx.AsyncClient(
+    transport = httpx2.ASGITransport(app=_main.app)
+    async with httpx2.AsyncClient(
         transport=transport,
-        base_url="http://test",
+        base_url="https://test",
         headers={"Authorization": f"Bearer {_TEST_API_KEY}"},
     ) as client:
         yield client, fake
@@ -73,10 +86,10 @@ async def client_with_fake_azure_backend(monkeypatch, tmp_path):
     fake = FakeLLMClient([LLMResponse(text="Hello from fake!")])
     monkeypatch.setattr(build_module, "build_llm", lambda settings, parser: fake)
 
-    transport = httpx.ASGITransport(app=_main.app)
-    async with httpx.AsyncClient(
+    transport = httpx2.ASGITransport(app=_main.app)
+    async with httpx2.AsyncClient(
         transport=transport,
-        base_url="http://test",
+        base_url="https://test",
         headers={"Authorization": f"Bearer {_TEST_API_KEY}"},
     ) as client:
         yield client, fake
@@ -85,7 +98,7 @@ async def client_with_fake_azure_backend(monkeypatch, tmp_path):
         await _main._run_store._conn.close()
 
 
-def sse_frames(resp: httpx.Response) -> list[dict]:
+def sse_frames(resp: httpx2.Response) -> list[dict]:
     """All `data:` frames of a fully-buffered SSE response, parsed."""
     return [
         json.loads(line[len("data: "):])
@@ -94,5 +107,5 @@ def sse_frames(resp: httpx.Response) -> list[dict]:
     ]
 
 
-def thread_id_from(resp: httpx.Response) -> str:
+def thread_id_from(resp: httpx2.Response) -> str:
     return sse_frames(resp)[0]["thread_id"]
