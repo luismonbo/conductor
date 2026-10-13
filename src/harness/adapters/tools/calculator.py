@@ -7,6 +7,7 @@ import operator
 from collections.abc import Callable
 from typing import Any
 
+from harness.core.tools.base import ToolError
 from harness.core.types import ToolSpec
 
 # Maps an AST operator node type to the function that evaluates it. The values
@@ -54,6 +55,11 @@ class CalculatorTool:
         )
 
     async def run(self, arguments: dict[str, Any]) -> str:
-        expr = arguments["expression"]
-        tree = ast.parse(expr, mode="eval")
-        return str(_safe_eval(tree.body))
+        expr = arguments.get("expression")
+        if not isinstance(expr, str) or not expr.strip():
+            raise ToolError("expression is required, e.g. '3 * (4 + 2)'")
+        try:
+            return str(_safe_eval(ast.parse(expr, mode="eval").body))
+        except (SyntaxError, ValueError, ZeroDivisionError, OverflowError) as exc:
+            # The model wrote the expression, so it can fix it: say what was wrong.
+            raise ToolError(f"cannot evaluate {expr!r}: {exc}") from exc

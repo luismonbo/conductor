@@ -97,6 +97,12 @@ class Settings(BaseSettings):
     # docs/superpowers/specs/2026-09-19-visitor-scoped-threads-design.md.
     memory_tools_enabled: bool = False
 
+    # Tool arguments and results reach a browser (the SSE stream and
+    # GET /threads/{id}) only when true; off, a browser gets each tool's name
+    # only. Default-safe for a public site; the owner's own UI turns it on. See
+    # security/egress.py and docs/superpowers/specs/2026-10-13-egress-hardening-design.md.
+    show_tool_details: bool = False
+
     # Level of the harness's own log lines (harness.*); every other library
     # stays at WARNING. See observability/logging_setup.py.
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"

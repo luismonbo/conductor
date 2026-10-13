@@ -22,21 +22,42 @@ async def _seeded_store_and_retriever(chunks: list[Chunk]) -> tuple[InMemoryVect
 
 
 @pytest.mark.asyncio
-async def test_formats_hits_with_score_source_and_section():
+async def test_cites_the_documents_title_never_its_path():
     chunk = Chunk(
         chunk_id="c1", document_id="d1", collection="papers",
         text="the model uses self-attention", section_path=("Method", "Ablations"),
-        source_path="papers/attn.pdf",
+        source_path="data/raw/papers/attn.pdf", title="Attention Is All You Need",
     )
     store, retriever = await _seeded_store_and_retriever([chunk])
     tool = SearchDocumentsTool(retriever, store, default_collection="papers")
 
     result = await tool.run({"query": "self-attention"})
 
-    assert "papers/attn.pdf" in result
-    assert "Method > Ablations" in result
+    assert result.startswith("[1] (score: ")
+    assert 'source: "Attention Is All You Need", section: Method > Ablations)' in result
     assert "the model uses self-attention" in result
-    assert result.startswith("[1] (score:")
+    assert "data/raw" not in result and "attn.pdf" not in result
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("source_path", "cited"),
+    [("data/raw/docs/010-azure-embeddings-adapter.md", "010-azure-embeddings-adapter"),
+     ("", "untitled")],
+)
+async def test_an_untitled_chunk_cites_its_file_name_without_folder_or_extension(source_path, cited):
+    # Chunks ingested before titles existed have title="".
+    chunk = Chunk(
+        chunk_id="c1", document_id="d1", collection="docs", text="body",
+        section_path=(), source_path=source_path,
+    )
+    store, retriever = await _seeded_store_and_retriever([chunk])
+    tool = SearchDocumentsTool(retriever, store, default_collection="docs")
+
+    result = await tool.run({"query": "body"})
+
+    assert f'source: "{cited}"' in result
+    assert "data/raw" not in result
 
 
 @pytest.mark.asyncio
@@ -191,3 +212,45 @@ async def test_the_agents_default_collection_stays_searchable_when_unlisted():
 
     assert not result.is_error
     assert "private research notes" in result.content
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "arguments", [{}, {"query": ""}, {"query": "   "}, {"query": None}], ids=repr,
+)
+async def test_a_missing_query_is_explained_to_the_model(arguments):
+    store, retriever = await _seeded_store_and_retriever([_PUBLIC])
+    tool = SearchDocumentsTool(retriever, store, default_collection="docs", collections=["docs"])
+
+    result = await _dispatch(tool, arguments)
+
+    assert result.is_error
+    assert "query is required" in result.content
+
+
+@pytest.mark.asyncio
+async def test_a_null_k_means_the_default():
+    # Small models send null for an optional parameter, as with collection above.
+    chunks = [
+        Chunk(chunk_id=f"c{i}", document_id="d1", collection="docs", text=f"chunk {i}", section_path=())
+        for i in range(3)
+    ]
+    store, retriever = await _seeded_store_and_retriever(chunks)
+    tool = SearchDocumentsTool(retriever, store, default_collection="docs", default_k=2)
+
+    result = await _dispatch(tool, {"query": "chunk", "k": None})
+
+    assert not result.is_error
+    assert result.content.count("(score:") == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("k", ["many", [5], float("inf"), float("nan")], ids=repr)
+async def test_a_k_that_is_not_a_whole_number_is_explained_to_the_model(k):
+    store, retriever = await _seeded_store_and_retriever([_PUBLIC])
+    tool = SearchDocumentsTool(retriever, store, default_collection="docs", collections=["docs"])
+
+    result = await _dispatch(tool, {"query": "notes", "k": k})
+
+    assert result.is_error
+    assert "k must be a whole number from 1 to 20" in result.content

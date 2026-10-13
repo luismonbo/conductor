@@ -37,6 +37,7 @@ from langgraph.graph import StateGraph, START, END
 from langgraph.types import interrupt
 
 from harness.core.llm.client import LLMClient
+from harness.core.llm.errors import ContentFiltered
 from harness.core.llm.model_resolution import resolve_model
 from harness.core.tools.registry import ToolRegistry
 from harness.core.types import AgentEvent, LLMResponse, Message, Role, ToolSpec
@@ -58,6 +59,16 @@ def _prompt_chars(msgs: list[Message], specs: list[ToolSpec]) -> int:
         len(m.content) + sum(len(str(tc.arguments)) for tc in m.tool_calls) for m in msgs
     )
     return message_chars + sum(len(repr(spec)) for spec in specs)
+
+
+def _estimated_usage(
+    msgs: list[Message], specs: list[ToolSpec], streamed: list[str]
+) -> tuple[int, int]:
+    """(input, output) tokens for a call the provider never reported usage for."""
+    return (
+        estimate_tokens(_prompt_chars(msgs, specs)),
+        estimate_tokens(sum(len(t) for t in streamed)),
+    )
 
 
 def build_graph(
@@ -101,18 +112,27 @@ def build_graph(
             # still billed, but the provider never reports its usage. Record an
             # estimate, or the daily token budget never sees cancelled calls.
             if accumulator:
-                accumulator.add(
-                    input_tokens=estimate_tokens(_prompt_chars(msgs, specs)),
-                    output_tokens=estimate_tokens(sum(len(t) for t in streamed)),
-                )
+                input_t, output_t = _estimated_usage(msgs, specs, streamed)
+                accumulator.add(input_tokens=input_t, output_tokens=output_t)
             raise
 
         if response is None:
             response = LLMResponse(text="")
 
+        filtered = response.finish_reason == "content_filter"
         if accumulator:
             input_t, output_t = response.token_usage
+            if filtered and not (input_t or output_t):
+                # A filtered stream may end without a usage report; the call was
+                # still billed, so estimate it as a cancelled call is.
+                input_t, output_t = _estimated_usage(msgs, specs, streamed)
             accumulator.add(input_tokens=input_t, output_tokens=output_t)
+
+        if filtered:
+            # The provider's filter cut the answer off. Raising keeps the partial
+            # answer out of the checkpoint; the API turns this into the visitor's
+            # content-filter sentence (security/egress.py).
+            raise ContentFiltered("completion")
 
         for tc in response.tool_calls:
             await queue.put(AgentEvent(

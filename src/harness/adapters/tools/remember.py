@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Any
 
 from harness.core.memory.store import LongTermMemory
+from harness.core.tools.base import ToolError
 from harness.core.types import ToolSpec
 
 
@@ -41,5 +42,8 @@ class RememberTool:
         )
 
     async def run(self, arguments: dict[str, Any]) -> str:
-        memory_id = await self._memory.write(arguments["text"])
+        text = arguments.get("text")
+        if not isinstance(text, str) or not text.strip():
+            raise ToolError("text is required: the fact to remember, as a clear statement")
+        memory_id = await self._memory.write(text)
         return f"Remembered (id={memory_id})."

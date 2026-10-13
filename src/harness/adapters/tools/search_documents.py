@@ -8,9 +8,12 @@ fallback.
 """
 from __future__ import annotations
 
+from pathlib import PurePath
 from typing import Any
 
+from harness.core.rag.document import Chunk
 from harness.core.rag.ports import Retriever, VectorStore
+from harness.core.tools.base import ToolError
 from harness.core.types import ToolSpec
 
 _DESCRIPTION = (
@@ -22,6 +25,12 @@ _DESCRIPTION = (
 )
 
 _MAX_K = 20
+
+
+def _cited_name(chunk: Chunk) -> str:
+    """What a citation names: the document's title, else its file name without
+    folder or extension. Never the path: the model repeats what it reads."""
+    return chunk.title or PurePath(chunk.source_path).stem or "untitled"
 
 
 class SearchDocumentsTool:
@@ -73,13 +82,15 @@ class SearchDocumentsTool:
         )
 
     async def run(self, arguments: dict[str, Any]) -> str:
-        query = arguments["query"]
-        k = max(1, min(int(arguments.get("k", self._default_k)), _MAX_K))
+        query = arguments.get("query")
+        if not isinstance(query, str) or not query.strip():
+            raise ToolError("query is required: say what to search for")
+        k = self._k(arguments.get("k"))
         # Missing, null or empty means the default: every vector store reads a
         # None collection as "search everything", so None must never get through.
         collection = arguments.get("collection") or self._default_collection
         if collection not in self._allowed:
-            raise ValueError(
+            raise ToolError(
                 f"collection {collection!r} is not available; "
                 f"this assistant can search: {', '.join(self._allowed)}"
             )
@@ -95,7 +106,17 @@ class SearchDocumentsTool:
         for i, sc in enumerate(hits, start=1):
             section = " > ".join(sc.chunk.section_path) or "n/a"
             lines.append(
-                f"[{i}] (score: {sc.score:.2f}, source: {sc.chunk.source_path}, "
+                f'[{i}] (score: {sc.score:.2f}, source: "{_cited_name(sc.chunk)}", '
                 f"section: {section})\n{sc.chunk.text}"
             )
         return "\n\n".join(lines)
+
+    def _k(self, value: Any) -> int:
+        # Missing or null means the default: small models send null for an
+        # optional parameter.
+        if value is None:
+            return self._default_k
+        try:
+            return max(1, min(int(value), _MAX_K))
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ToolError(f"k must be a whole number from 1 to {_MAX_K}") from exc

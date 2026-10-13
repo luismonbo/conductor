@@ -41,6 +41,10 @@ agent: default
 # Single-operator deployments can opt back into shared long-term memory.
 memory_tools_enabled: false
 
+# Tool arguments and results in the browser: a public site sends each tool's
+# name only. A single-operator deployment whose UI shows them sets true.
+show_tool_details: false
+
 # --- Input guard -------------------------------------------------------------
 # TypeSafe (Jev) screens every chat message before the agent sees it. The key
 # is a secret: HARNESS_TYPESAFE_API_KEY in the environment, never here.
