@@ -56,13 +56,14 @@ src/harness/
 ├── orchestration/        ← shared agent loop, agent loader, composition root, checkpointer factory
 ├── adapters/
 │   ├── llm/              ← Azure, OpenAI-compatible, fake
-│   ├── tools/            ← calculator, recall
+│   ├── tools/            ← calculator, remember, recall, search_documents, wiki
 │   ├── memory/           ← in-memory, pgvector stub (long-term conversational memory)
 │   ├── parsing/          ← docling, markitdown, router
 │   ├── normalization/    ← LLM structured-output normalizer
 │   ├── chunking/         ← structure-aware chunker
 │   ├── embedding/        ← openai-compatible, fake
-│   └── vectorstore/      ← pgvector, Milvus Lite, in-memory (RAG chunk index)
+│   ├── vectorstore/      ← pgvector, Milvus Lite, in-memory (RAG chunk index)
+│   └── wiki/             ← wiki pages from a local folder or Azure Blob, parsed into memory
 ├── core/
 │   ├── rag/              ← RAG schema, ports, ingestion + serving pipelines
 │   └── ...               ← protocols + types, imports nothing outward
@@ -168,6 +169,10 @@ uv run pytest -q   # 354 tests
 | vector store (CLI `--vector-store`) | `pgvector` | `pgvector` · `milvus` · `in_memory` |
 | `HARNESS_RAG_K` | `5` | retrieval depth |
 | `HARNESS_RAG_PER_DOCUMENT_K` | `2` | max chunks per document; `0` = plain flat top-k |
+| `HARNESS_WIKI_DIR` | — | a local wiki folder holding `index.md`, e.g. `wiki` (the repo's gitignored `wiki/`; see [Agents](#agents)); set this or the Blob settings, not both |
+| `HARNESS_WIKI_BLOB_ACCOUNT_URL` | — | `https://<account>.blob.core.windows.net`; read with `DefaultAzureCredential` (needs Storage Blob Data Reader) |
+| `HARNESS_WIKI_BLOB_CONTAINER` | — | the private container holding the wiki's pages; set together with the account URL |
+| `HARNESS_WIKI_BLOB_PREFIX` | — | optional folder inside the container, e.g. `wiki/` |
 | `HARNESS_DEFAULT_MODEL` | — | LiteLLM profile name sent when no pin/override applies; supersedes `HARNESS_LLM_MODEL` when set |
 | `LITELLM_MASTER_KEY` | — | proxy auth; must equal `HARNESS_LLM_API_KEY` |
 | `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` | — | empty = tracing disabled, chat unaffected |
@@ -210,10 +215,19 @@ serves. Prompts live only in `prompt.py`: never in `.env`, Settings or a target 
 `search_documents` searches only the collections its `tools.py` lists; any other collection the
 model names is refused.
 
-**Private agents.** An agent that shouldn't be public, such as a website's scoped assistant, is a
-gitignored folder under `src/harness/agents/`; the Dockerfile's `COPY src/ src/` bakes it into the
-image. That relies on the editable install `uv sync` performs (a `.pth` file pointing at `src/`):
-a non-editable wheel build drops gitignored files.
+**Wiki.** Instead of searching documents, an agent can read a wiki: `read_wiki_index` returns its
+`index.md`, and `read_wiki_page` one page by the name its `[[...]]` links use (the page's path
+without `.md`). The wiki loads into memory at startup from `HARNESS_WIKI_DIR`, a local folder (in
+this repo, the gitignored `wiki/`: `HARNESS_WIKI_DIR=wiki`), or, in production, from a private
+Azure Blob container (`HARNESS_WIKI_BLOB_ACCOUNT_URL`,
+`HARNESS_WIKI_BLOB_CONTAINER`, optional `HARNESS_WIKI_BLOB_PREFIX`) read with the app's managed
+identity; restart the app after changing it. The website agent (`agents/website/`) answers from its
+wiki only and does not start without it.
+
+**Private agents.** To keep an agent out of a public repo, gitignore its folder under
+`src/harness/agents/`; the Dockerfile's `COPY src/ src/` still bakes it into the image. That relies
+on the editable install `uv sync` performs (a `.pth` file pointing at `src/`): a non-editable wheel
+build drops gitignored files.
 
 ---
 

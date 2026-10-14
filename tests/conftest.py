@@ -40,3 +40,19 @@ def fixture_agents(monkeypatch):
         "load_agent",
         lambda name: load_agent(name, package="tests.fixtures.agents"),
     )
+
+
+_WIKI_ENV = (
+    "HARNESS_WIKI_DIR",
+    "HARNESS_WIKI_BLOB_ACCOUNT_URL",
+    "HARNESS_WIKI_BLOB_CONTAINER",
+    "HARNESS_WIKI_BLOB_PREFIX",
+)
+
+
+@pytest.fixture(autouse=True)
+def _no_wiki_by_default(monkeypatch):
+    """Every test starts with no wiki source, whatever the developer's .env says.
+    Tests that need a wiki set HARNESS_WIKI_DIR (or pass wiki_dir) themselves."""
+    for key in _WIKI_ENV:
+        monkeypatch.setenv(key, "")

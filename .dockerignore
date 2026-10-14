@@ -42,6 +42,8 @@ harness.sqlite*
 data/raw/
 data/processed/
 evaluation/reports/
+# The local wiki: production reads its pages from Azure Blob, not the image.
+/wiki/
 
 # Local working context, not shipped (see CLAUDE.md)
 docs/

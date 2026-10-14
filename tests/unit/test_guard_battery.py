@@ -22,6 +22,11 @@ def test_extraction_and_private_info_share_one_refusal():
     assert EXTRACTION.refusal == PRIVATE_INFO.refusal != OFF_TOPIC.refusal
 
 
+def test_the_shared_refusal_sends_salary_and_rate_questions_to_the_contact_links():
+    assert "salary or rates" in PRIVATE_INFO.refusal
+    assert "contact links on this site" in PRIVATE_INFO.refusal
+
+
 def test_every_check_targets_the_visitor_message_and_has_examples_on_both_sides():
     for check in BATTERY:
         assert "`visitor_message`" in check.question

@@ -30,6 +30,7 @@ dependencies = [
     "setuptools>=78.1.1",
     "slowapi>=0.1.10",
     "typesafe-sdk>=0.7.2",
+    "langchain-azure-storage>=1.2.1",
 ]
 
 [project.optional-dependencies]

@@ -1,7 +1,7 @@
 # Template for a deployment target. Copy this file to <name>.yaml (e.g.
 # daily-driver.yaml, luismonbo-com.yaml) and set HARNESS_TARGET=<name> to
-# select it. Real target files are gitignored — this example is the only
-# one committed, since this repo is public.
+# select it. Real target files are gitignored, except luismonbo-com.yaml: the
+# public site's, committed so CI can build its image (this repo is public).
 #
 # Only non-secret Settings fields belong here. Fields that can carry a
 # credential (API keys, DSNs — see SECRET_FIELDS in
