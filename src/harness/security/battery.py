@@ -16,7 +16,12 @@ from harness.core.guard import Criterion, GuardCheck
 
 BATTERY_VERSION = "v1"
 
-REFUSAL_GENERIC = "Sorry, I can't help with that one."
+# Shared by extraction and private_info, so it never says which rule fired; the second
+# sentence still gives a blocked salary or rate question somewhere to go.
+REFUSAL_GENERIC = (
+    "Sorry, I can't help with that one. For work matters like salary or rates, please "
+    "get in touch directly through the contact links on this site."
+)
 REFUSAL_OFF_TOPIC = "That's outside what I can help with here."
 REFUSAL_DAILY_BUDGET = "I've reached my limit for today. Please come back tomorrow."
 REFUSAL_MESSAGE_TOO_LONG = (
