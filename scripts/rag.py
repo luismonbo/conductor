@@ -12,12 +12,19 @@ import argparse
 import asyncio
 import json
 import logging
+import os
 import re
 import sys
 from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass
 from pathlib import Path, PurePath
 from typing import Any, Protocol
+
+# A Milvus search forks Milvus Lite's server while gRPC threads run, and gRPC's C
+# core then logs "skipping fork() handlers" lines to stderr. gRPC reads this as
+# pymilvus loads it, so it is set before the imports below. Errors still print,
+# and a GRPC_VERBOSITY already in the environment wins.
+os.environ.setdefault("GRPC_VERBOSITY", "ERROR")
 
 import psycopg
 import yaml

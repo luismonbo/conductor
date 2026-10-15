@@ -407,3 +407,36 @@ def test_delete_an_unknown_document(index, capsys):
     )
     assert code == 1
     assert "not in collection 'papers': papers/zzzz" in err
+
+
+# Records GRPC_VERBOSITY at the moment grpc is first imported: gRPC reads it then.
+_GRPC_SPY = """
+import builtins, os, sys
+seen = {}
+real_import = builtins.__import__
+def spy(name, *args, **kwargs):
+    if name == "grpc" and "grpc" not in sys.modules and "grpc" not in seen:
+        seen["grpc"] = os.environ.get("GRPC_VERBOSITY")
+    return real_import(name, *args, **kwargs)
+builtins.__import__ = spy
+import scripts.rag
+print(seen.get("grpc", "grpc never imported"))
+"""
+
+
+def test_grpc_info_logs_are_off_before_grpc_loads():
+    """A Milvus search forks Milvus Lite's server while gRPC threads run, and gRPC
+    logs "skipping fork() handlers" lines to stderr unless told otherwise before
+    it loads; setting it any later has no effect."""
+    env = {key: value for key, value in os.environ.items() if key != "GRPC_VERBOSITY"}
+    quiet = subprocess.run(
+        [sys.executable, "-c", _GRPC_SPY], env=env, capture_output=True, text=True
+    )
+    assert quiet.stdout.strip() == "ERROR", quiet.stderr[-2000:]
+    asked = subprocess.run(
+        [sys.executable, "-c", _GRPC_SPY],
+        env={**env, "GRPC_VERBOSITY": "DEBUG"},
+        capture_output=True,
+        text=True,
+    )
+    assert asked.stdout.strip() == "DEBUG", asked.stderr[-2000:]
