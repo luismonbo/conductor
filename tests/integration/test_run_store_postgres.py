@@ -147,6 +147,7 @@ async def test_a_session_time_zone_other_than_utc_changes_nothing():
                 hour=0, minute=0, second=0, microsecond=0
             )
             assert await store.tokens_since(midnight) == 15
+            assert await store.tokens_since(started - timedelta(microseconds=1)) == 15
             assert await store.tokens_since(started + timedelta(microseconds=1)) == 0
         finally:
             await new_york.close()
