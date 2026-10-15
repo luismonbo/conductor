@@ -23,10 +23,8 @@ import scripts.rag as rag
 from harness.config.settings import Settings
 from harness.core.rag.document import Chunk
 from harness.orchestration.build import build_vector_store
+from tests.conftest import POSTGRES_DSN as _PG_DSN, require_postgres as _require_postgres
 
-_PG_DSN = os.environ.get(
-    "HARNESS_TEST_PGVECTOR_DSN", "postgresql://harness:harness@localhost:5432/harness"
-)
 _VOCABULARY = ("encoder", "decoder", "attention")
 DIM = 1 + len(_VOCABULARY)
 TRANSFORMERS = "papers/aaaa000000000001"
@@ -78,13 +76,6 @@ CHUNKS = [
     _chunk(RECURRENT, 0, "encoder attention", "Recurrent nets", ("Background",), None),
     _chunk(NOTES, 0, "attention attention", "Notes", ("Notes",), None),
 ]
-
-
-def _require_postgres() -> None:
-    try:
-        psycopg.connect(_PG_DSN, connect_timeout=3).close()
-    except psycopg.OperationalError as exc:
-        pytest.skip(f"Postgres unreachable at {_PG_DSN}: {exc}")
 
 
 def _settings(**overrides: object) -> Settings:

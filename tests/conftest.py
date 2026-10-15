@@ -1,9 +1,17 @@
 """Suite-wide test defaults."""
 from __future__ import annotations
 
+import functools
 import logging
+import os
+import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
+from urllib.parse import quote
 
+import psycopg
 import pytest
+from psycopg import sql
 
 from harness.observability.logging_setup import _PRIVATE_AT_DEBUG
 
@@ -56,3 +64,58 @@ def _no_wiki_by_default(monkeypatch):
     Tests that need a wiki set HARNESS_WIKI_DIR (or pass wiki_dir) themselves."""
     for key in _WIKI_ENV:
         monkeypatch.setenv(key, "")
+
+
+# --- Postgres ------------------------------------------------------------------
+# The server the Postgres tests use: `make infra` locally, a service container in
+# CI. A postgresql:// URL: the API's settings accept only that form.
+POSTGRES_DSN = os.environ.get(
+    "HARNESS_TEST_POSTGRES_DSN", "postgresql://harness:harness@localhost:5432/harness"
+)
+
+
+@functools.cache
+def _postgres_unreachable() -> str | None:
+    """Why the test Postgres can't be reached, or None. Checked once per run."""
+    try:
+        psycopg.connect(POSTGRES_DSN, connect_timeout=3).close()
+    except psycopg.OperationalError as exc:
+        return str(exc)
+    return None
+
+
+def require_postgres() -> None:
+    """Skip the calling test unless the test Postgres answers."""
+    reason = _postgres_unreachable()
+    if reason is not None:
+        pytest.skip(f"Postgres unreachable at {POSTGRES_DSN}: {reason}")
+
+
+def with_options(dsn: str, options: str) -> str:
+    """`dsn`, a postgresql:// URL, with libpq `options` such as "-c search_path=x"."""
+    separator = "&" if "?" in dsn else "?"
+    return f"{dsn}{separator}options={quote(options)}"
+
+
+@contextmanager
+def postgres_schema(options: str = "") -> Iterator[str]:
+    """A DSN whose tables land in a fresh schema, dropped on exit.
+
+    `options` adds session settings, e.g. "-c TimeZone=America/New_York".
+    """
+    require_postgres()
+    schema = f"test_{uuid.uuid4().hex[:12]}"
+    with psycopg.connect(POSTGRES_DSN, autocommit=True) as admin:
+        admin.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(schema)))
+    try:
+        yield with_options(POSTGRES_DSN, f"-c search_path={schema} {options}".strip())
+    finally:
+        with psycopg.connect(POSTGRES_DSN, autocommit=True) as admin:
+            admin.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(schema)))
+
+
+@pytest.fixture
+def postgres_dsn() -> Iterator[str]:
+    """A DSN on the test Postgres, in a schema of this test's own."""
+    with postgres_schema() as dsn:
+        yield dsn
