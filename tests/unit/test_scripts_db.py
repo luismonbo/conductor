@@ -7,6 +7,7 @@ AsyncSqliteSaver; the runs and guard decisions from RunStore. The same bytes
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import sqlite3
 from datetime import datetime, timezone
@@ -393,3 +394,70 @@ def test_markdown_and_json_are_exclusive(settings, capsys):
 def test_inline_code_survives_backticks():
     assert db._code("plain") == "`plain`"
     assert db._code("has ` tick") == "`` has ` tick ``"
+
+
+# --- usage -------------------------------------------------------------------
+
+
+def test_usage_per_day_against_the_budget(settings, capsys):
+    code, out, _ = run(capsys, "usage", "--days", "3", "--json")
+    assert code == 0
+    usage = json.loads(out)
+    assert usage["days"] == [
+        {"day": "2026-10-13", "runs": 0, "threads": 0, "tokens": 0, "blocked": 1},
+        {"day": "2026-10-14", "runs": 1, "threads": 1, "tokens": 120, "blocked": 0},
+        {"day": "2026-10-15", "runs": 3, "threads": 2, "tokens": 395, "blocked": 1},
+    ]
+    assert usage["today_tokens"] == 395
+    assert usage["all_time"] == {"runs": 4, "tokens": 515}
+
+
+def test_usage_text_shows_the_budget_line(settings, capsys):
+    _, out, _ = run(capsys, "usage", "--days", "3")
+    assert "today: 395 of 790 daily budget (50%)" in out
+    assert "all time: 4 runs, 515 tokens" in out
+
+
+def test_usage_with_the_budget_off(database, monkeypatch, capsys):
+    _use_settings(monkeypatch, checkpointer_url=str(database), daily_token_budget=0)
+    _, out, _ = run(capsys, "usage")
+    assert "today: 395 tokens (daily budget off)" in out
+
+
+# --- guard -------------------------------------------------------------------
+
+
+def test_guard_blocked_newest_first(settings, capsys):
+    code, out, _ = run(capsys, "guard", "--blocked", "--json")
+    assert code == 0
+    rows = json.loads(out)
+    assert [r["message_text"] for r in rows] == ["one more question", POEM]
+    assert rows[1]["thread_id"] is None
+    assert rows[1]["probabilities"] == {"off_topic": 0.93}
+
+
+def test_guard_text_marks_a_blocked_first_message(settings, capsys):
+    _, out, _ = run(capsys, "guard")
+    poem = [line for line in out.splitlines() if "write me a poem" in line]
+    assert len(poem) == 1  # the newline inside the message stays inside one row
+    assert "about snakes 🐍" in poem[0]
+    assert "blocked" in poem[0] and "off_topic" in poem[0] and "210 ms" in poem[0]
+    assert " - " in poem[0]  # no thread
+
+
+# --- read-only ---------------------------------------------------------------
+
+
+def test_every_command_leaves_the_database_untouched(settings, database, capsys):
+    before = hashlib.sha256(database.read_bytes()).hexdigest()
+    for argv in (
+        ["threads"],
+        ["thread", "aaaa1"],
+        ["thread", "aaaa1", "--markdown"],
+        ["thread", "cccc"],
+        ["usage"],
+        ["guard"],
+    ):
+        assert db.main(argv) == 0
+    capsys.readouterr()
+    assert hashlib.sha256(database.read_bytes()).hexdigest() == before

@@ -14,7 +14,7 @@ import sqlite3
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -342,6 +342,47 @@ class Store:
             params.append(limit)
         return [dict(row) for row in self._sql.execute(sql, params)]
 
+    def runs_per_day(self, since_day: str) -> dict[str, dict[str, int]]:
+        """Runs, threads and tokens per UTC day, from `since_day` (YYYY-MM-DD) on."""
+        if "runs" not in self._tables:
+            return {}
+        rows = self._sql.execute(
+            "SELECT substr(started_at, 1, 10) AS day, COUNT(*) AS runs, "
+            "COUNT(DISTINCT thread_id) AS threads, "
+            "SUM(COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0)) AS tokens "
+            "FROM runs WHERE started_at >= ? GROUP BY day",
+            (since_day,),
+        )
+        return {
+            row["day"]: {
+                "runs": row["runs"],
+                "threads": row["threads"],
+                "tokens": row["tokens"] or 0,
+            }
+            for row in rows
+        }
+
+    def blocked_per_day(self, since_day: str) -> dict[str, int]:
+        if "guard_decisions" not in self._tables:
+            return {}
+        rows = self._sql.execute(
+            "SELECT substr(created_at, 1, 10) AS day, COUNT(*) AS blocked "
+            "FROM guard_decisions WHERE allowed = 0 AND created_at >= ? GROUP BY day",
+            (since_day,),
+        )
+        return {row["day"]: row["blocked"] for row in rows}
+
+    def run_totals(self) -> tuple[int, int]:
+        """All-time runs, and their input + output tokens."""
+        if "runs" not in self._tables:
+            return 0, 0
+        row = self._sql.execute(
+            "SELECT COUNT(*) AS runs, "
+            "SUM(COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0)) AS tokens "
+            "FROM runs"
+        ).fetchone()
+        return row["runs"], row["tokens"] or 0
+
 
 # --- commands ----------------------------------------------------------------
 
@@ -562,6 +603,78 @@ def cmd_thread(store: Store, args: argparse.Namespace, settings: Settings) -> No
     _print_thread(info, messages, runs, guard, full=args.full, tools=not args.no_tools)
 
 
+def cmd_usage(store: Store, args: argparse.Namespace, settings: Settings) -> None:
+    """Counted as the API counts its daily budget: runs started since UTC midnight."""
+    today = _utcnow().date()
+    days = [(today - timedelta(days=n)).isoformat() for n in range(args.days - 1, -1, -1)]
+    runs = store.runs_per_day(days[0])
+    blocked = store.blocked_per_day(days[0])
+    empty = {"runs": 0, "threads": 0, "tokens": 0}
+    per_day = [
+        {"day": day, **runs.get(day, empty), "blocked": blocked.get(day, 0)}
+        for day in days
+    ]
+    today_tokens = per_day[-1]["tokens"]
+    budget = settings.daily_token_budget
+    total_runs, total_tokens = store.run_totals()
+    if args.json:
+        _print_json(
+            {
+                "days": per_day,
+                "today_tokens": today_tokens,
+                "daily_token_budget": budget,
+                "all_time": {"runs": total_runs, "tokens": total_tokens},
+            }
+        )
+        return
+    _print_table(
+        ["day (UTC)", "runs", "threads", "tokens", "blocked"],
+        [
+            [
+                day["day"],
+                str(day["runs"]),
+                str(day["threads"]),
+                f"{day['tokens']:,}",
+                str(day["blocked"]),
+            ]
+            for day in per_day
+        ],
+        numeric=frozenset({1, 2, 3, 4}),
+    )
+    print()
+    if budget:
+        share = round(100 * today_tokens / budget)
+        print(f"today: {today_tokens:,} of {budget:,} daily budget ({share}%)")
+    else:
+        print(f"today: {today_tokens:,} tokens (daily budget off)")
+    print(f"all time: {total_runs:,} runs, {total_tokens:,} tokens")
+
+
+def cmd_guard(store: Store, args: argparse.Namespace, settings: Settings) -> None:
+    rows = store.guard_decisions(blocked_only=args.blocked, limit=args.limit)
+    if args.json:
+        _print_json([_guard_json(row) for row in rows])
+        return
+    if not rows:
+        print("No guard decisions.")
+        return
+    _print_table(
+        ["time (UTC)", "verdict", "stage", "reason", "latency", "thread", "message"],
+        [
+            [
+                _fmt_time(row["created_at"]),
+                _verdict(row),
+                row["stage"],
+                row["reason"] or "-",
+                "-" if row["latency_ms"] is None else f"{row['latency_ms']} ms",
+                _short(row["thread_id"]),
+                _cut(row["message_text"], _TITLE_CHARS),
+            ]
+            for row in rows
+        ],
+    )
+
+
 # --- command line ------------------------------------------------------------
 
 
@@ -605,6 +718,23 @@ def _parser() -> argparse.ArgumentParser:
     )
     output.add_argument("--json", action="store_true", help="everything as JSON")
 
+    usage = commands.add_parser(
+        "usage", parents=[common], help="tokens per UTC day against the daily budget"
+    )
+    usage.add_argument(
+        "--days", type=_positive_int, default=7, help="days back, today included"
+    )
+    usage.add_argument("--json", action="store_true", help="full rows as JSON")
+
+    guard = commands.add_parser(
+        "guard", parents=[common], help="input-guard decisions, newest first"
+    )
+    guard.add_argument("--limit", type=_positive_int, default=20)
+    guard.add_argument("--blocked", action="store_true", help="blocked messages only")
+    guard.add_argument(
+        "--json", action="store_true", help="full rows, with the scores, as JSON"
+    )
+
     return parser
 
 
@@ -636,6 +766,8 @@ Command = Callable[[Store, argparse.Namespace, Settings], None]
 _COMMANDS: dict[str, Command] = {
     "threads": cmd_threads,
     "thread": cmd_thread,
+    "usage": cmd_usage,
+    "guard": cmd_guard,
 }
 
 
