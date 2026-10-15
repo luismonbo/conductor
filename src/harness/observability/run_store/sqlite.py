@@ -1,3 +1,4 @@
+"""SqliteRunStore: the run store in harness.sqlite (local runs) or in memory (tests)."""
 from __future__ import annotations
 
 import json
@@ -8,6 +9,7 @@ from datetime import datetime, timezone
 import aiosqlite
 
 from harness.core.guard import GuardDecision
+from harness.observability.run_store import storable_text
 from harness.observability.token_accumulator import TokenAccumulator
 
 logger = logging.getLogger(__name__)
@@ -105,11 +107,13 @@ SELECT COALESCE(SUM(COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0)), 0)
 FROM runs WHERE started_at >= ?
 """
 
-# Decision rows keep this many characters of the screened message.
-GUARD_MESSAGE_TEXT_CHARS = 2000
+
+def _iso_utc(moment: datetime) -> str:
+    """`moment` in the format started_at is stored in, so the two compare as text."""
+    return moment.astimezone(timezone.utc).isoformat()
 
 
-class RunStore:
+class SqliteRunStore:
     def __init__(self, conn: aiosqlite.Connection) -> None:
         self._conn = conn
 
@@ -229,7 +233,7 @@ class RunStore:
                     decision.input_tokens,
                     decision.error,
                     len(message),
-                    message[:GUARD_MESSAGE_TEXT_CHARS],
+                    storable_text(message),
                 ),
             )
             await self._conn.commit()
@@ -248,15 +252,15 @@ class RunStore:
             logger.exception("RunStore.count_thread_runs failed for thread_id=%s", thread_id)
             return 0
 
-    async def tokens_since(self, since_iso: str) -> int:
-        """Input + output tokens of runs started at or after since_iso (ISO-8601 UTC).
+    async def tokens_since(self, since: datetime) -> int:
+        """Input + output tokens of runs started at or after `since`.
 
-        Plain string comparison is safe: every started_at is written by
-        datetime.now(timezone.utc).isoformat(). 0 on error, so the daily budget
-        fails open.
+        Every started_at is written by datetime.now(timezone.utc).isoformat(), so
+        `since` in the same format compares correctly as text. 0 on error, so the
+        daily budget fails open.
         """
         try:
-            cur = await self._conn.execute(_TOKENS_SINCE, (since_iso,))
+            cur = await self._conn.execute(_TOKENS_SINCE, (_iso_utc(since),))
             row = await cur.fetchone()
             return int(row[0]) if row else 0
         except Exception:

@@ -8,7 +8,7 @@ import pytest
 import harness.api.main as _main
 from harness.adapters.llm.fake import FakeLLMClient
 from harness.core.types import LLMResponse, ToolCall
-from harness.observability.run_store import RunStore
+from harness.observability.run_store.sqlite import SqliteRunStore
 from tests.integration.conftest import _TEST_API_KEY, sse_frames, thread_id_from
 
 
@@ -180,8 +180,8 @@ async def test_resuming_another_visitors_thread_is_404(two_clients, monkeypatch)
 async def test_a_failed_run_store_setup_is_retried_not_cached(monkeypatch):
     """A store cached before its schema is in place would 404 every continued
     thread until restart, so a failed setup is discarded (and closed)."""
-    real_create_table = RunStore.create_table
-    attempts: list[RunStore] = []
+    real_create_table = SqliteRunStore.create_table
+    attempts: list[SqliteRunStore] = []
 
     async def _fails_once(self):
         attempts.append(self)
@@ -189,7 +189,7 @@ async def test_a_failed_run_store_setup_is_retried_not_cached(monkeypatch):
             raise aiosqlite.OperationalError("database is locked")
         await real_create_table(self)
 
-    monkeypatch.setattr(RunStore, "create_table", _fails_once)
+    monkeypatch.setattr(SqliteRunStore, "create_table", _fails_once)
 
     with pytest.raises(aiosqlite.OperationalError):
         await _main._get_run_store()

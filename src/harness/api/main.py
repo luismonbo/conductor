@@ -38,6 +38,7 @@ from harness.core.types import AgentEvent, Message, Role
 from harness.observability.langfuse_tracing import langfuse_configured
 from harness.observability.logging_setup import configure_logging
 from harness.observability.run_store import RunStore
+from harness.observability.run_store.sqlite import SqliteRunStore
 from harness.observability.token_accumulator import TokenAccumulator
 from harness.orchestration.build import AgentRuntime, build_input_guard, build_runtime
 from harness.security import egress
@@ -51,7 +52,7 @@ from harness.security.input_guard import GuardContext, InputGuard
 load_dotenv(override=False)
 
 # Lazy-initialized module-level state
-_run_store: RunStore | None = None
+_run_store: SqliteRunStore | None = None
 _run_store_lock: asyncio.Lock | None = None
 _runtime: AgentRuntime | None = None
 _runtime_lock: asyncio.Lock | None = None
@@ -187,7 +188,7 @@ async def _get_run_store() -> RunStore:
                 else settings.checkpointer_url
             )
             conn = await aiosqlite.connect(path)
-            store = RunStore(conn)
+            store = SqliteRunStore(conn)
             try:
                 await store.create_table()
             except BaseException:
@@ -314,10 +315,10 @@ async def _last_assistant_text(graph: Any, thread_id: str) -> str | None:
     )
 
 
-def _utc_midnight_iso() -> str:
-    """Start of the current UTC day, in the same format as runs.started_at."""
+def _utc_midnight() -> datetime:
+    """Start of the current UTC day: the daily token budget counts from here."""
     now = datetime.now(timezone.utc)
-    return now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+    return now.replace(hour=0, minute=0, second=0, microsecond=0)
 
 
 async def _guard_context(
@@ -339,7 +340,7 @@ async def _guard_context(
         else 0
     )
     tokens_today = (
-        await run_store.tokens_since(_utc_midnight_iso())
+        await run_store.tokens_since(_utc_midnight())
         if limits.daily_token_budget
         else 0
     )

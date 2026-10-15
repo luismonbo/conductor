@@ -10,7 +10,7 @@ import harness.orchestration.build as build_module
 from harness.adapters.llm.fake import FakeLLMClient
 from harness.core.llm.errors import ContentFiltered
 from harness.core.types import LLMResponse, ToolCall
-from harness.observability.run_store import RunStore
+from harness.observability.run_store.sqlite import SqliteRunStore
 from harness.security.egress import CONTENT_FILTERED_TEXT, UNAVAILABLE_TEXT
 from tests.integration.conftest import _TEST_API_KEY, sse_frames, thread_id_from
 
@@ -139,7 +139,7 @@ async def test_a_failure_before_the_stream_starts_is_a_bare_500(monkeypatch):
     async def _broken_start_run(self, *args, **kwargs):
         raise RuntimeError("database is locked at /app/state/harness.sqlite")
 
-    monkeypatch.setattr(RunStore, "start_run", _broken_start_run)
+    monkeypatch.setattr(SqliteRunStore, "start_run", _broken_start_run)
     transport = httpx2.ASGITransport(app=_main.app, raise_app_exceptions=False)
     async with httpx2.AsyncClient(
         transport=transport, base_url="https://test",

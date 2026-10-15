@@ -26,7 +26,7 @@ from harness.config.settings import Settings
 from harness.core.guard import GuardDecision
 from harness.core.tools.registry import ToolRegistry
 from harness.core.types import LLMResponse, Message, Role, ToolCall
-from harness.observability.run_store import RunStore
+from harness.observability.run_store.sqlite import SqliteRunStore
 from harness.observability.token_accumulator import TokenAccumulator
 from harness.orchestration.loop import build_graph
 
@@ -80,7 +80,7 @@ async def _converse(
 
 
 async def _record_runs(conn: aiosqlite.Connection) -> None:
-    store = RunStore(conn)
+    store = SqliteRunStore(conn)
     await store.create_table()
     finished = {
         "run-1": (CHAT, "default", 100, 20),
@@ -479,7 +479,7 @@ async def _build_hostile(path: Path) -> None:
         await _converse(
             conn, CHAT, [HOSTILE], [_calculator_call("c1"), LLMResponse(text=HOSTILE)]
         )
-        store = RunStore(conn)
+        store = SqliteRunStore(conn)
         await store.create_table()
         await store.start_run("run-h", CHAT, "default", "fake", HOSTILE_SID)
         await store.record_guard_decision(
