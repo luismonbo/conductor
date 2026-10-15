@@ -15,7 +15,7 @@ import re
 import sys
 from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass
-from pathlib import Path
+from pathlib import Path, PurePath
 from typing import Any, Protocol
 
 import psycopg
@@ -95,6 +95,40 @@ def _collection_name(text: str) -> str:
     if not _NAME.match(text):
         raise argparse.ArgumentTypeError("letters, digits, '.', '_' and '-' only")
     return text
+
+
+def _resolve(prefix: str, candidates: list[str], what: str) -> str:
+    """The one candidate `prefix` names: an exact id, or a unique prefix of one."""
+    if prefix in candidates:
+        return prefix
+    matches = sorted({c for c in candidates if c.startswith(prefix)})
+    if not matches:
+        raise ScriptError(f"no {what} matching {prefix!r}")
+    if len(matches) > 1:
+        listed = "\n  ".join(matches[:10])
+        raise ScriptError(f"{prefix!r} matches {len(matches)} {what}s:\n  {listed}")
+    return matches[0]
+
+
+def _cited_name(chunk: Chunk) -> str:
+    """What a citation names, as search_documents does: the title, else the file name."""
+    return chunk.title or PurePath(chunk.source_path).stem or "untitled"
+
+
+def _section(chunk: Chunk) -> str:
+    return " › ".join(chunk.section_path) or "-"
+
+
+def _pages(chunk: Chunk) -> str:
+    if chunk.page_start is None:
+        return "-"
+    if chunk.page_end is not None and chunk.page_end != chunk.page_start:
+        return f"p.{chunk.page_start}–{chunk.page_end}"
+    return f"p.{chunk.page_start}"
+
+
+def _indented(text: str, prefix: str = "    ") -> str:
+    return "\n".join(prefix + line for line in text.splitlines()) or prefix
 
 
 # --- reading -----------------------------------------------------------------
@@ -377,6 +411,72 @@ def cmd_docs(args: argparse.Namespace, settings: Settings, store: str) -> None:
         print()
 
 
+def _show_chunk(chunk: Chunk, *, as_json: bool) -> None:
+    if as_json:
+        _print_json(asdict(chunk))
+        return
+    fields = [
+        ("chunk", chunk.chunk_id),
+        ("document", chunk.document_id),
+        ("collection", chunk.collection),
+        ("title", chunk.title or "-"),
+        ("source", chunk.source_path or "-"),
+        ("section", _section(chunk)),
+        ("kind", chunk.section_kind),
+        ("pages", _pages(chunk)),
+        ("order", str(chunk.order)),
+        ("embedding", chunk.embedding_model or "-"),
+        ("version", str(chunk.chunk_version)),
+        ("created", chunk.created_at or "-"),
+        ("metadata", json.dumps(chunk.metadata, ensure_ascii=False)),
+    ]
+    _print_table(None, [[name, value] for name, value in fields])
+    print()
+    print(chunk.text)
+
+
+def _show_document(
+    document_id: str, chunks: list[Chunk], *, full: bool, as_json: bool
+) -> None:
+    if as_json:
+        _print_json({"document_id": document_id, "chunks": [asdict(c) for c in chunks]})
+        return
+    print(f"{document_id} · {_cited_name(chunks[0])} · {len(chunks)} chunks")
+    print()
+    if full:
+        for chunk in chunks:
+            print(f"[{chunk.order}] {chunk.chunk_id} · {_section(chunk)} · {_pages(chunk)}")
+            print(_indented(chunk.text))
+            print()
+        return
+    _print_table(
+        ["order", "chunk", "section", "pages", "text"],
+        [
+            [str(c.order), c.chunk_id, _cut(_section(c), 40), _pages(c), _cut(c.text, 80)]
+            for c in chunks
+        ],
+        numeric=frozenset({0}),
+    )
+
+
+def cmd_show(args: argparse.Namespace, settings: Settings, store: str) -> None:
+    prefix, _, index = args.id.partition(":")
+    reader = _open_reader(store, settings)
+    try:
+        document_id = _resolve(prefix, reader.document_ids(), "document")
+        chunks = reader.chunks(document_id)
+    finally:
+        reader.close()
+    if not index:
+        _show_document(document_id, chunks, full=args.full, as_json=args.json)
+        return
+    chunk_id = f"{document_id}:{index}"
+    chunk = next((c for c in chunks if c.chunk_id == chunk_id), None)
+    if chunk is None:
+        raise ScriptError(f"no chunk {chunk_id!r}; {document_id} has {len(chunks)} chunks")
+    _show_chunk(chunk, as_json=args.json)
+
+
 # --- command line ------------------------------------------------------------
 
 
@@ -403,6 +503,16 @@ def _parser() -> argparse.ArgumentParser:
     )
     docs.add_argument("--collection", type=_collection_name, help="only this collection")
     docs.add_argument("--json", action="store_true", help="everything as JSON")
+
+    show = commands.add_parser(
+        "show", parents=[common], help="a document's chunks, or one chunk in full"
+    )
+    show.add_argument(
+        "id",
+        help="a document id or unique prefix (papers/5045), or a chunk (papers/5045:12)",
+    )
+    show.add_argument("--full", action="store_true", help="every chunk's whole text")
+    show.add_argument("--json", action="store_true", help="everything as JSON")
 
     return parser
 
@@ -431,6 +541,7 @@ Command = Callable[[argparse.Namespace, Settings, str], None]
 
 _COMMANDS: dict[str, Command] = {
     "docs": cmd_docs,
+    "show": cmd_show,
 }
 
 

@@ -259,3 +259,42 @@ def test_a_collection_name_that_would_break_a_filter_is_rejected():
     with pytest.raises(SystemExit) as exit_info:
         rag.main(["docs", "--collection", 'papers" or "1'])
     assert exit_info.value.code == 2
+
+
+# --- show --------------------------------------------------------------------
+
+
+def test_show_a_document_by_prefix(index, capsys):
+    code, out, _ = run(capsys, "show", "papers/aaaa", "--json")
+    assert code == 0
+    document = json.loads(out)
+    assert document["document_id"] == TRANSFORMERS
+    assert [c["chunk_id"] for c in document["chunks"]] == [
+        f"{TRANSFORMERS}:{order}" for order in range(3)
+    ]
+
+
+def test_show_a_document_as_text(index, capsys):
+    _, out, _ = run(capsys, "show", "papers/aaaa")
+    assert f"{TRANSFORMERS} · Transformers · 3 chunks" in out
+    assert "Model › Decoder" in out and "p.3–4" in out
+
+
+def test_show_one_chunk(index, capsys):
+    code, out, _ = run(capsys, "show", "papers/aaaa:1")
+    assert code == 0
+    assert "encoder encoder layers" in out
+    assert "Model › Encoder" in out
+    assert "keyword-test" in out
+
+
+def test_show_an_ambiguous_prefix(index, capsys):
+    code, _, err = run(capsys, "show", "papers/")
+    assert code == 1
+    assert TRANSFORMERS in err and RECURRENT in err
+
+
+def test_show_an_unknown_chunk(index, capsys):
+    code, _, err = run(capsys, "show", "papers/aaaa:9")
+    assert code == 1
+    assert f"no chunk '{TRANSFORMERS}:9'" in err
