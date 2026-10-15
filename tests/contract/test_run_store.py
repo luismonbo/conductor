@@ -12,22 +12,32 @@ from datetime import datetime, timedelta, timezone
 import aiosqlite
 import pytest
 
+from harness.adapters.postgres.pool import open_pool
 from harness.core.guard import GuardDecision
 from harness.observability.run_store import RunStore
+from harness.observability.run_store.postgres import PostgresRunStore
 from harness.observability.run_store.sqlite import SqliteRunStore
 from harness.observability.token_accumulator import TokenAccumulator
+from tests.conftest import postgres_schema
 
 SID_A = "session-a"
 SID_B = "session-b"
 
-_STORES = ["sqlite"]
+_STORES = ["sqlite", "postgres"]
 
 
 async def _open(name: str, stack: AsyncExitStack) -> RunStore:
     """A fresh store with its tables; `stack` closes it after the test."""
-    conn = await aiosqlite.connect(":memory:")
-    stack.push_async_callback(conn.close)
-    opened = SqliteRunStore(conn)
+    opened: RunStore
+    if name == "sqlite":
+        conn = await aiosqlite.connect(":memory:")
+        stack.push_async_callback(conn.close)
+        opened = SqliteRunStore(conn)
+    else:
+        dsn = stack.enter_context(postgres_schema())  # skips without Postgres
+        pool = await open_pool(dsn)
+        stack.push_async_callback(pool.close)
+        opened = PostgresRunStore(pool)
     await opened.create_table()
     return opened
 
