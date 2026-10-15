@@ -1,0 +1,355 @@
+"""Read-only views of the harness's conversations and run history.
+
+Reads harness.sqlite: LangGraph's checkpoints (the conversations), `runs` (one
+row per agent run: agent, tokens, stop reason) and `guard_decisions` (one row
+per screened message). The file is opened read-only, so nothing here writes,
+and a wrong path is an error instead of a new empty database. SQLite only for
+now: a Postgres reader joins when the checkpointer and run store move there.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import sqlite3
+import sys
+from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+from langgraph.checkpoint.sqlite import SqliteSaver
+
+from harness.config.settings import Settings, get_settings
+
+_EXAMPLES = """examples:
+  uv run scripts/db.py threads
+  uv run scripts/db.py thread 10fa
+  uv run scripts/db.py thread 10fa --markdown > thread.md
+  uv run scripts/db.py usage --days 14
+  uv run scripts/db.py guard --blocked
+"""
+
+# The harness's own types inside checkpoints. Allowing them explicitly stops
+# LangGraph's "unregistered type" warning on every read, and keeps reads working
+# once LangGraph refuses unregistered types.
+_HARNESS_TYPES = [("harness.core.types", name) for name in ("Message", "Role", "ToolCall")]
+
+_TITLE_CHARS = 60
+
+
+class ScriptError(Exception):
+    """A failure reported as one line on stderr, with exit code 1."""
+
+
+# --- formatting --------------------------------------------------------------
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _short(value: str | None) -> str:
+    """A UUID (thread, session or run id) as its first 8 characters."""
+    return value[:8] if value else "-"
+
+
+def _cut(text: str, width: int) -> str:
+    """One line of at most `width` characters; newlines become spaces."""
+    line = " ".join(text.split())
+    return line if len(line) <= width else line[: width - 1] + "…"
+
+
+def _fmt_time(iso: str | None) -> str:
+    if not iso:
+        return "-"
+    moment = datetime.fromisoformat(iso).astimezone(timezone.utc)
+    return moment.strftime("%Y-%m-%d %H:%M")
+
+
+def _print_json(data: Any) -> None:
+    print(json.dumps(data, indent=2, ensure_ascii=False, default=str))
+
+
+def _print_table(
+    headers: list[str] | None,
+    rows: list[list[str]],
+    numeric: frozenset[int] = frozenset(),
+    indent: str = "",
+) -> None:
+    """Aligned columns; `numeric` columns align right."""
+    lines = [headers, *rows] if headers else rows
+    if not lines:
+        return
+    widths = [max(len(line[i]) for line in lines) for i in range(len(lines[0]))]
+    for line in lines:
+        cells = [
+            cell.rjust(widths[i]) if i in numeric else cell.ljust(widths[i])
+            for i, cell in enumerate(line)
+        ]
+        print(indent + "  ".join(cells).rstrip())
+
+
+def _positive_int(text: str) -> int:
+    value = int(text)
+    if value < 1:
+        raise argparse.ArgumentTypeError("must be 1 or more")
+    return value
+
+
+# --- messages ----------------------------------------------------------------
+# Read by attribute, so a message in an unexpected shape prints as text instead
+# of crashing the script.
+
+
+def _role(message: Any) -> str:
+    role = getattr(message, "role", None)
+    return str(getattr(role, "value", role) or "unknown")
+
+
+def _content(message: Any) -> str:
+    content = getattr(message, "content", None)
+    return content if isinstance(content, str) else str(message)
+
+
+def _title(messages: list[Any]) -> str:
+    """The first user message: the title the UI shows."""
+    return next((_content(m) for m in messages if _role(m) == "user"), "")
+
+
+# --- reading -----------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Conversation:
+    messages: list[Any]
+    last_activity: str | None  # the latest checkpoint's timestamp
+
+
+@dataclass(frozen=True)
+class RunSummary:
+    runs: int
+    input_tokens: int
+    output_tokens: int
+    agent: str | None  # the latest run's
+    session_id: str | None  # the latest run's
+
+
+def _summarize_runs(rows: list[dict[str, Any]]) -> dict[str, RunSummary]:
+    """Per thread, from run rows in start order."""
+    by_thread: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        if row["thread_id"]:
+            by_thread.setdefault(row["thread_id"], []).append(row)
+    return {
+        thread_id: RunSummary(
+            runs=len(thread_rows),
+            input_tokens=sum(row["input_tokens"] or 0 for row in thread_rows),
+            output_tokens=sum(row["output_tokens"] or 0 for row in thread_rows),
+            agent=thread_rows[-1]["agent"],
+            # .get: databases from before visitor sessions have no session_id.
+            session_id=thread_rows[-1].get("session_id"),
+        )
+        for thread_id, thread_rows in by_thread.items()
+    }
+
+
+def _connect_ro(path: Path) -> sqlite3.Connection:
+    # mode=ro: a missing file is an error rather than a new empty database.
+    uri = path.resolve().as_uri() + "?mode=ro"
+    return sqlite3.connect(uri, uri=True, check_same_thread=False)
+
+
+class Store:
+    """Read-only access to one SQLite file; a Postgres version joins later."""
+
+    def __init__(self, path: Path) -> None:
+        if not path.is_file():
+            raise ScriptError(
+                f"no database at {path} (run from the repo root, or pass --db PATH)"
+            )
+        self._sql = _connect_ro(path)
+        self._sql.row_factory = sqlite3.Row
+        tables = self._sql.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+        self._tables = {row["name"] for row in tables}
+        self._saver_conn: sqlite3.Connection | None = None
+        self._saver: SqliteSaver | None = None
+        # Without its tables the saver's setup would try to create them.
+        if {"checkpoints", "writes"} <= self._tables:
+            self._saver_conn = _connect_ro(path)
+            serde = JsonPlusSerializer(allowed_msgpack_modules=_HARNESS_TYPES)
+            self._saver = SqliteSaver(self._saver_conn, serde=serde)
+
+    def close(self) -> None:
+        self._sql.close()
+        if self._saver_conn is not None:
+            self._saver_conn.close()
+
+    def thread_ids(self) -> list[str]:
+        """Threads with a conversation, newest first: checkpoint ids sort by time."""
+        if "checkpoints" not in self._tables:
+            return []
+        rows = self._sql.execute(
+            "SELECT thread_id FROM checkpoints GROUP BY thread_id "
+            "ORDER BY MAX(checkpoint_id) DESC"
+        )
+        return [row["thread_id"] for row in rows]
+
+    def conversation(self, thread_id: str) -> Conversation | None:
+        if self._saver is None:
+            return None
+        found = self._saver.get_tuple({"configurable": {"thread_id": thread_id}})
+        if found is None:
+            return None
+        values = found.checkpoint.get("channel_values") or {}
+        return Conversation(list(values.get("messages") or []), found.checkpoint.get("ts"))
+
+    def runs(self, thread_id: str | None = None) -> list[dict[str, Any]]:
+        """Run rows in start order: all of them, or one thread's."""
+        if "runs" not in self._tables:
+            return []
+        if thread_id is None:
+            rows = self._sql.execute("SELECT * FROM runs ORDER BY started_at")
+        else:
+            rows = self._sql.execute(
+                "SELECT * FROM runs WHERE thread_id = ? ORDER BY started_at", (thread_id,)
+            )
+        return [dict(row) for row in rows]
+
+
+# --- commands ----------------------------------------------------------------
+
+
+def _thread_info(
+    thread_id: str, conversation: Conversation | None, summary: RunSummary | None
+) -> dict[str, Any]:
+    messages = conversation.messages if conversation else []
+    return {
+        "thread_id": thread_id,
+        "last_activity": conversation.last_activity if conversation else None,
+        "agent": summary.agent if summary else None,
+        "session_id": summary.session_id if summary else None,
+        "turns": summary.runs if summary else None,
+        "input_tokens": summary.input_tokens if summary else None,
+        "output_tokens": summary.output_tokens if summary else None,
+        "messages": len(messages),
+        "title": _title(messages),
+    }
+
+
+def cmd_threads(store: Store, args: argparse.Namespace, settings: Settings) -> None:
+    summaries = _summarize_runs(store.runs())
+    found: list[dict[str, Any]] = []
+    for thread_id in store.thread_ids():
+        summary = summaries.get(thread_id)
+        if args.agent and (summary is None or summary.agent != args.agent):
+            continue
+        found.append(_thread_info(thread_id, store.conversation(thread_id), summary))
+        if len(found) == args.limit:
+            break
+    if args.json:
+        _print_json(found)
+        return
+    if not found:
+        print("No threads.")
+        return
+    rows = []
+    for info in found:
+        has_runs = info["turns"] is not None
+        tokens = info["input_tokens"] + info["output_tokens"] if has_runs else 0
+        rows.append(
+            [
+                _short(info["thread_id"]),
+                _fmt_time(info["last_activity"]),
+                info["agent"] or "-",
+                str(info["turns"]) if has_runs else "-",
+                f"{tokens:,}" if has_runs else "-",
+                _cut(info["title"], _TITLE_CHARS),
+            ]
+        )
+    _print_table(
+        ["thread", "last activity (UTC)", "agent", "turns", "tokens", "first message"],
+        rows,
+        numeric=frozenset({3, 4}),
+    )
+
+
+# --- command line ------------------------------------------------------------
+
+
+def _parser() -> argparse.ArgumentParser:
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument(
+        "--db", help="the SQLite file (default: HARNESS_CHECKPOINTER_URL)"
+    )
+    parser = argparse.ArgumentParser(
+        prog="db.py",
+        description="Conversations, runs and guard decisions in harness.sqlite (read-only).",
+        epilog=_EXAMPLES,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    commands = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
+
+    threads = commands.add_parser(
+        "threads", parents=[common], help="conversations, newest first"
+    )
+    threads.add_argument("--limit", type=_positive_int, default=20)
+    threads.add_argument(
+        "--agent", help="only threads whose latest run used this agent"
+    )
+    threads.add_argument("--json", action="store_true", help="full rows as JSON")
+
+    return parser
+
+
+def _load_settings() -> Settings:
+    try:
+        return get_settings()
+    except ValueError as exc:
+        raise ScriptError(f"settings: {exc}") from exc
+
+
+def _db_path(arg: str | None, settings: Settings) -> Path:
+    if arg:
+        return Path(arg)
+    if settings.checkpointer == "memory":
+        raise ScriptError(
+            "HARNESS_CHECKPOINTER=memory keeps conversations inside the API process; "
+            "there is nothing on disk to read (pass --db PATH)"
+        )
+    if settings.checkpointer != "sqlite":
+        raise ScriptError(
+            f"HARNESS_CHECKPOINTER={settings.checkpointer}: db.py reads SQLite only "
+            "for now (pass --db PATH)"
+        )
+    return Path(settings.checkpointer_url)
+
+
+Command = Callable[[Store, argparse.Namespace, Settings], None]
+
+_COMMANDS: dict[str, Command] = {
+    "threads": cmd_threads,
+}
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _parser().parse_args(argv)
+    try:
+        settings = _load_settings()
+        store = Store(_db_path(args.db, settings))
+        try:
+            _COMMANDS[args.command](store, args, settings)
+        finally:
+            store.close()
+    except ScriptError as exc:
+        print(f"db.py: {exc}", file=sys.stderr)
+        return 1
+    except sqlite3.Error as exc:
+        print(f"db.py: can't read the database: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
