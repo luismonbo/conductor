@@ -3,7 +3,7 @@
 # Bring up infra (postgres, litellm) and print next steps.
 # Langfuse runs against Langfuse Cloud, not local infra — see .env.example.
 up:
-	uv run python scripts/validate_litellm_config.py litellm_config.yaml
+	uv run python scripts/infra/validate_litellm_config.py litellm_config.yaml
 	docker compose up -d postgres litellm
 	@echo "infra up — API: make api   frontend: make web   litellm ui: http://localhost:4000/ui"
 

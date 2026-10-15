@@ -8,8 +8,8 @@ into the dataset before labelling against them, so the next eval run's
 fingerprint check actually covers what's new.
 
 Usage:
-    uv run python scripts/refresh_corpus_fingerprint.py
-    uv run python scripts/refresh_corpus_fingerprint.py --dataset papers_v2.json --collection papers
+    uv run scripts/eval/refresh_corpus_fingerprint.py
+    uv run scripts/eval/refresh_corpus_fingerprint.py --dataset papers_v2.json --collection papers
 """
 
 from __future__ import annotations
@@ -21,15 +21,10 @@ import sys
 from datetime import date
 from pathlib import Path
 
-_root = Path(__file__).parent.parent
-sys.path.insert(0, str(_root / "src"))
-if str(_root) not in sys.path:
-    sys.path.append(str(_root))
+from harness.config.settings import get_settings
+from harness.orchestration.build import build_vector_store
 
-from harness.config.settings import get_settings  # noqa: E402
-from harness.orchestration.build import build_vector_store  # noqa: E402
-
-_DATASETS_DIR = _root / "evaluation" / "rag" / "datasets"
+_DATASETS_DIR = Path(__file__).resolve().parents[2] / "evaluation" / "rag" / "datasets"
 
 
 def _parse_args() -> argparse.Namespace:
@@ -104,7 +99,7 @@ def main() -> int:
     if added:
         print(
             f"Note: {len(added)} new document(s) have no labelled cases yet — grade "
-            "some with scripts/label_assist.py before trusting scores that touch them."
+            "some with scripts/eval/label_assist.py before trusting scores that touch them."
         )
     if removed or changed:
         print(
