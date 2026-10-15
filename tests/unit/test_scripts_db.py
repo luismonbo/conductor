@@ -252,11 +252,17 @@ def test_the_db_flag_overrides_the_settings(database, tmp_path, monkeypatch, cap
 
 
 @pytest.mark.parametrize(
-    ("checkpointer", "message"),
-    [("memory", "nothing on disk"), ("postgres", "SQLite only")],
+    ("overrides", "message"),
+    [
+        ({"checkpointer": "memory"}, "nothing on disk"),
+        (
+            {"checkpointer": "postgres", "checkpointer_url": "postgresql://u:p@localhost/db"},
+            "SQLite only",
+        ),
+    ],
 )
-def test_checkpointers_without_a_file(checkpointer, message, monkeypatch, capsys):
-    _use_settings(monkeypatch, checkpointer=checkpointer)
+def test_checkpointers_without_a_file(overrides, message, monkeypatch, capsys):
+    _use_settings(monkeypatch, **overrides)
     code, _, err = run(capsys, "threads")
     assert code == 1
     assert message in err

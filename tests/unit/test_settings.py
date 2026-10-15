@@ -1,7 +1,10 @@
 """Pin the OpenAI-compatible backend settings and their defaults."""
 from __future__ import annotations
 
+import re
+
 import pytest
+from pydantic import ValidationError
 
 from harness.config.settings import Settings, get_settings
 
@@ -156,3 +159,24 @@ def test_tool_details_can_be_turned_on(monkeypatch):
     monkeypatch.setenv("HARNESS_API_KEY", "test-key")
 
     assert Settings(_env_file=None).show_tool_details is True
+
+
+_POSTGRES_URL_ERROR = (
+    "HARNESS_CHECKPOINTER=postgres needs HARNESS_CHECKPOINTER_URL set to "
+    "a postgresql:// connection string"
+)
+
+
+@pytest.mark.parametrize("url", ["", "./harness.sqlite", "postgresql+psycopg://u:p@h/db"])
+def test_postgres_needs_a_postgresql_url(url):
+    # Without it, a missing secret leaves the SQLite default for psycopg to choke on.
+    with pytest.raises(ValidationError, match=re.escape(_POSTGRES_URL_ERROR)):
+        Settings(_env_file=None, api_key="test-key", checkpointer="postgres", checkpointer_url=url)
+
+
+@pytest.mark.parametrize("url", ["postgresql://u:p@h/db", "postgres://u:p@h/db"])
+def test_postgres_takes_either_url_scheme(url):
+    settings = Settings(
+        _env_file=None, api_key="test-key", checkpointer="postgres", checkpointer_url=url
+    )
+    assert settings.checkpointer_url == url

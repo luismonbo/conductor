@@ -24,13 +24,6 @@ async def test_sqlite_checkpointer():
 
 
 @pytest.mark.asyncio
-async def test_postgres_raises_not_implemented():
-    s = Settings(checkpointer="postgres", api_key="test-key")
-    with pytest.raises(NotImplementedError):
-        await build_checkpointer(s)
-
-
-@pytest.mark.asyncio
 async def test_unknown_raises_value_error():
     s = Settings(checkpointer="redis", api_key="test-key")
     with pytest.raises(ValueError):
