@@ -5,7 +5,7 @@ grade it against datasets/RUBRIC.md. The human confirms or overrides every
 grade; nothing is written without confirmation.
 
 Usage:
-    uv run python scripts/label_assist.py \
+    uv run scripts/eval/label_assist.py \
         --query "How many layers are in the encoder stack?" \
         --case-id attn_encoder_layers \
         --query-type factual --difficulty easy
@@ -23,16 +23,11 @@ import sys
 from datetime import date
 from pathlib import Path
 
-_root = Path(__file__).parent.parent
-sys.path.insert(0, str(_root / "src"))
-if str(_root) not in sys.path:
-    sys.path.append(str(_root))
+from harness.config.settings import get_settings
+from harness.core.rag.document import ScoredChunk
+from harness.orchestration.build import build_retriever, build_vector_store
 
-from harness.config.settings import get_settings  # noqa: E402
-from harness.core.rag.document import ScoredChunk  # noqa: E402
-from harness.orchestration.build import build_retriever, build_vector_store  # noqa: E402
-
-_DATASETS_DIR = _root / "evaluation" / "rag" / "datasets"
+_DATASETS_DIR = Path(__file__).resolve().parents[2] / "evaluation" / "rag" / "datasets"
 _VALID_GRADES = {"0", "1", "2", "3"}
 
 

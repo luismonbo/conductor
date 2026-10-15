@@ -44,7 +44,7 @@ services:
     ports: ["5432:5432"]
     volumes:
       - "postgres_data:/var/lib/postgresql/data"
-      - "./scripts/create-databases.sql:/docker-entrypoint-initdb.d/create-databases.sql"
+      - "./scripts/infra/create-databases.sql:/docker-entrypoint-initdb.d/create-databases.sql"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U harness"]
       interval: 3s
