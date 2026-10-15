@@ -9,6 +9,7 @@ Nothing here creates a table or a collection.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import logging
 import re
@@ -29,7 +30,8 @@ from pymilvus.exceptions import ConnectionConfigException
 from harness.adapters.vectorstore.milvus_store import _chunk_from_entity
 from harness.adapters.vectorstore.pgvector_store import _chunk_from_row
 from harness.config.settings import Settings, get_settings
-from harness.core.rag.document import Chunk
+from harness.core.rag.document import Chunk, ScoredChunk
+from harness.orchestration.build import build_retriever, build_vector_store
 
 _EXAMPLES = """examples:
   uv run scripts/rag.py docs
@@ -48,6 +50,7 @@ _STORES = ("milvus", "pgvector")
 _NAME = re.compile(r"^[A-Za-z0-9_.-]+$")  # also keeps quotes out of Milvus filters
 _LOCAL_HOSTS = {"", "localhost", "127.0.0.1", "::1"}
 _CELL_CHARS = 50
+_SNIPPET_CHARS = 200
 
 
 class ScriptError(Exception):
@@ -95,6 +98,13 @@ def _collection_name(text: str) -> str:
     if not _NAME.match(text):
         raise argparse.ArgumentTypeError("letters, digits, '.', '_' and '-' only")
     return text
+
+
+def _positive_int(text: str) -> int:
+    value = int(text)
+    if value < 1:
+        raise argparse.ArgumentTypeError("must be 1 or more")
+    return value
 
 
 def _resolve(prefix: str, candidates: list[str], what: str) -> str:
@@ -477,6 +487,98 @@ def cmd_show(args: argparse.Namespace, settings: Settings, store: str) -> None:
     _show_chunk(chunk, as_json=args.json)
 
 
+def _check_manifest(collection: str, settings: Settings) -> None:
+    """Refuse an index built with another embedding model: its scores mean nothing."""
+    manifest = _manifest(collection)
+    if manifest is None:
+        print(
+            f"rag.py: warning: no ingest manifest for {collection!r} in "
+            f"{_INDEX_CONFIG_DIR}; can't confirm the embedding model",
+            file=sys.stderr,
+        )
+        return
+    built = (manifest.get("embedding_model"), manifest.get("embedding_dimension"))
+    current = (settings.embedding_model, settings.embedding_dimension)
+    if built != current:
+        raise ScriptError(
+            f"{collection!r} was built with {built[0]} ({built[1]}), but the settings say "
+            f"{current[0]} ({current[1]}), so the scores would mean nothing. Fix "
+            "HARNESS_EMBEDDING_MODEL / HARNESS_EMBEDDING_DIMENSION, or re-ingest."
+        )
+
+
+async def _retrieve(
+    settings: Settings, store: str, query: str, k: int, collection: str
+) -> list[ScoredChunk]:
+    retriever = build_retriever(settings, build_vector_store(settings, store))
+    return await retriever.retrieve(query, k, collection)
+
+
+def _print_hits(
+    args: argparse.Namespace,
+    hits: list[ScoredChunk],
+    *,
+    collection: str,
+    store: str,
+    k: int,
+    quota: int,
+) -> None:
+    if args.json:
+        _print_json(
+            {
+                "query": args.query,
+                "collection": collection,
+                "store": store,
+                "k": k,
+                "per_document_k": quota,
+                "results": [
+                    {"rank": rank, "score": hit.score, "chunk": asdict(hit.chunk)}
+                    for rank, hit in enumerate(hits, start=1)
+                ],
+            }
+        )
+        return
+    ranking = f"per-document quota {quota}" if quota else "raw ranking"
+    print(f'Top {len(hits)} for "{args.query}" in {collection} ({store}, {ranking}):')
+    for rank, hit in enumerate(hits, start=1):
+        chunk = hit.chunk
+        heading = " › ".join([_cited_name(chunk), *chunk.section_path])
+        print()
+        print(f"{rank:>2}  {hit.score:.3f}  {heading}  {_pages(chunk)}  {chunk.chunk_id}")
+        text = chunk.text if args.full else _cut(chunk.text, _SNIPPET_CHARS)
+        print(_indented(text))
+
+
+def cmd_search(args: argparse.Namespace, settings: Settings, store: str) -> None:
+    if not args.query.strip():
+        raise ScriptError("the query is empty")
+    if settings.embedding_backend == "fake":
+        raise ScriptError(
+            "HARNESS_EMBEDDING_BACKEND=fake makes random vectors; search needs the "
+            "embedding model the index was built with"
+        )
+    collection = args.collection or settings.rag_collection
+    _check_manifest(collection, settings)
+    reader = _open_reader(store, settings)
+    try:
+        present = reader.collections()
+    finally:
+        reader.close()
+    if collection not in present:
+        raise ScriptError(
+            f"no chunks in collection {collection!r} in {store}; "
+            f"it has: {', '.join(present) or 'nothing'}"
+        )
+    k = args.k or settings.rag_k
+    quota = 0 if args.raw else settings.rag_per_document_k
+    search_settings = settings.model_copy(update={"rag_per_document_k": quota})
+    try:
+        hits = asyncio.run(_retrieve(search_settings, store, args.query, k, collection))
+    except Exception as exc:  # the embedding service, or the store mid-query
+        raise ScriptError(f"search failed: {_first_line(exc)}") from exc
+    _print_hits(args, hits, collection=collection, store=store, k=k, quota=quota)
+
+
 # --- command line ------------------------------------------------------------
 
 
@@ -514,6 +616,20 @@ def _parser() -> argparse.ArgumentParser:
     show.add_argument("--full", action="store_true", help="every chunk's whole text")
     show.add_argument("--json", action="store_true", help="everything as JSON")
 
+    search = commands.add_parser(
+        "search", parents=[common], help="what the agent's search_documents gets"
+    )
+    search.add_argument("query", help="the query; take it from the tool call, not the chat")
+    search.add_argument(
+        "--collection", type=_collection_name, help="default: HARNESS_RAG_COLLECTION"
+    )
+    search.add_argument("--k", type=_positive_int, help="default: HARNESS_RAG_K")
+    search.add_argument(
+        "--raw", action="store_true", help="no per-document quota: the plain ranking"
+    )
+    search.add_argument("--full", action="store_true", help="each chunk's whole text")
+    search.add_argument("--json", action="store_true", help="everything as JSON")
+
     return parser
 
 
@@ -542,6 +658,7 @@ Command = Callable[[argparse.Namespace, Settings, str], None]
 _COMMANDS: dict[str, Command] = {
     "docs": cmd_docs,
     "show": cmd_show,
+    "search": cmd_search,
 }
 
 

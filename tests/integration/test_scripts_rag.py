@@ -298,3 +298,66 @@ def test_show_an_unknown_chunk(index, capsys):
     code, _, err = run(capsys, "show", "papers/aaaa:9")
     assert code == 1
     assert f"no chunk '{TRANSFORMERS}:9'" in err
+
+
+# --- search ------------------------------------------------------------------
+
+
+def test_search_returns_what_the_agent_gets(index, capsys):
+    code, out, _ = run(capsys, "search", "encoder", "--json")
+    assert code == 0
+    found = json.loads(out)
+    assert found["per_document_k"] == 1
+    assert [r["chunk"]["chunk_id"] for r in found["results"]] == [
+        f"{TRANSFORMERS}:1",
+        f"{RECURRENT}:0",
+    ]
+
+
+def test_search_raw_shows_the_plain_ranking(index, capsys):
+    _, out, _ = run(capsys, "search", "encoder", "--raw", "--json")
+    found = json.loads(out)
+    assert found["per_document_k"] == 0
+    assert [r["chunk"]["chunk_id"] for r in found["results"]] == [
+        f"{TRANSFORMERS}:1",
+        f"{TRANSFORMERS}:0",
+    ]
+
+
+def test_search_text(index, capsys):
+    _, out, _ = run(capsys, "search", "encoder")
+    assert f"in papers ({index.store}, per-document quota 1)" in out
+    assert "0.949  Transformers › Model › Encoder  p.3–4" in out
+
+
+def test_search_refuses_the_fake_embedder(index, monkeypatch, capsys):
+    _use(monkeypatch, index.settings.model_copy(update={"embedding_backend": "fake"}))
+    code, _, err = run(capsys, "search", "encoder")
+    assert code == 1
+    assert "fake" in err
+
+
+def test_search_refuses_a_mismatched_index(index, capsys):
+    _write_manifest(index.manifests, "papers", "keyword-test", 8)
+    code, _, err = run(capsys, "search", "encoder")
+    assert code == 1
+    assert "keyword-test (8)" in err and f"keyword-test ({DIM})" in err
+
+
+def test_search_warns_without_a_manifest(index, capsys):
+    (index.manifests / "papers.yaml").unlink()
+    code, _, err = run(capsys, "search", "encoder")
+    assert code == 0
+    assert "no ingest manifest" in err
+
+
+def test_search_names_the_collections_the_store_has(index, capsys):
+    code, _, err = run(capsys, "search", "encoder", "--collection", "nope")
+    assert code == 1
+    assert "it has: notes, papers" in err
+
+
+def test_search_refuses_an_empty_query(index, capsys):
+    code, _, err = run(capsys, "search", "   ")
+    assert code == 1
+    assert "the query is empty" in err
