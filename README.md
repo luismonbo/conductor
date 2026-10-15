@@ -77,6 +77,9 @@ frontend/src/
 └── pages/ChatPage
 ```
 
+Local tools to inspect conversations, runs and the vector index live in `scripts/` (see
+[scripts/README.md](scripts/README.md)); they never ship in an image.
+
 ---
 
 ## Quick start
