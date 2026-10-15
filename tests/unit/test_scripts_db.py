@@ -361,3 +361,35 @@ def test_a_database_from_before_visitor_sessions(tmp_path, monkeypatch, capsys):
 def test_a_message_in_an_unexpected_shape_prints_as_text():
     lines = db._transcript_lines([{"role": "x"}, "plain text"], full=False, tools=True)
     assert lines == ["Unknown: {'role': 'x'}", "Unknown: plain text"]
+
+
+# --- markdown export ---------------------------------------------------------
+
+
+def test_markdown_export(settings, capsys):
+    code, out, _ = run(capsys, "thread", "aaaa1", "--markdown")
+    assert code == 0
+    assert out.startswith("# What is 2+2?\n")
+    assert out.count("**You:** What is 2+2?") == 2
+    assert "**Assistant:** Still 4." in out
+    assert '_Tool call: `calculator(expression="2+2")`_' in out
+    assert "<summary>Tool result (1 chars)</summary>" in out
+    assert "## Blocked messages" in out and "one more question" in out
+
+
+def test_markdown_without_tools(settings, capsys):
+    _, out, _ = run(capsys, "thread", "aaaa1", "--markdown", "--no-tools")
+    assert "Tool call" not in out and "<details>" not in out
+    assert "**Assistant:** It is 4." in out
+
+
+def test_markdown_and_json_are_exclusive(settings, capsys):
+    with pytest.raises(SystemExit) as exit_info:
+        db.main(["thread", "aaaa1", "--markdown", "--json"])
+    assert exit_info.value.code == 2
+    assert "not allowed with argument" in capsys.readouterr().err
+
+
+def test_inline_code_survives_backticks():
+    assert db._code("plain") == "`plain`"
+    assert db._code("has ` tick") == "`` has ` tick ``"

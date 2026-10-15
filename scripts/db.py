@@ -421,6 +421,62 @@ def _guard_json(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _code(text: str) -> str:
+    """Inline Markdown code that survives backticks inside it."""
+    return f"`` {text} ``" if "`" in text else f"`{text}`"
+
+
+def _markdown(
+    info: dict[str, Any],
+    messages: list[Any],
+    guard: list[dict[str, Any]],
+    *,
+    tools: bool,
+) -> str:
+    """The conversation as Markdown, to export it."""
+    tokens = (info["input_tokens"] or 0) + (info["output_tokens"] or 0)
+    meta = " · ".join(
+        [
+            f"Thread {_code(info['thread_id'])}",
+            info["agent"] or "agent unknown",
+            f"{info['turns'] or 0} turns",
+            f"{tokens:,} tokens",
+            f"last activity {_fmt_time(info['last_activity'])} UTC",
+        ]
+    )
+    title = _cut(info["title"], _TITLE_CHARS) or info["thread_id"]
+    lines = [f"# {title}", "", meta, ""]
+    for message in messages:
+        role = _role(message)
+        content = _content(message)
+        if role == "tool":
+            if tools:
+                lines += [
+                    "<details>",
+                    f"<summary>Tool result ({len(content):,} chars)</summary>",
+                    "",
+                    content,
+                    "",
+                    "</details>",
+                    "",
+                ]
+            continue
+        if content:
+            lines += [f"**{_LABELS.get(role, role.capitalize())}:** {content}", ""]
+        if tools:
+            for call in _tool_calls(message):
+                lines += [f"_Tool call: {_code(_call_text(call))}_", ""]
+    blocked = [row for row in guard if not row["allowed"]]
+    if blocked:
+        lines += ["## Blocked messages", ""]
+        for row in blocked:
+            text = " ".join(row["message_text"].split())
+            when = _fmt_time(row["created_at"])
+            lines.append(f"- {when} UTC, {row['reason'] or row['stage']}: {text}")
+        lines.append("")
+    return "\n".join(lines)
+
+
 def _print_thread(
     info: dict[str, Any],
     messages: list[Any],
@@ -500,6 +556,9 @@ def cmd_thread(store: Store, args: argparse.Namespace, settings: Settings) -> No
             }
         )
         return
+    if args.markdown:
+        print(_markdown(info, messages, guard, tools=not args.no_tools), end="")
+        return
     _print_thread(info, messages, runs, guard, full=args.full, tools=not args.no_tools)
 
 
@@ -540,7 +599,11 @@ def _parser() -> argparse.ArgumentParser:
     thread.add_argument(
         "--no-tools", action="store_true", help="hide tool calls and results"
     )
-    thread.add_argument("--json", action="store_true", help="everything as JSON")
+    output = thread.add_mutually_exclusive_group()
+    output.add_argument(
+        "--markdown", action="store_true", help="the conversation as Markdown, to export it"
+    )
+    output.add_argument("--json", action="store_true", help="everything as JSON")
 
     return parser
 
