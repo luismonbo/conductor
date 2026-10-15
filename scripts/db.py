@@ -23,6 +23,17 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 
 from harness.config.settings import Settings, get_settings
 
+from _common import (
+    ScriptError,
+    cut,
+    load_settings,
+    positive_int,
+    print_json,
+    print_table,
+    resolve,
+    visible,
+)
+
 _EXAMPLES = """examples:
   uv run scripts/db.py threads
   uv run scripts/db.py thread 10fa
@@ -42,10 +53,6 @@ _RESULT_CHARS = 120
 _LABELS = {"user": "You", "assistant": "Assistant", "system": "System"}
 
 
-class ScriptError(Exception):
-    """A failure reported as one line on stderr, with exit code 1."""
-
-
 # --- formatting --------------------------------------------------------------
 
 
@@ -55,13 +62,7 @@ def _utcnow() -> datetime:
 
 def _short(value: str | None) -> str:
     """A UUID (thread, session or run id) as its first 8 characters."""
-    return value[:8] if value else "-"
-
-
-def _cut(text: str, width: int) -> str:
-    """One line of at most `width` characters; newlines become spaces."""
-    line = " ".join(text.split())
-    return line if len(line) <= width else line[: width - 1] + "…"
+    return visible(value[:8]) if value else "-"
 
 
 def _fmt_time(iso: str | None) -> str:
@@ -71,51 +72,8 @@ def _fmt_time(iso: str | None) -> str:
     return moment.strftime("%Y-%m-%d %H:%M")
 
 
-def _print_json(data: Any) -> None:
-    print(json.dumps(data, indent=2, ensure_ascii=False, default=str))
-
-
-def _print_table(
-    headers: list[str] | None,
-    rows: list[list[str]],
-    numeric: frozenset[int] = frozenset(),
-    indent: str = "",
-) -> None:
-    """Aligned columns; `numeric` columns align right."""
-    lines = [headers, *rows] if headers else rows
-    if not lines:
-        return
-    widths = [max(len(line[i]) for line in lines) for i in range(len(lines[0]))]
-    for line in lines:
-        cells = [
-            cell.rjust(widths[i]) if i in numeric else cell.ljust(widths[i])
-            for i, cell in enumerate(line)
-        ]
-        print(indent + "  ".join(cells).rstrip())
-
-
-def _positive_int(text: str) -> int:
-    value = int(text)
-    if value < 1:
-        raise argparse.ArgumentTypeError("must be 1 or more")
-    return value
-
-
 def _count(value: int | None) -> str:
     return "-" if value is None else f"{value:,}"
-
-
-def _resolve(prefix: str, candidates: list[str], what: str) -> str:
-    """The one candidate `prefix` names: an exact id, or a unique prefix of one."""
-    if prefix in candidates:
-        return prefix
-    matches = sorted({c for c in candidates if c.startswith(prefix)})
-    if not matches:
-        raise ScriptError(f"no {what} matching {prefix!r}")
-    if len(matches) > 1:
-        listed = "\n  ".join(matches[:10])
-        raise ScriptError(f"{prefix!r} matches {len(matches)} {what}s:\n  {listed}")
-    return matches[0]
 
 
 # --- messages ----------------------------------------------------------------
@@ -173,22 +131,23 @@ def _call_text(call: Any) -> str:
 
 
 def _call_line(call: Any, full: bool) -> str:
-    text = _call_text(call)
-    return "  → " + (text if full else _cut(text, _CALL_CHARS))
+    text = visible(_call_text(call))
+    return "  → " + (text if full else cut(text, _CALL_CHARS))
 
 
 def _result_lines(content: str, full: bool) -> list[str]:
+    shown = visible(content)
     if full:
-        first, *rest = content.splitlines() or [""]
+        first, *rest = shown.splitlines() or [""]
         return [f"  ← {first}", *(f"    {line}" for line in rest)]
-    line = " ".join(content.split())
+    line = " ".join(shown.split())
     if len(line) <= _RESULT_CHARS:
         return [f"  ← {line}"]
     return [f"  ← {line[:_RESULT_CHARS]} … ({len(content):,} chars)"]
 
 
 def _speaker_lines(label: str, text: str) -> list[str]:
-    first, *rest = text.splitlines() or [""]
+    first, *rest = visible(text).splitlines() or [""]
     return [f"{label}: {first}", *(f"  {line}" for line in rest)]
 
 
@@ -415,7 +374,7 @@ def cmd_threads(store: Store, args: argparse.Namespace, settings: Settings) -> N
         if len(found) == args.limit:
             break
     if args.json:
-        _print_json(found)
+        print_json(found)
         return
     if not found:
         print("No threads.")
@@ -431,10 +390,10 @@ def cmd_threads(store: Store, args: argparse.Namespace, settings: Settings) -> N
                 info["agent"] or "-",
                 str(info["turns"]) if has_runs else "-",
                 f"{tokens:,}" if has_runs else "-",
-                _cut(info["title"], _TITLE_CHARS),
+                cut(info["title"], _TITLE_CHARS),
             ]
         )
-    _print_table(
+    print_table(
         ["thread", "last activity (UTC)", "agent", "turns", "tokens", "first message"],
         rows,
         numeric=frozenset({3, 4}),
@@ -478,14 +437,14 @@ def _markdown(
     tokens = (info["input_tokens"] or 0) + (info["output_tokens"] or 0)
     meta = " · ".join(
         [
-            f"Thread {_code(info['thread_id'])}",
+            f"Thread {_code(visible(info['thread_id']))}",
             info["agent"] or "agent unknown",
             f"{info['turns'] or 0} turns",
             f"{tokens:,} tokens",
             f"last activity {_fmt_time(info['last_activity'])} UTC",
         ]
     )
-    title = _cut(info["title"], _TITLE_CHARS) or info["thread_id"]
+    title = cut(info["title"], _TITLE_CHARS) or info["thread_id"]
     lines = [f"# {title}", "", meta, ""]
     for message in messages:
         role = _role(message)
@@ -496,22 +455,23 @@ def _markdown(
                     "<details>",
                     f"<summary>Tool result ({len(content):,} chars)</summary>",
                     "",
-                    content,
+                    visible(content),
                     "",
                     "</details>",
                     "",
                 ]
             continue
         if content:
-            lines += [f"**{_LABELS.get(role, role.capitalize())}:** {content}", ""]
+            label = _LABELS.get(role, role.capitalize())
+            lines += [f"**{label}:** {visible(content)}", ""]
         if tools:
             for call in _tool_calls(message):
-                lines += [f"_Tool call: {_code(_call_text(call))}_", ""]
+                lines += [f"_Tool call: {_code(visible(_call_text(call)))}_", ""]
     blocked = [row for row in guard if not row["allowed"]]
     if blocked:
         lines += ["## Blocked messages", ""]
         for row in blocked:
-            text = " ".join(row["message_text"].split())
+            text = " ".join(visible(row["message_text"]).split())
             when = _fmt_time(row["created_at"])
             lines.append(f"- {when} UTC, {row['reason'] or row['stage']}: {text}")
         lines.append("")
@@ -528,7 +488,7 @@ def _print_thread(
     tools: bool,
 ) -> None:
     tokens_in, tokens_out = info["input_tokens"] or 0, info["output_tokens"] or 0
-    print(f"Thread {info['thread_id']}")
+    print(f"Thread {visible(info['thread_id'])}")
     print(
         " · ".join(
             [
@@ -547,7 +507,7 @@ def _print_thread(
         print("(no conversation stored)")
     if runs:
         print("\nRuns")
-        _print_table(
+        print_table(
             ["started (UTC)", "stop", "in", "out", "iterations", "duration"],
             [
                 [
@@ -564,7 +524,7 @@ def _print_thread(
         )
     if guard:
         print("\nGuard")
-        _print_table(
+        print_table(
             ["time (UTC)", "verdict", "stage", "reason", "message"],
             [
                 [
@@ -572,7 +532,7 @@ def _print_thread(
                     _verdict(row),
                     row["stage"],
                     row["reason"] or "-",
-                    _cut(row["message_text"], _TITLE_CHARS),
+                    cut(row["message_text"], _TITLE_CHARS),
                 ]
                 for row in guard
             ],
@@ -581,14 +541,14 @@ def _print_thread(
 
 def cmd_thread(store: Store, args: argparse.Namespace, settings: Settings) -> None:
     candidates = store.thread_ids() + store.run_thread_ids()
-    thread_id = _resolve(args.thread_id, candidates, "thread")
+    thread_id = resolve(args.thread_id, candidates, "thread")
     conversation = store.conversation(thread_id)
     runs = store.runs(thread_id)
     info = _thread_info(thread_id, conversation, _summarize_runs(runs).get(thread_id))
     messages = conversation.messages if conversation else []
     guard = list(reversed(store.guard_decisions(thread_id=thread_id)))  # oldest first
     if args.json:
-        _print_json(
+        print_json(
             {
                 **info,
                 "messages": [_message_json(message) for message in messages],
@@ -618,7 +578,7 @@ def cmd_usage(store: Store, args: argparse.Namespace, settings: Settings) -> Non
     budget = settings.daily_token_budget
     total_runs, total_tokens = store.run_totals()
     if args.json:
-        _print_json(
+        print_json(
             {
                 "days": per_day,
                 "today_tokens": today_tokens,
@@ -627,7 +587,7 @@ def cmd_usage(store: Store, args: argparse.Namespace, settings: Settings) -> Non
             }
         )
         return
-    _print_table(
+    print_table(
         ["day (UTC)", "runs", "threads", "tokens", "blocked"],
         [
             [
@@ -653,12 +613,12 @@ def cmd_usage(store: Store, args: argparse.Namespace, settings: Settings) -> Non
 def cmd_guard(store: Store, args: argparse.Namespace, settings: Settings) -> None:
     rows = store.guard_decisions(blocked_only=args.blocked, limit=args.limit)
     if args.json:
-        _print_json([_guard_json(row) for row in rows])
+        print_json([_guard_json(row) for row in rows])
         return
     if not rows:
         print("No guard decisions.")
         return
-    _print_table(
+    print_table(
         ["time (UTC)", "verdict", "stage", "reason", "latency", "thread", "message"],
         [
             [
@@ -668,7 +628,7 @@ def cmd_guard(store: Store, args: argparse.Namespace, settings: Settings) -> Non
                 row["reason"] or "-",
                 "-" if row["latency_ms"] is None else f"{row['latency_ms']} ms",
                 _short(row["thread_id"]),
-                _cut(row["message_text"], _TITLE_CHARS),
+                cut(row["message_text"], _TITLE_CHARS),
             ]
             for row in rows
         ],
@@ -694,7 +654,7 @@ def _parser() -> argparse.ArgumentParser:
     threads = commands.add_parser(
         "threads", parents=[common], help="conversations, newest first"
     )
-    threads.add_argument("--limit", type=_positive_int, default=20)
+    threads.add_argument("--limit", type=positive_int, default=20)
     threads.add_argument(
         "--agent", help="only threads whose latest run used this agent"
     )
@@ -722,27 +682,20 @@ def _parser() -> argparse.ArgumentParser:
         "usage", parents=[common], help="tokens per UTC day against the daily budget"
     )
     usage.add_argument(
-        "--days", type=_positive_int, default=7, help="days back, today included"
+        "--days", type=positive_int, default=7, help="days back, today included"
     )
     usage.add_argument("--json", action="store_true", help="full rows as JSON")
 
     guard = commands.add_parser(
         "guard", parents=[common], help="input-guard decisions, newest first"
     )
-    guard.add_argument("--limit", type=_positive_int, default=20)
+    guard.add_argument("--limit", type=positive_int, default=20)
     guard.add_argument("--blocked", action="store_true", help="blocked messages only")
     guard.add_argument(
         "--json", action="store_true", help="full rows, with the scores, as JSON"
     )
 
     return parser
-
-
-def _load_settings() -> Settings:
-    try:
-        return get_settings()
-    except ValueError as exc:
-        raise ScriptError(f"settings: {exc}") from exc
 
 
 def _db_path(arg: str | None, settings: Settings) -> Path:
@@ -774,7 +727,7 @@ _COMMANDS: dict[str, Command] = {
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
-        settings = _load_settings()
+        settings = load_settings(get_settings)
         store = Store(_db_path(args.db, settings))
         try:
             _COMMANDS[args.command](store, args, settings)

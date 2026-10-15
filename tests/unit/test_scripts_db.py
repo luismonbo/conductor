@@ -9,6 +9,8 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import os
+import re
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -461,3 +463,79 @@ def test_every_command_leaves_the_database_untouched(settings, database, capsys)
         assert db.main(argv) == 0
     capsys.readouterr()
     assert hashlib.sha256(database.read_bytes()).hexdigest() == before
+
+
+# --- untrusted text ------------------------------------------------------------
+
+# Visitor messages and the sid cookie are untrusted: raw ESC, BEL, CR, C1 and
+# bidi-override characters would rewrite the terminal that prints them.
+HOSTILE = "hi \x1b]0;pwned\x07\x1b[2K\x9b31m\u202eevil\u202c\rthere"
+HOSTILE_SID = "sid\x1b[2K"
+_RAW_CONTROLS = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]")
+
+
+async def _build_hostile(path: Path) -> None:
+    async with aiosqlite.connect(path) as conn:
+        await _converse(
+            conn, CHAT, [HOSTILE], [_calculator_call("c1"), LLMResponse(text=HOSTILE)]
+        )
+        store = RunStore(conn)
+        await store.create_table()
+        await store.start_run("run-h", CHAT, "default", "fake", HOSTILE_SID)
+        await store.record_guard_decision(
+            GuardDecision(allowed=False, stage="classifier", reason="off_topic"),
+            session_id=HOSTILE_SID, thread_id=CHAT, run_id=None, message=HOSTILE,
+        )
+
+
+def test_visitor_control_characters_never_reach_the_terminal(tmp_path, monkeypatch, capsys):
+    path = tmp_path / "hostile.sqlite"
+    asyncio.run(_build_hostile(path))
+    _use_settings(monkeypatch, checkpointer_url=str(path))
+    for argv in (
+        ["threads"],
+        ["threads", "--json"],
+        ["thread", CHAT],
+        ["thread", CHAT, "--full"],
+        ["thread", CHAT, "--markdown"],
+        ["thread", CHAT, "--json"],
+        ["guard"],
+        ["guard", "--json"],
+    ):
+        code, out, err = run(capsys, *argv)
+        assert code == 0, (argv, err)
+        assert not _RAW_CONTROLS.search(out), argv
+    _, out, _ = run(capsys, "guard")
+    assert "\\x1b]0;pwned\\x07" in out  # shown as text, not executed
+    _, out, _ = run(capsys, "guard", "--json")
+    assert json.loads(out)[0]["message_text"] == HOSTILE  # JSON keeps the exact text
+
+
+def test_tool_arguments_and_results_are_shown_not_executed():
+    call = ToolCall(id="c", name="search_documents", arguments={"query": HOSTILE})
+    lines = [
+        db._call_line(call, full=False),
+        db._call_line(call, full=True),
+        *db._result_lines(HOSTILE, full=False),
+        *db._result_lines(HOSTILE, full=True),
+    ]
+    assert not any(_RAW_CONTROLS.search(line) for line in lines)
+
+
+def _broken_settings(monkeypatch: pytest.MonkeyPatch) -> Settings:
+    """Invalid settings whose input holds a secret; the real .env is kept out."""
+    for key in [key for key in os.environ if key.startswith("HARNESS_")]:
+        monkeypatch.delenv(key)
+    return Settings(
+        _env_file=None, azure_api_key="SECRETkey123", auth_enabled=True, api_key=""
+    )
+
+
+def test_a_settings_error_is_one_line_without_the_input(monkeypatch, capsys):
+    monkeypatch.setattr(db, "get_settings", lambda: _broken_settings(monkeypatch))
+    code, _, err = run(capsys, "threads")
+    assert code == 1
+    assert err.startswith("db.py: settings: ") and err.count("\n") == 1
+    assert "HARNESS_API_KEY" in err
+    assert "SECRET" not in err
+

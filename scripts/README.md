@@ -5,7 +5,7 @@ Local tools for looking inside the harness, run by you or by Claude. None ships 
 
 Run them from the repo root: settings, `.env` and the default paths (`./harness.sqlite`,
 `./data/...`) are relative to it. Every read command takes `--json`, and `--help` on any command
-lists its options.
+lists its options. `_common.py` holds what both scripts share; it isn't run on its own.
 
 ## `db.py`: conversations and run history
 

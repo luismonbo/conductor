@@ -419,7 +419,8 @@ def spy(name, *args, **kwargs):
         seen["grpc"] = os.environ.get("GRPC_VERBOSITY")
     return real_import(name, *args, **kwargs)
 builtins.__import__ = spy
-import scripts.rag
+sys.path.insert(0, "scripts")  # as `uv run scripts/rag.py` sees it
+import rag
 print(seen.get("grpc", "grpc never imported"))
 """
 
@@ -440,3 +441,37 @@ def test_grpc_info_logs_are_off_before_grpc_loads():
         text=True,
     )
     assert asked.stdout.strip() == "DEBUG", asked.stderr[-2000:]
+
+
+@pytest.mark.parametrize(
+    "dsn",
+    [
+        "postgresql://harness:s3cr@tZq9@127.0.0.1:1/harness",  # unencoded @
+        "postgresql://harness:s3cr/tZq9@127.0.0.1:1/harness",  # unencoded /
+        "postgresql://harness:s3cr%zztZq9@127.0.0.1:1/harness",  # bad percent-encoding
+        "host=127.0.0.1 port=1 user=harness password=s3cr@tZq9 dbname=harness",
+    ],
+)
+def test_a_malformed_dsn_never_prints_the_password(dsn, monkeypatch, capsys):
+    _use(monkeypatch, _settings(rag_vector_store_backend="milvus"))
+    code, out, err = run(capsys, "docs", "--store", "pgvector", "--dsn", dsn)
+    assert code == 1
+    assert "s3cr" not in out + err and "tZq9" not in out + err
+    assert err.startswith("rag.py: ") and err.count("\n") == 1  # one line, no traceback
+
+
+def test_a_settings_error_is_one_line_without_the_input(monkeypatch, capsys):
+    def broken() -> Settings:
+        for key in [key for key in os.environ if key.startswith("HARNESS_")]:
+            monkeypatch.delenv(key)
+        return Settings(
+            _env_file=None, azure_api_key="SECRETkey123", auth_enabled=True, api_key=""
+        )
+
+    monkeypatch.setattr(rag, "get_settings", broken)
+    code, _, err = run(capsys, "docs")
+    assert code == 1
+    assert err.startswith("rag.py: settings: ") and err.count("\n") == 1
+    assert "HARNESS_API_KEY" in err
+    assert "SECRET" not in err
+

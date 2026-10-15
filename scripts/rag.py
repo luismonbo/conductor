@@ -40,6 +40,16 @@ from harness.config.settings import Settings, get_settings
 from harness.core.rag.document import Chunk, ScoredChunk
 from harness.orchestration.build import build_retriever, build_vector_store
 
+from _common import (
+    ScriptError,
+    cut,
+    load_settings,
+    positive_int,
+    print_json,
+    print_table,
+    resolve,
+)
+
 _EXAMPLES = """examples:
   uv run scripts/rag.py docs
   uv run scripts/rag.py show papers/5045
@@ -56,44 +66,17 @@ _INDEX_CONFIG_DIR = Path("data/index_config")
 _STORES = ("milvus", "pgvector")
 _NAME = re.compile(r"^[A-Za-z0-9_.-]+$")  # also keeps quotes out of Milvus filters
 _LOCAL_HOSTS = {"", "localhost", "127.0.0.1", "::1"}
+# Where a connection string keeps its password: URL userinfo (up to the last "@",
+# so an unencoded "@" or "/" stays inside it) or a password= keyword or parameter.
+_URL_USERINFO = re.compile(r"^(?P<scheme>[A-Za-z][A-Za-z0-9+.-]*://)(?P<userinfo>[^?#]*)@")
+_PASSWORD_PARAM = re.compile(
+    r"(?P<key>password\s*=\s*)(?P<value>'(?:[^'\\]|\\.)*'|[^\s&]+)", re.IGNORECASE
+)
 _CELL_CHARS = 50
 _SNIPPET_CHARS = 200
 
 
-class ScriptError(Exception):
-    """A failure reported as one line on stderr, with exit code 1."""
-
-
 # --- formatting --------------------------------------------------------------
-
-
-def _cut(text: str, width: int) -> str:
-    """One line of at most `width` characters; newlines become spaces."""
-    line = " ".join(text.split())
-    return line if len(line) <= width else line[: width - 1] + "…"
-
-
-def _print_json(data: Any) -> None:
-    print(json.dumps(data, indent=2, ensure_ascii=False, default=str))
-
-
-def _print_table(
-    headers: list[str] | None,
-    rows: list[list[str]],
-    numeric: frozenset[int] = frozenset(),
-    indent: str = "",
-) -> None:
-    """Aligned columns; `numeric` columns align right."""
-    lines = [headers, *rows] if headers else rows
-    if not lines:
-        return
-    widths = [max(len(line[i]) for line in lines) for i in range(len(lines[0]))]
-    for line in lines:
-        cells = [
-            cell.rjust(widths[i]) if i in numeric else cell.ljust(widths[i])
-            for i, cell in enumerate(line)
-        ]
-        print(indent + "  ".join(cells).rstrip())
 
 
 def _first_line(exc: BaseException) -> str:
@@ -105,26 +88,6 @@ def _collection_name(text: str) -> str:
     if not _NAME.match(text):
         raise argparse.ArgumentTypeError("letters, digits, '.', '_' and '-' only")
     return text
-
-
-def _positive_int(text: str) -> int:
-    value = int(text)
-    if value < 1:
-        raise argparse.ArgumentTypeError("must be 1 or more")
-    return value
-
-
-def _resolve(prefix: str, candidates: list[str], what: str) -> str:
-    """The one candidate `prefix` names: an exact id, or a unique prefix of one."""
-    if prefix in candidates:
-        return prefix
-    matches = sorted({c for c in candidates if c.startswith(prefix)})
-    if not matches:
-        raise ScriptError(f"no {what} matching {prefix!r}")
-    if len(matches) > 1:
-        listed = "\n  ".join(matches[:10])
-        raise ScriptError(f"{prefix!r} matches {len(matches)} {what}s:\n  {listed}")
-    return matches[0]
 
 
 def _cited_name(chunk: Chunk) -> str:
@@ -258,10 +221,42 @@ class MilvusReader:
         self._client.close()
 
 
+def _url_password(dsn: str) -> str | None:
+    match = _URL_USERINFO.match(dsn)
+    if match is None or ":" not in match.group("userinfo"):
+        return None
+    return match.group("userinfo").split(":", 1)[1]
+
+
+def _without_password(dsn: str) -> str:
+    """The DSN with its password replaced by ***, however malformed it is."""
+    match = _URL_USERINFO.match(dsn)
+    if match is not None and _url_password(dsn) is not None:
+        user = match.group("userinfo").split(":", 1)[0]
+        dsn = f"{match.group('scheme')}{user}:***@{dsn[match.end():]}"
+    return _PASSWORD_PARAM.sub(lambda m: m.group("key") + "***", dsn)
+
+
+def _scrub(text: str, dsn: str) -> str:
+    """`text` without the DSN's password or any piece of it libpq split off."""
+    secrets = [m.group("value").strip("'") for m in _PASSWORD_PARAM.finditer(dsn)]
+    if (password := _url_password(dsn)) is not None:
+        secrets.append(password)
+    pieces = {
+        piece
+        for secret in secrets
+        for piece in (secret, *re.split(r"[@/:?#%&]", secret))
+        if len(piece) >= 3
+    }
+    for piece in sorted(pieces, key=len, reverse=True):
+        text = text.replace(piece, "***")
+    return text
+
+
 def _server(dsn: str) -> str:
     """user@host:port/db, never the password."""
     try:
-        info = conninfo_to_dict(dsn)
+        info = conninfo_to_dict(_without_password(dsn))
     except psycopg.Error:
         return "the configured server"
     host = info.get("host") or "localhost"
@@ -271,7 +266,7 @@ def _server(dsn: str) -> str:
 
 def _is_local(dsn: str) -> bool:
     try:
-        return (conninfo_to_dict(dsn).get("host") or "") in _LOCAL_HOSTS
+        return (conninfo_to_dict(_without_password(dsn)).get("host") or "") in _LOCAL_HOSTS
     except psycopg.Error:
         return False
 
@@ -280,19 +275,28 @@ class PgVectorReader:
     def __init__(self, dsn: str, table: str) -> None:
         if not dsn:
             raise ScriptError("HARNESS_PGVECTOR_URL is empty: set it, or pass --dsn")
+        malformed = (
+            f"malformed connection string for {_server(dsn)}: URL-encode special "
+            "characters in the password (@ is %40, / is %2F, % is %25)"
+        )
+        # libpq would read an unencoded "@" or "/" as the host, and look the rest of
+        # the password up in DNS: refuse before connecting.
+        if re.search(r"[@/?#]", _url_password(dsn) or ""):
+            raise ScriptError(malformed)
         try:
             self._conn = psycopg.connect(
                 dsn, autocommit=True, connect_timeout=10, row_factory=dict_row
             )
-        except psycopg.OperationalError as exc:
+        except psycopg.ProgrammingError as exc:  # libpq can't parse it
+            raise ScriptError(malformed) from exc
+        except psycopg.Error as exc:
             hint = (
                 "start it with `make infra`"
                 if _is_local(dsn)
                 else "check the server's firewall rule for your IP and sslmode=require"
             )
-            raise ScriptError(
-                f"can't reach Postgres at {_server(dsn)}: {_first_line(exc)} ({hint})"
-            ) from exc
+            reason = _scrub(_first_line(exc), dsn)
+            raise ScriptError(f"can't reach Postgres at {_server(dsn)}: {reason} ({hint})") from exc
         self._table = Identifier(table)
         found = self._conn.execute("SELECT to_regclass(%s) AS name", (table,)).fetchone()
         if found is None or found["name"] is None:
@@ -385,7 +389,7 @@ def cmd_docs(args: argparse.Namespace, settings: Settings, store: str) -> None:
         for name, docs in sorted(by_collection.items())
     ]
     if args.json:
-        _print_json(
+        print_json(
             [
                 {
                     "collection": name,
@@ -411,13 +415,13 @@ def cmd_docs(args: argparse.Namespace, settings: Settings, store: str) -> None:
             f"{name} · {store} · {len(docs)} documents, {chunks:,} chunks · "
             f"{_embedding(manifest)}"
         )
-        _print_table(
+        print_table(
             None,
             [
                 [
                     d.document_id,
-                    _cut(d.title or "-", _CELL_CHARS),
-                    _cut(d.source_path or "-", _CELL_CHARS),
+                    cut(d.title or "-", _CELL_CHARS),
+                    cut(d.source_path or "-", _CELL_CHARS),
                     f"{d.chunks:,} chunks",
                 ]
                 for d in docs
@@ -430,7 +434,7 @@ def cmd_docs(args: argparse.Namespace, settings: Settings, store: str) -> None:
 
 def _show_chunk(chunk: Chunk, *, as_json: bool) -> None:
     if as_json:
-        _print_json(asdict(chunk))
+        print_json(asdict(chunk))
         return
     fields = [
         ("chunk", chunk.chunk_id),
@@ -447,7 +451,7 @@ def _show_chunk(chunk: Chunk, *, as_json: bool) -> None:
         ("created", chunk.created_at or "-"),
         ("metadata", json.dumps(chunk.metadata, ensure_ascii=False)),
     ]
-    _print_table(None, [[name, value] for name, value in fields])
+    print_table(None, [[name, value] for name, value in fields])
     print()
     print(chunk.text)
 
@@ -456,7 +460,7 @@ def _show_document(
     document_id: str, chunks: list[Chunk], *, full: bool, as_json: bool
 ) -> None:
     if as_json:
-        _print_json({"document_id": document_id, "chunks": [asdict(c) for c in chunks]})
+        print_json({"document_id": document_id, "chunks": [asdict(c) for c in chunks]})
         return
     print(f"{document_id} · {_cited_name(chunks[0])} · {len(chunks)} chunks")
     print()
@@ -466,10 +470,10 @@ def _show_document(
             print(_indented(chunk.text))
             print()
         return
-    _print_table(
+    print_table(
         ["order", "chunk", "section", "pages", "text"],
         [
-            [str(c.order), c.chunk_id, _cut(_section(c), 40), _pages(c), _cut(c.text, 80)]
+            [str(c.order), c.chunk_id, cut(_section(c), 40), _pages(c), cut(c.text, 80)]
             for c in chunks
         ],
         numeric=frozenset({0}),
@@ -480,7 +484,7 @@ def cmd_show(args: argparse.Namespace, settings: Settings, store: str) -> None:
     prefix, _, index = args.id.partition(":")
     reader = _open_reader(store, settings)
     try:
-        document_id = _resolve(prefix, reader.document_ids(), "document")
+        document_id = resolve(prefix, reader.document_ids(), "document")
         chunks = reader.chunks(document_id)
     finally:
         reader.close()
@@ -531,7 +535,7 @@ def _print_hits(
     quota: int,
 ) -> None:
     if args.json:
-        _print_json(
+        print_json(
             {
                 "query": args.query,
                 "collection": collection,
@@ -552,7 +556,7 @@ def _print_hits(
         heading = " › ".join([_cited_name(chunk), *chunk.section_path])
         print()
         print(f"{rank:>2}  {hit.score:.3f}  {heading}  {_pages(chunk)}  {chunk.chunk_id}")
-        text = chunk.text if args.full else _cut(chunk.text, _SNIPPET_CHARS)
+        text = chunk.text if args.full else cut(chunk.text, _SNIPPET_CHARS)
         print(_indented(text))
 
 
@@ -690,7 +694,7 @@ def _parser() -> argparse.ArgumentParser:
     search.add_argument(
         "--collection", type=_collection_name, help="default: HARNESS_RAG_COLLECTION"
     )
-    search.add_argument("--k", type=_positive_int, help="default: HARNESS_RAG_K")
+    search.add_argument("--k", type=positive_int, help="default: HARNESS_RAG_K")
     search.add_argument(
         "--raw", action="store_true", help="no per-document quota: the plain ranking"
     )
@@ -715,10 +719,7 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def _load_settings(args: argparse.Namespace) -> Settings:
-    try:
-        settings = get_settings()
-    except ValueError as exc:
-        raise ScriptError(f"settings: {exc}") from exc
+    settings = load_settings(get_settings)
     return settings.model_copy(update={"pgvector_url": args.dsn}) if args.dsn else settings
 
 
