@@ -37,6 +37,9 @@ _EXAMPLES = """examples:
 _HARNESS_TYPES = [("harness.core.types", name) for name in ("Message", "Role", "ToolCall")]
 
 _TITLE_CHARS = 60
+_CALL_CHARS = 150
+_RESULT_CHARS = 120
+_LABELS = {"user": "You", "assistant": "Assistant", "system": "System"}
 
 
 class ScriptError(Exception):
@@ -98,6 +101,23 @@ def _positive_int(text: str) -> int:
     return value
 
 
+def _count(value: int | None) -> str:
+    return "-" if value is None else f"{value:,}"
+
+
+def _resolve(prefix: str, candidates: list[str], what: str) -> str:
+    """The one candidate `prefix` names: an exact id, or a unique prefix of one."""
+    if prefix in candidates:
+        return prefix
+    matches = sorted({c for c in candidates if c.startswith(prefix)})
+    if not matches:
+        raise ScriptError(f"no {what} matching {prefix!r}")
+    if len(matches) > 1:
+        listed = "\n  ".join(matches[:10])
+        raise ScriptError(f"{prefix!r} matches {len(matches)} {what}s:\n  {listed}")
+    return matches[0]
+
+
 # --- messages ----------------------------------------------------------------
 # Read by attribute, so a message in an unexpected shape prints as text instead
 # of crashing the script.
@@ -116,6 +136,77 @@ def _content(message: Any) -> str:
 def _title(messages: list[Any]) -> str:
     """The first user message: the title the UI shows."""
     return next((_content(m) for m in messages if _role(m) == "user"), "")
+
+
+def _tool_calls(message: Any) -> list[Any]:
+    return list(getattr(message, "tool_calls", None) or ())
+
+
+def _message_json(message: Any) -> dict[str, Any]:
+    return {
+        "role": _role(message),
+        "content": _content(message),
+        "tool_calls": [
+            {
+                "id": getattr(call, "id", None),
+                "name": getattr(call, "name", None),
+                "arguments": getattr(call, "arguments", None),
+            }
+            for call in _tool_calls(message)
+        ],
+        "tool_call_id": getattr(message, "tool_call_id", None),
+        "name": getattr(message, "name", None),
+    }
+
+
+def _call_text(call: Any) -> str:
+    """`name(key=value, …)`, with the values as JSON."""
+    arguments = getattr(call, "arguments", None)
+    if isinstance(arguments, dict):
+        inner = ", ".join(
+            f"{key}={json.dumps(value, ensure_ascii=False)}"
+            for key, value in arguments.items()
+        )
+    else:
+        inner = json.dumps(arguments, ensure_ascii=False, default=str)
+    return f"{getattr(call, 'name', '?')}({inner})"
+
+
+def _call_line(call: Any, full: bool) -> str:
+    text = _call_text(call)
+    return "  → " + (text if full else _cut(text, _CALL_CHARS))
+
+
+def _result_lines(content: str, full: bool) -> list[str]:
+    if full:
+        first, *rest = content.splitlines() or [""]
+        return [f"  ← {first}", *(f"    {line}" for line in rest)]
+    line = " ".join(content.split())
+    if len(line) <= _RESULT_CHARS:
+        return [f"  ← {line}"]
+    return [f"  ← {line[:_RESULT_CHARS]} … ({len(content):,} chars)"]
+
+
+def _speaker_lines(label: str, text: str) -> list[str]:
+    first, *rest = text.splitlines() or [""]
+    return [f"{label}: {first}", *(f"  {line}" for line in rest)]
+
+
+def _transcript_lines(messages: list[Any], *, full: bool, tools: bool) -> list[str]:
+    lines: list[str] = []
+    for message in messages:
+        role = _role(message)
+        if role == "tool":
+            if tools:
+                lines += _result_lines(_content(message), full)
+            continue
+        content = _content(message)
+        calls = _tool_calls(message)
+        if content or not calls:
+            lines += _speaker_lines(_LABELS.get(role, role.capitalize()), content)
+        if tools:
+            lines += [_call_line(call, full) for call in calls]
+    return lines
 
 
 # --- reading -----------------------------------------------------------------
@@ -196,6 +287,14 @@ class Store:
         )
         return [row["thread_id"] for row in rows]
 
+    def run_thread_ids(self) -> list[str]:
+        if "runs" not in self._tables:
+            return []
+        rows = self._sql.execute(
+            "SELECT DISTINCT thread_id FROM runs WHERE thread_id IS NOT NULL"
+        )
+        return [row["thread_id"] for row in rows]
+
     def conversation(self, thread_id: str) -> Conversation | None:
         if self._saver is None:
             return None
@@ -216,6 +315,32 @@ class Store:
                 "SELECT * FROM runs WHERE thread_id = ? ORDER BY started_at", (thread_id,)
             )
         return [dict(row) for row in rows]
+
+    def guard_decisions(
+        self,
+        *,
+        thread_id: str | None = None,
+        blocked_only: bool = False,
+        limit: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """Guard rows, newest first."""
+        if "guard_decisions" not in self._tables:
+            return []
+        clauses: list[str] = []
+        params: list[Any] = []
+        if thread_id is not None:
+            clauses.append("thread_id = ?")
+            params.append(thread_id)
+        if blocked_only:
+            clauses.append("allowed = 0")
+        sql = "SELECT * FROM guard_decisions"
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
+        sql += " ORDER BY created_at DESC"
+        if limit is not None:
+            sql += " LIMIT ?"
+            params.append(limit)
+        return [dict(row) for row in self._sql.execute(sql, params)]
 
 
 # --- commands ----------------------------------------------------------------
@@ -275,6 +400,109 @@ def cmd_threads(store: Store, args: argparse.Namespace, settings: Settings) -> N
     )
 
 
+def _duration(row: dict[str, Any]) -> str:
+    if not row["started_at"] or not row["finished_at"]:
+        return "-"
+    started = datetime.fromisoformat(row["started_at"])
+    finished = datetime.fromisoformat(row["finished_at"])
+    return f"{(finished - started).total_seconds():.1f}s"
+
+
+def _verdict(row: dict[str, Any]) -> str:
+    return "allowed" if row["allowed"] else "blocked"
+
+
+def _guard_json(row: dict[str, Any]) -> dict[str, Any]:
+    probabilities = row.get("probabilities")
+    return {
+        **row,
+        "allowed": bool(row["allowed"]),
+        "probabilities": json.loads(probabilities) if probabilities else None,
+    }
+
+
+def _print_thread(
+    info: dict[str, Any],
+    messages: list[Any],
+    runs: list[dict[str, Any]],
+    guard: list[dict[str, Any]],
+    *,
+    full: bool,
+    tools: bool,
+) -> None:
+    tokens_in, tokens_out = info["input_tokens"] or 0, info["output_tokens"] or 0
+    print(f"Thread {info['thread_id']}")
+    print(
+        " · ".join(
+            [
+                info["agent"] or "agent unknown",
+                f"session {_short(info['session_id'])}",
+                f"last activity {_fmt_time(info['last_activity'])} UTC",
+                f"{info['turns'] or 0} turns",
+                f"{tokens_in:,} in / {tokens_out:,} out tokens",
+            ]
+        )
+    )
+    print()
+    if messages:
+        print("\n".join(_transcript_lines(messages, full=full, tools=tools)))
+    else:
+        print("(no conversation stored)")
+    if runs:
+        print("\nRuns")
+        _print_table(
+            ["started (UTC)", "stop", "in", "out", "iterations", "duration"],
+            [
+                [
+                    _fmt_time(row["started_at"]),
+                    row["stopped_reason"] or "-",
+                    _count(row["input_tokens"]),
+                    _count(row["output_tokens"]),
+                    _count(row["iterations"]),
+                    _duration(row),
+                ]
+                for row in runs
+            ],
+            numeric=frozenset({2, 3, 4, 5}),
+        )
+    if guard:
+        print("\nGuard")
+        _print_table(
+            ["time (UTC)", "verdict", "stage", "reason", "message"],
+            [
+                [
+                    _fmt_time(row["created_at"]),
+                    _verdict(row),
+                    row["stage"],
+                    row["reason"] or "-",
+                    _cut(row["message_text"], _TITLE_CHARS),
+                ]
+                for row in guard
+            ],
+        )
+
+
+def cmd_thread(store: Store, args: argparse.Namespace, settings: Settings) -> None:
+    candidates = store.thread_ids() + store.run_thread_ids()
+    thread_id = _resolve(args.thread_id, candidates, "thread")
+    conversation = store.conversation(thread_id)
+    runs = store.runs(thread_id)
+    info = _thread_info(thread_id, conversation, _summarize_runs(runs).get(thread_id))
+    messages = conversation.messages if conversation else []
+    guard = list(reversed(store.guard_decisions(thread_id=thread_id)))  # oldest first
+    if args.json:
+        _print_json(
+            {
+                **info,
+                "messages": [_message_json(message) for message in messages],
+                "runs": runs,
+                "guard_decisions": [_guard_json(row) for row in guard],
+            }
+        )
+        return
+    _print_thread(info, messages, runs, guard, full=args.full, tools=not args.no_tools)
+
+
 # --- command line ------------------------------------------------------------
 
 
@@ -299,6 +527,20 @@ def _parser() -> argparse.ArgumentParser:
         "--agent", help="only threads whose latest run used this agent"
     )
     threads.add_argument("--json", action="store_true", help="full rows as JSON")
+
+    thread = commands.add_parser(
+        "thread",
+        parents=[common],
+        help="one conversation, with its runs and guard decisions",
+    )
+    thread.add_argument("thread_id", help="a thread id, or any unique prefix of one")
+    thread.add_argument(
+        "--full", action="store_true", help="tool arguments and results in full"
+    )
+    thread.add_argument(
+        "--no-tools", action="store_true", help="hide tool calls and results"
+    )
+    thread.add_argument("--json", action="store_true", help="everything as JSON")
 
     return parser
 
@@ -330,6 +572,7 @@ Command = Callable[[Store, argparse.Namespace, Settings], None]
 
 _COMMANDS: dict[str, Command] = {
     "threads": cmd_threads,
+    "thread": cmd_thread,
 }
 
 

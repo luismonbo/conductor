@@ -257,3 +257,107 @@ def test_checkpointers_without_a_file(checkpointer, message, monkeypatch, capsys
     code, _, err = run(capsys, "threads")
     assert code == 1
     assert message in err
+
+
+# --- thread ------------------------------------------------------------------
+
+
+def test_thread_shows_every_message(settings, capsys):
+    code, out, _ = run(capsys, "thread", "aaaa1")
+    assert code == 0
+    assert out.count("You: What is 2+2?") == 2
+    assert out.count('→ calculator(expression="2+2")') == 2
+    assert out.count("← 4") == 2
+    assert "Assistant: It is 4." in out
+    assert "Assistant: Still 4." in out
+
+
+def test_thread_json_carries_messages_runs_and_guard(settings, capsys):
+    _, out, _ = run(capsys, "thread", CHAT, "--json")
+    thread = json.loads(out)
+    roles = [m["role"] for m in thread["messages"]]
+    assert roles == ["user", "assistant", "tool", "assistant"] * 2
+    assert thread["messages"][1]["tool_calls"] == [
+        {"id": "c1", "name": "calculator", "arguments": {"expression": "2+2"}}
+    ]
+    assert [r["run_id"] for r in thread["runs"]] == ["run-1", "run-2"]
+    assert [(g["message_text"], g["allowed"]) for g in thread["guard_decisions"]] == [
+        ("What is 2+2?", True),
+        ("one more question", False),
+    ]
+
+
+def test_thread_lists_its_runs_and_the_blocked_follow_up(settings, capsys):
+    _, out, _ = run(capsys, "thread", "aaaa1")
+    runs = out.split("\nRuns\n")[1]
+    assert "final_answer" in runs and "6.0s" in runs
+    guard = out.split("\nGuard\n")[1]
+    assert "blocked" in guard and "one more question" in guard
+
+
+def test_no_tools_hides_tool_traffic(settings, capsys):
+    _, out, _ = run(capsys, "thread", "aaaa1", "--no-tools")
+    assert "→" not in out and "←" not in out
+    assert "Assistant: Still 4." in out
+
+
+def test_long_tool_results_are_cut_unless_full():
+    [cut] = db._result_lines("word " * 100, full=False)
+    assert cut.endswith("… (500 chars)")
+    assert len(cut) < 140
+    assert db._result_lines("line one\nline two", full=True) == [
+        "  ← line one",
+        "    line two",
+    ]
+
+
+def test_long_tool_arguments_are_cut_unless_full():
+    call = ToolCall(id="c", name="search_documents", arguments={"query": "x" * 300})
+    assert len(db._call_line(call, full=False)) <= 4 + 150
+    assert db._call_line(call, full=True).endswith('"' + "x" * 300 + '")')
+
+
+def test_an_ambiguous_prefix_lists_the_matches(settings, capsys):
+    code, _, err = run(capsys, "thread", "aaaa")
+    assert code == 1
+    assert CHAT in err and QUIET in err
+
+
+def test_an_unknown_thread_is_an_error(settings, capsys):
+    code, _, err = run(capsys, "thread", "ffff")
+    assert code == 1
+    assert "no thread matching 'ffff'" in err
+
+
+def test_a_thread_with_runs_only(settings, capsys):
+    code, out, _ = run(capsys, "thread", "cccc")
+    assert code == 0
+    assert "(no conversation stored)" in out
+    assert "final_answer" in out
+
+
+def test_a_database_from_before_visitor_sessions(tmp_path, monkeypatch, capsys):
+    path = tmp_path / "old.sqlite"
+    conn = sqlite3.connect(path)
+    with conn:
+        conn.execute(
+            "CREATE TABLE runs (run_id TEXT PRIMARY KEY, thread_id TEXT, agent TEXT, "
+            "backend TEXT, started_at TEXT, finished_at TEXT, stopped_reason TEXT, "
+            "input_tokens INTEGER, output_tokens INTEGER, iterations INTEGER)"
+        )
+        conn.execute(
+            "INSERT INTO runs VALUES ('r1', 'legacy-1', 'default', 'fake', "
+            "'2026-08-01T10:00:00+00:00', '2026-08-01T10:00:03+00:00', "
+            "'final_answer', 10, 2, 1)"
+        )
+    conn.close()
+    _use_settings(monkeypatch, checkpointer_url=str(path))
+    code, out, err = run(capsys, "thread", "legacy")
+    assert code == 0, err
+    assert "session -" in out
+    assert "(no conversation stored)" in out
+
+
+def test_a_message_in_an_unexpected_shape_prints_as_text():
+    lines = db._transcript_lines([{"role": "x"}, "plain text"], full=False, tools=True)
+    assert lines == ["Unknown: {'role': 'x'}", "Unknown: plain text"]
