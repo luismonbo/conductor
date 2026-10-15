@@ -361,3 +361,49 @@ def test_search_refuses_an_empty_query(index, capsys):
     code, _, err = run(capsys, "search", "   ")
     assert code == 1
     assert "the query is empty" in err
+
+
+# --- delete ------------------------------------------------------------------
+
+
+def _document_ids(capsys, collection: str) -> list[str]:
+    _, out, _ = run(capsys, "docs", "--collection", collection, "--json")
+    groups = json.loads(out)
+    return [d["document_id"] for d in groups[0]["documents"]] if groups else []
+
+
+def test_delete_needs_yes_without_a_terminal(index, monkeypatch, capsys):
+    monkeypatch.setattr(rag, "_interactive", lambda: False)
+    code, _, err = run(capsys, "delete", "--collection", "notes")
+    assert code == 1
+    assert "pass --yes" in err
+    assert _document_ids(capsys, "notes") == [NOTES]
+
+
+def test_delete_one_document_with_yes(index, capsys):
+    code, out, _ = run(
+        capsys, "delete", "--collection", "papers", "--document-id", RECURRENT, "--yes"
+    )
+    assert code == 0
+    assert f"deleted {RECURRENT}" in out
+    assert "now has 1 document(s)" in out
+    assert _document_ids(capsys, "papers") == [TRANSFORMERS]
+
+
+def test_delete_asks_on_a_terminal(index, monkeypatch, capsys):
+    monkeypatch.setattr(rag, "_interactive", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda prompt: "n")
+    code, _, err = run(capsys, "delete", "--collection", "notes")
+    assert (code, err.strip()) == (1, "rag.py: nothing deleted")
+    monkeypatch.setattr("builtins.input", lambda prompt: "y")
+    code, _, _ = run(capsys, "delete", "--collection", "notes")
+    assert code == 0
+    assert _document_ids(capsys, "notes") == []
+
+
+def test_delete_an_unknown_document(index, capsys):
+    code, _, err = run(
+        capsys, "delete", "--collection", "papers", "--document-id", "papers/zzzz", "--yes"
+    )
+    assert code == 1
+    assert "not in collection 'papers': papers/zzzz" in err

@@ -579,6 +579,66 @@ def cmd_search(args: argparse.Namespace, settings: Settings, store: str) -> None
     _print_hits(args, hits, collection=collection, store=store, k=k, quota=quota)
 
 
+def _interactive() -> bool:
+    try:
+        return sys.stdin.isatty()
+    except (AttributeError, ValueError):
+        return False
+
+
+async def _delete(
+    settings: Settings, store: str, document_ids: list[str], collection: str
+) -> dict[str, int]:
+    vector_store = build_vector_store(settings, store)
+    for document_id in document_ids:
+        await vector_store.delete(document_id)
+        print(f"  deleted {document_id}")
+    return await vector_store.document_stats(collection=collection)
+
+
+def cmd_delete(args: argparse.Namespace, settings: Settings, store: str) -> None:
+    # The reader checks the store exists first, so delete never creates one.
+    reader = _open_reader(store, settings)
+    try:
+        stats = {d.document_id: d.chunks for d in reader.documents(args.collection)}
+    finally:
+        reader.close()
+    if not stats:
+        print(f"Collection {args.collection!r} has no chunks in {store}.")
+        return
+    if args.document_ids:
+        missing = [d for d in args.document_ids if d not in stats]
+        if missing:
+            raise ScriptError(f"not in collection {args.collection!r}: {', '.join(missing)}")
+        targets = {d: stats[d] for d in args.document_ids}
+    else:
+        targets = stats
+    total = sum(targets.values())
+    print(
+        f"{len(targets)} of {len(stats)} document(s) in {args.collection!r} ({store}), "
+        f"{total:,} chunk(s):"
+    )
+    for document_id, count in sorted(targets.items()):
+        print(f"  {document_id}  {count:,} chunk(s)")
+    if not args.yes:
+        if not _interactive():
+            raise ScriptError("nothing deleted: no terminal to confirm on; pass --yes")
+        try:
+            answer = input(f"Delete these {total:,} chunk(s)? [y/N] ")
+        except EOFError:
+            answer = ""
+        if answer.strip().lower() != "y":
+            raise ScriptError("nothing deleted")
+    try:
+        remaining = asyncio.run(_delete(settings, store, sorted(targets), args.collection))
+    except Exception as exc:  # the store failed mid-delete
+        raise ScriptError(f"delete failed: {_first_line(exc)}") from exc
+    still_there = sorted(d for d in targets if d in remaining)
+    if still_there:
+        raise ScriptError(f"still present after delete: {', '.join(still_there)}")
+    print(f"Deleted. {args.collection!r} now has {len(remaining)} document(s) in {store}.")
+
+
 # --- command line ------------------------------------------------------------
 
 
@@ -630,6 +690,20 @@ def _parser() -> argparse.ArgumentParser:
     search.add_argument("--full", action="store_true", help="each chunk's whole text")
     search.add_argument("--json", action="store_true", help="everything as JSON")
 
+    delete = commands.add_parser(
+        "delete", parents=[common], help="delete a collection's chunks (asks first)"
+    )
+    delete.add_argument("--collection", type=_collection_name, required=True)
+    delete.add_argument(
+        "--document-id",
+        action="append",
+        dest="document_ids",
+        help="only this document (repeatable; exact ids)",
+    )
+    delete.add_argument(
+        "--yes", action="store_true", help="don't ask; required without a terminal"
+    )
+
     return parser
 
 
@@ -659,6 +733,7 @@ _COMMANDS: dict[str, Command] = {
     "docs": cmd_docs,
     "show": cmd_show,
     "search": cmd_search,
+    "delete": cmd_delete,
 }
 
 
