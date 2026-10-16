@@ -6,6 +6,7 @@ docs/superpowers/specs/2026-10-15-production-storage-neon-design.md, §4.2.
 """
 from __future__ import annotations
 
+import re
 from typing import Any
 
 import psycopg
@@ -41,6 +42,49 @@ CONNECTION_KWARGS: dict[str, Any] = {
 }
 
 
+# Where a URL connection string keeps its password: the userinfo, which runs to the
+# last "@" before any "?" or "#", so an unencoded "@" or "/" stays inside it.
+URL_USERINFO = re.compile(r"^(?P<scheme>[A-Za-z][A-Za-z0-9+.-]*://)(?P<userinfo>[^?#]*)@")
+# What libpq reads as something other than the password.
+_MISPLACED_IN_PASSWORD = re.compile(r"[@/?#]")
+
+
+def url_password(dsn: str) -> str | None:
+    """The password of a URL connection string, as written: None when it has none."""
+    match = URL_USERINFO.match(dsn)
+    if match is None or ":" not in match.group("userinfo"):
+        return None
+    return match.group("userinfo").split(":", 1)[1]
+
+
+def _parses(dsn: str) -> bool:
+    try:
+        conninfo_to_dict(dsn)
+    except psycopg.Error:
+        return False
+    return True
+
+
+def check_dsn(dsn: str) -> None:
+    """Raise ValueError unless libpq will read `dsn` the way it was written.
+
+    An unencoded "%" in the password makes psycopg's parser quote the whole password
+    in its error. An unencoded "@" or "/" is read as part of the host, which libpq then
+    looks up in DNS and names in its error. Either way the pool would log a piece of
+    the password, so a malformed URL is refused before anything connects or logs.
+
+    The message names nothing taken from `dsn`, and the error carries no chained
+    exception: the parser's error is gone before this one is raised, because uvicorn
+    prints a startup error's whole chain.
+    """
+    if _parses(dsn) and not _MISPLACED_IN_PASSWORD.search(url_password(dsn) or ""):
+        return
+    raise ValueError(
+        "the Postgres connection string is malformed: URL-encode special characters "
+        "in the password (@ is %40, / is %2F, % is %25)"
+    ) from None
+
+
 def host_of(dsn: str) -> str:
     """The server's host, for logs and errors: never the rest of the connection string."""
     try:
@@ -52,9 +96,11 @@ def host_of(dsn: str) -> str:
 async def open_pool(dsn: str) -> PostgresPool:
     """An open pool with its first connection made, or ConnectionError naming the host.
 
-    Neon closes connections when it suspends, so each checkout checks its
-    connection first (one round trip) and replaces a dead one.
+    A malformed connection string is a ValueError, raised before the pool exists
+    (see check_dsn). Neon closes connections when it suspends, so each checkout
+    checks its connection first (one round trip) and replaces a dead one.
     """
+    check_dsn(dsn)
     pool: PostgresPool = AsyncConnectionPool(
         dsn,
         connection_class=AsyncConnection[DictRow],

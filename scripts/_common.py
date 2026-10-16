@@ -17,6 +17,7 @@ from psycopg.conninfo import conninfo_to_dict
 from psycopg.rows import DictRow, dict_row
 from pydantic import ValidationError
 
+from harness.adapters.postgres.pool import URL_USERINFO, check_dsn, url_password
 from harness.config.settings import Settings
 
 # Stored text can be untrusted (a visitor's message, the sid cookie a visitor
@@ -110,9 +111,8 @@ def load_settings(read: Callable[[], Settings]) -> Settings:
 # --- Postgres ------------------------------------------------------------------
 
 _LOCAL_HOSTS = {"", "localhost", "127.0.0.1", "::1"}
-# Where a connection string keeps its password: URL userinfo (up to the last "@",
-# so an unencoded "@" or "/" stays inside it) or a password= keyword or parameter.
-_URL_USERINFO = re.compile(r"^(?P<scheme>[A-Za-z][A-Za-z0-9+.-]*://)(?P<userinfo>[^?#]*)@")
+# Where a connection string keeps its password: URL userinfo (pool.URL_USERINFO) or
+# a password= keyword or parameter.
 _PASSWORD_PARAM = re.compile(
     r"(?P<key>password\s*=\s*)(?P<value>'(?:[^'\\]|\\.)*'|[^\s&]+)", re.IGNORECASE
 )
@@ -123,17 +123,10 @@ def first_line(exc: BaseException) -> str:
     return f"{type(exc).__name__}: {text.splitlines()[0]}" if text else type(exc).__name__
 
 
-def _url_password(dsn: str) -> str | None:
-    match = _URL_USERINFO.match(dsn)
-    if match is None or ":" not in match.group("userinfo"):
-        return None
-    return match.group("userinfo").split(":", 1)[1]
-
-
 def _without_password(dsn: str) -> str:
     """The DSN with its password replaced by ***, however malformed it is."""
-    match = _URL_USERINFO.match(dsn)
-    if match is not None and _url_password(dsn) is not None:
+    match = URL_USERINFO.match(dsn)
+    if match is not None and url_password(dsn) is not None:
         user = match.group("userinfo").split(":", 1)[0]
         dsn = f"{match.group('scheme')}{user}:***@{dsn[match.end():]}"
     return _PASSWORD_PARAM.sub(lambda m: m.group("key") + "***", dsn)
@@ -142,7 +135,7 @@ def _without_password(dsn: str) -> str:
 def _scrub(text: str, dsn: str) -> str:
     """`text` without the DSN's password or any piece of it libpq split off."""
     secrets = [m.group("value").strip("'") for m in _PASSWORD_PARAM.finditer(dsn)]
-    if (password := _url_password(dsn)) is not None:
+    if (password := url_password(dsn)) is not None:
         secrets.append(password)
     pieces = {
         piece
@@ -182,8 +175,10 @@ def connect_postgres(dsn: str) -> psycopg.Connection[DictRow]:
     )
     # libpq would read an unencoded "@" or "/" as the host, and look the rest of
     # the password up in DNS: refuse before connecting.
-    if re.search(r"[@/?#]", _url_password(dsn) or ""):
-        raise ScriptError(malformed)
+    try:
+        check_dsn(dsn)
+    except ValueError:
+        raise ScriptError(malformed) from None
     try:
         return psycopg.connect(
             dsn, autocommit=True, connect_timeout=10, row_factory=dict_row
