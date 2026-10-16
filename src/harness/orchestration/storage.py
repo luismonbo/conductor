@@ -16,11 +16,18 @@ import logging
 from collections.abc import Awaitable, Callable
 from contextlib import AsyncExitStack
 from dataclasses import dataclass
-
-from langgraph.checkpoint.base import BaseCheckpointSaver
+from typing import TYPE_CHECKING
 
 from harness.config.settings import Settings
 from harness.observability.run_store import RunStore
+
+# Annotations only, so importing this module (and with it orchestration.build) does
+# not load LangGraph: callers that never run an agent should not pay for it. Each
+# opener imports its own saver when it runs.
+if TYPE_CHECKING:
+    from langgraph.checkpoint.base import BaseCheckpointSaver
+
+    _Opened = tuple[BaseCheckpointSaver, RunStore]
 
 logger = logging.getLogger(__name__)
 
@@ -36,9 +43,6 @@ class Storage:
     async def aclose(self) -> None:
         """Close every connection open_storage opened. A second call does nothing."""
         await self._close()
-
-
-_Opened = tuple[BaseCheckpointSaver, RunStore]
 
 
 async def _sqlite_run_store(path: str, stack: AsyncExitStack) -> RunStore:
@@ -118,6 +122,8 @@ async def open_storage(settings: Settings) -> Storage:
         )
     async with AsyncExitStack() as stack:
         checkpointer, run_store = await opener(settings, stack)
+        # Before pop_all(): whatever can still fail runs while the stack still closes
+        # everything it opened.
+        logger.info("storage: %s", _where(settings))
         close = stack.pop_all().aclose
-    logger.info("storage: %s", _where(settings))
     return Storage(checkpointer=checkpointer, run_store=run_store, _close=close)

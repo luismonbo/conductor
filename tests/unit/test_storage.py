@@ -9,6 +9,7 @@ import pytest
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
+import harness.orchestration.storage as storage_module
 from harness.config.settings import Settings
 from harness.observability.run_store.sqlite import SqliteRunStore
 from harness.orchestration.storage import open_storage
@@ -76,6 +77,36 @@ async def test_a_failure_while_opening_closes_what_was_already_open(monkeypatch,
     for conn in opened:
         with pytest.raises(ValueError, match="no active connection"):
             await conn.execute("SELECT 1")
+
+
+async def test_whatever_fails_after_both_are_open_still_closes_them(monkeypatch, tmp_path):
+    """The log line is the last thing open_storage does: it must run while the exit
+    stack still owns every connection, or an error from it leaks them."""
+    opened: list[aiosqlite.Connection] = []
+    real_connect = aiosqlite.connect
+
+    def recording_connect(*args, **kwargs):
+        opened.append(real_connect(*args, **kwargs))
+        return opened[-1]
+
+    def failing_where(settings):
+        raise RuntimeError("cannot describe the backend")
+
+    monkeypatch.setattr(aiosqlite, "connect", recording_connect)
+    monkeypatch.setattr(storage_module, "_where", failing_where)
+
+    try:
+        with pytest.raises(RuntimeError, match="cannot describe the backend"):
+            await open_storage(
+                _settings(checkpointer="sqlite", checkpointer_url=str(tmp_path / "h.sqlite"))
+            )
+        assert len(opened) == 2  # the checkpointer's connection and the run store's
+        for conn in opened:
+            with pytest.raises(ValueError, match="no active connection"):
+                await conn.execute("SELECT 1")
+    finally:
+        for conn in opened:  # aiosqlite's worker thread would keep pytest from exiting
+            await conn.close()
 
 
 async def test_an_unknown_backend_opens_nothing():
