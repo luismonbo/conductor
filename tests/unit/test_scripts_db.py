@@ -20,6 +20,7 @@ import psycopg
 import pytest
 from psycopg import sql
 
+import _stores
 import scripts.db as db
 from harness.adapters.llm.fake import FakeLLMClient
 from harness.adapters.tools.calculator import CalculatorTool
@@ -360,7 +361,7 @@ def test_a_failed_postgres_setup_closes_its_connection(postgres_dsn, monkeypatch
     can close its connection."""
     asyncio.run(_create_tables(_storage_settings("postgres", postgres_dsn)))
     connections: list[psycopg.Connection] = []
-    connect = db.connect_postgres
+    connect = _stores.connect_postgres
 
     def spy(dsn: str) -> psycopg.Connection:
         connections.append(connect(dsn))
@@ -369,8 +370,8 @@ def test_a_failed_postgres_setup_closes_its_connection(postgres_dsn, monkeypatch
     def refuse(*args: object, **kwargs: object) -> None:
         raise RuntimeError("saver refused")
 
-    monkeypatch.setattr(db, "connect_postgres", spy)
-    monkeypatch.setattr(db, "PostgresSaver", refuse)
+    monkeypatch.setattr(_stores, "connect_postgres", spy)
+    monkeypatch.setattr(_stores, "PostgresSaver", refuse)
     with pytest.raises(RuntimeError, match="saver refused"):
         db.PostgresStore(postgres_dsn)
     assert [conn.closed for conn in connections] == [True]
