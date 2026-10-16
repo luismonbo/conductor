@@ -10,9 +10,21 @@ lists its options. `_common.py` holds what both scripts share; it isn't run on i
 ## `db.py`: conversations and run history
 
 Reads the API's database read-only. With `HARNESS_CHECKPOINTER=sqlite` (the default) that's the
-file `HARNESS_CHECKPOINTER_URL` names, or `--db PATH`; with `HARNESS_CHECKPOINTER=postgres` it's the
-Postgres `HARNESS_CHECKPOINTER_URL` names, taken from the environment or `.env`, never the command
-line. A query against Neon wakes it for a few minutes. Neon's production connection string names
+file `HARNESS_CHECKPOINTER_URL` names, or `--db PATH`. With `HARNESS_CHECKPOINTER=postgres` it's the
+Postgres `HARNESS_CHECKPOINTER_URL` names, and that URL never goes on the command line.
+
+Never put the production URL in `.env`. `make api` and Compose's `api` service read it too, so your
+local API would serve from Neon and run your branch's LangGraph migrations against production.
+Set both variables for one command, in a subshell (zsh):
+
+```bash
+( export HARNESS_CHECKPOINTER=postgres; read -rs HARNESS_CHECKPOINTER_URL; export HARNESS_CHECKPOINTER_URL; uv run scripts/db.py threads )
+```
+
+`read -rs` takes the pasted URL without echoing it or putting it in your shell history. The URL
+disappears when the subshell ends.
+
+A query against Neon wakes it for a few minutes. Neon's production connection string names
 the image's Debian CA file (`sslrootcert=/etc/ssl/certs/ca-certificates.crt`); on a Mac, point
 `sslrootcert` at certifi's bundle instead (`uv run python -m certifi` prints its path).
 
