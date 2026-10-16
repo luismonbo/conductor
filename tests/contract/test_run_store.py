@@ -50,10 +50,15 @@ async def store(request) -> AsyncIterator[RunStore]:
 
 @pytest.fixture(params=_STORES)
 async def broken_store(request) -> AsyncIterator[RunStore]:
-    """A store whose every query fails: its connection, or its whole pool, is closed."""
+    """A store whose every query fails: its connection, or its whole pool, is closed.
+
+    Its one run is finished with tokens, so a healthy store would answer tokens_since
+    with 15: a 0 is the store failing open, not the answer for a run still in flight.
+    """
     async with AsyncExitStack() as stack:
         broken = await _open(request.param, stack)
         await broken.start_run("r1", "mine", "default", "fake", SID_A)
+        await broken.finish_run("r1", _tokens(10, 5), "final_answer")
     yield broken
 
 

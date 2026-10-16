@@ -169,7 +169,7 @@ def _get_runtime_lock() -> asyncio.Lock:
 async def _get_runtime() -> AgentRuntime:
     """The entry agent's runtime, built once: at startup by lifespan, or by the
     first request when no lifespan ran (tests). The lock makes concurrent first
-    callers share one build instead of each opening a checkpointer."""
+    callers share one build instead of each opening storage."""
     global _runtime
     if _runtime is not None:
         return _runtime
