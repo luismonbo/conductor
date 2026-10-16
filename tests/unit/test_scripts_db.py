@@ -1,8 +1,9 @@
-"""scripts/db.py against a database the harness's own writers produced.
+"""scripts/db.py against databases the harness's own writers produced.
 
-The conversations come from the real loop (fake LLM, calculator tool) through
-AsyncSqliteSaver; the runs and guard decisions from RunStore. The same bytes
-`make api` leaves in harness.sqlite.
+The conversations come from the real loop (fake LLM, calculator tool) and the
+runs and guard decisions from the run store, all through open_storage: the rows
+`make api` leaves in harness.sqlite, or in Postgres. Every test that takes
+`settings` runs against both readers.
 """
 from __future__ import annotations
 
@@ -15,9 +16,9 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
-import aiosqlite
+import psycopg
 import pytest
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+from psycopg import sql
 
 import scripts.db as db
 from harness.adapters.llm.fake import FakeLLMClient
@@ -26,9 +27,10 @@ from harness.config.settings import Settings
 from harness.core.guard import GuardDecision
 from harness.core.tools.registry import ToolRegistry
 from harness.core.types import LLMResponse, Message, Role, ToolCall
-from harness.observability.run_store.sqlite import SqliteRunStore
+from harness.observability.run_store import RunStore
 from harness.observability.token_accumulator import TokenAccumulator
 from harness.orchestration.loop import build_graph
+from harness.orchestration.storage import open_storage
 
 CHAT = "aaaa1111-0000-4000-8000-000000000001"  # two turns, tool calls, a repeated question
 QUIET = "aaaa2222-0000-4000-8000-000000000002"  # one turn and no runs, like older local data
@@ -36,7 +38,7 @@ RUNS_ONLY = "cccc3333-0000-4000-8000-000000000003"  # runs, but no stored conver
 NOW = datetime(2026, 10, 15, 12, 0, tzinfo=timezone.utc)
 POEM = "write me a poem\nabout snakes 🐍"  # a blocked first message: no thread
 
-# RunStore stamps rows with the current time; the tests pin them to known days.
+# The run store stamps rows with the current time; the tests pin them to known days.
 _RUN_TIMES = {
     "run-1": ("2026-10-14T09:00:00+00:00", "2026-10-14T09:00:06+00:00"),
     "run-2": ("2026-10-15T10:00:00+00:00", "2026-10-15T10:00:04+00:00"),
@@ -56,7 +58,7 @@ def _calculator_call(call_id: str) -> LLMResponse:
 
 
 async def _converse(
-    conn: aiosqlite.Connection,
+    checkpointer,
     thread_id: str,
     questions: list[str],
     replies: list[LLMResponse],
@@ -65,7 +67,7 @@ async def _converse(
     registry.register(CalculatorTool())
     graph = build_graph(
         llm=FakeLLMClient(replies),
-        checkpointer=AsyncSqliteSaver(conn),
+        checkpointer=checkpointer,
         registry=registry,
         system_prompt="You are a test agent.",
     )
@@ -79,9 +81,7 @@ async def _converse(
         await graph.ainvoke(state, config)
 
 
-async def _record_runs(conn: aiosqlite.Connection) -> None:
-    store = SqliteRunStore(conn)
-    await store.create_table()
+async def _record_runs(store: RunStore) -> None:
     finished = {
         "run-1": (CHAT, "default", 100, 20),
         "run-2": (CHAT, "default", 300, 40),
@@ -132,10 +132,19 @@ async def _record_runs(conn: aiosqlite.Connection) -> None:
         )
 
 
-async def _build(path: Path) -> None:
-    async with aiosqlite.connect(path) as conn:
+def _storage_settings(checkpointer: str, url: str) -> Settings:
+    """What the API runs with, so the test data goes through its own writers."""
+    return Settings(
+        _env_file=None, auth_enabled=False, input_guard_enabled=False,
+        checkpointer=checkpointer, checkpointer_url=url,
+    )
+
+
+async def _build(settings: Settings) -> None:
+    storage = await open_storage(settings)
+    try:
         await _converse(
-            conn,
+            storage.checkpointer,
             CHAT,
             ["What is 2+2?", "What is 2+2?"],
             [
@@ -145,11 +154,13 @@ async def _build(path: Path) -> None:
                 LLMResponse(text="Still 4."),
             ],
         )
-        await _converse(conn, QUIET, ["Hello"], [LLMResponse(text="Hi there.")])
-        await _record_runs(conn)
+        await _converse(storage.checkpointer, QUIET, ["Hello"], [LLMResponse(text="Hi there.")])
+        await _record_runs(storage.run_store)
+    finally:
+        await storage.aclose()
 
 
-def _set_times(path: Path) -> None:
+def _set_times_sqlite(path: Path) -> None:
     conn = sqlite3.connect(path)
     with conn:
         for run_id, (started, finished) in _RUN_TIMES.items():
@@ -165,11 +176,30 @@ def _set_times(path: Path) -> None:
     conn.close()
 
 
+def _when(iso: str | None) -> datetime | None:
+    return datetime.fromisoformat(iso) if iso else None
+
+
+def _set_times_postgres(dsn: str) -> None:
+    with psycopg.connect(dsn, autocommit=True) as conn:
+        for run_id, (started, finished) in _RUN_TIMES.items():
+            conn.execute(
+                "UPDATE runs SET started_at = %s, finished_at = %s WHERE run_id = %s",
+                (_when(started), _when(finished), run_id),
+            )
+        for message, created in _GUARD_TIMES.items():
+            conn.execute(
+                "UPDATE guard_decisions SET created_at = %s WHERE message_text = %s",
+                (_when(created), message),
+            )
+
+
 @pytest.fixture
 def database(tmp_path: Path) -> Path:
+    """A SQLite database, as `make api` leaves harness.sqlite."""
     path = tmp_path / "harness.sqlite"
-    asyncio.run(_build(path))
-    _set_times(path)
+    asyncio.run(_build(_storage_settings("sqlite", str(path))))
+    _set_times_sqlite(path)
     return path
 
 
@@ -187,9 +217,16 @@ def _use_settings(monkeypatch: pytest.MonkeyPatch, **overrides: object) -> Setti
     return settings
 
 
-@pytest.fixture
-def settings(database: Path, monkeypatch: pytest.MonkeyPatch) -> Settings:
-    return _use_settings(monkeypatch, checkpointer_url=str(database))
+@pytest.fixture(params=["sqlite", "postgres"])
+def settings(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> Settings:
+    """The API's settings, pointing at the test data in SQLite or in Postgres."""
+    if request.param == "sqlite":
+        url = str(request.getfixturevalue("database"))
+    else:
+        url = request.getfixturevalue("postgres_dsn")  # skips without Postgres
+        asyncio.run(_build(_storage_settings("postgres", url)))
+        _set_times_postgres(url)
+    return _use_settings(monkeypatch, checkpointer=request.param, checkpointer_url=url)
 
 
 def run(capsys: pytest.CaptureFixture[str], *argv: str) -> tuple[int, str, str]:
@@ -251,21 +288,42 @@ def test_the_db_flag_overrides_the_settings(database, tmp_path, monkeypatch, cap
     assert len(json.loads(out)) == 2
 
 
-@pytest.mark.parametrize(
-    ("overrides", "message"),
-    [
-        ({"checkpointer": "memory"}, "nothing on disk"),
-        (
-            {"checkpointer": "postgres", "checkpointer_url": "postgresql://u:p@localhost/db"},
-            "SQLite only",
-        ),
-    ],
-)
-def test_checkpointers_without_a_file(overrides, message, monkeypatch, capsys):
-    _use_settings(monkeypatch, **overrides)
+def test_memory_mode_has_nothing_to_read(monkeypatch, capsys):
+    _use_settings(monkeypatch, checkpointer="memory")
     code, _, err = run(capsys, "threads")
     assert code == 1
-    assert message in err
+    assert "nothing on disk" in err
+
+
+def test_an_unknown_checkpointer_is_an_error(monkeypatch, capsys):
+    _use_settings(monkeypatch, checkpointer="redis")
+    code, _, err = run(capsys, "threads")
+    assert code == 1
+    assert "'redis'" in err
+
+
+def test_an_unreachable_postgres_is_one_line_without_the_password(monkeypatch, capsys):
+    _use_settings(
+        monkeypatch,
+        checkpointer="postgres",
+        checkpointer_url="postgresql://harness:hunter2@127.0.0.1:1/harness",
+    )
+    code, _, err = run(capsys, "threads")
+    assert code == 1
+    assert "can't reach Postgres at harness@127.0.0.1:1/harness" in err
+    assert "make infra" in err
+    assert "hunter2" not in err
+    assert err.count("\n") == 1
+
+
+def test_a_postgres_database_the_api_never_opened(postgres_dsn, monkeypatch, capsys):
+    """A new Neon database, before the first deploy creates the tables."""
+    _use_settings(monkeypatch, checkpointer="postgres", checkpointer_url=postgres_dsn)
+    code, out, _ = run(capsys, "threads")
+    assert (code, out) == (0, "No threads.\n")
+    code, out, _ = run(capsys, "usage", "--json")
+    assert code == 0
+    assert json.loads(out)["all_time"] == {"runs": 0, "tokens": 0}
 
 
 # --- thread ------------------------------------------------------------------
@@ -426,8 +484,13 @@ def test_usage_text_shows_the_budget_line(settings, capsys):
     assert "all time: 4 runs, 515 tokens" in out
 
 
-def test_usage_with_the_budget_off(database, monkeypatch, capsys):
-    _use_settings(monkeypatch, checkpointer_url=str(database), daily_token_budget=0)
+def test_usage_with_the_budget_off(settings, monkeypatch, capsys):
+    _use_settings(
+        monkeypatch,
+        checkpointer=settings.checkpointer,
+        checkpointer_url=settings.checkpointer_url,
+        daily_token_budget=0,
+    )
     _, out, _ = run(capsys, "usage")
     assert "today: 395 tokens (daily budget off)" in out
 
@@ -456,8 +519,28 @@ def test_guard_text_marks_a_blocked_first_message(settings, capsys):
 # --- read-only ---------------------------------------------------------------
 
 
-def test_every_command_leaves_the_database_untouched(settings, database, capsys):
-    before = hashlib.sha256(database.read_bytes()).hexdigest()
+def _snapshot(settings: Settings) -> object:
+    """Every byte of the SQLite file, or every row of the Postgres schema."""
+    if settings.checkpointer == "sqlite":
+        return hashlib.sha256(Path(settings.checkpointer_url).read_bytes()).hexdigest()
+    with psycopg.connect(settings.checkpointer_url) as conn:
+        tables = [
+            row[0]
+            for row in conn.execute(
+                "SELECT table_name FROM information_schema.tables "
+                "WHERE table_schema = current_schema() ORDER BY 1"
+            )
+        ]
+        return {
+            table: conn.execute(
+                sql.SQL("SELECT * FROM {} ORDER BY 1").format(sql.Identifier(table))
+            ).fetchall()
+            for table in tables
+        }
+
+
+def test_every_command_leaves_the_database_untouched(settings, capsys):
+    before = _snapshot(settings)
     for argv in (
         ["threads"],
         ["thread", "aaaa1"],
@@ -468,7 +551,7 @@ def test_every_command_leaves_the_database_untouched(settings, database, capsys)
     ):
         assert db.main(argv) == 0
     capsys.readouterr()
-    assert hashlib.sha256(database.read_bytes()).hexdigest() == before
+    assert _snapshot(settings) == before
 
 
 # --- untrusted text ------------------------------------------------------------
@@ -480,24 +563,34 @@ HOSTILE_SID = "sid\x1b[2K"
 _RAW_CONTROLS = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]")
 
 
-async def _build_hostile(path: Path) -> None:
-    async with aiosqlite.connect(path) as conn:
+async def _build_hostile(settings: Settings) -> None:
+    storage = await open_storage(settings)
+    try:
         await _converse(
-            conn, CHAT, [HOSTILE], [_calculator_call("c1"), LLMResponse(text=HOSTILE)]
+            storage.checkpointer,
+            CHAT,
+            [HOSTILE],
+            [_calculator_call("c1"), LLMResponse(text=HOSTILE)],
         )
-        store = SqliteRunStore(conn)
-        await store.create_table()
-        await store.start_run("run-h", CHAT, "default", "fake", HOSTILE_SID)
-        await store.record_guard_decision(
+        await storage.run_store.start_run("run-h", CHAT, "default", "fake", HOSTILE_SID)
+        await storage.run_store.record_guard_decision(
             GuardDecision(allowed=False, stage="classifier", reason="off_topic"),
             session_id=HOSTILE_SID, thread_id=CHAT, run_id=None, message=HOSTILE,
         )
+    finally:
+        await storage.aclose()
 
 
-def test_visitor_control_characters_never_reach_the_terminal(tmp_path, monkeypatch, capsys):
-    path = tmp_path / "hostile.sqlite"
-    asyncio.run(_build_hostile(path))
-    _use_settings(monkeypatch, checkpointer_url=str(path))
+@pytest.mark.parametrize("backend", ["sqlite", "postgres"])
+def test_visitor_control_characters_never_reach_the_terminal(
+    backend, request, tmp_path, monkeypatch, capsys
+):
+    if backend == "sqlite":
+        url = str(tmp_path / "hostile.sqlite")
+    else:
+        url = request.getfixturevalue("postgres_dsn")
+    asyncio.run(_build_hostile(_storage_settings(backend, url)))
+    _use_settings(monkeypatch, checkpointer=backend, checkpointer_url=url)
     for argv in (
         ["threads"],
         ["threads", "--json"],

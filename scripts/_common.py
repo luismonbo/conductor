@@ -1,4 +1,5 @@
-"""What db.py and rag.py share: one-line errors, safe text, tables and JSON.
+"""What db.py and rag.py share: one-line errors, safe text, tables and JSON, and
+Postgres connections that never print a password.
 
 Imported as `_common`: running a script puts scripts/ first on sys.path, and
 pytest adds it through the pythonpath in pyproject.toml.
@@ -11,6 +12,9 @@ import re
 from collections.abc import Callable
 from typing import Any
 
+import psycopg
+from psycopg.conninfo import conninfo_to_dict
+from psycopg.rows import DictRow, dict_row
 from pydantic import ValidationError
 
 from harness.config.settings import Settings
@@ -101,3 +105,98 @@ def load_settings(read: Callable[[], Settings]) -> Settings:
         raise ScriptError(f"settings: {reasons}") from exc
     except ValueError as exc:
         raise ScriptError(f"settings: {exc}") from exc
+
+
+# --- Postgres ------------------------------------------------------------------
+
+_LOCAL_HOSTS = {"", "localhost", "127.0.0.1", "::1"}
+# Where a connection string keeps its password: URL userinfo (up to the last "@",
+# so an unencoded "@" or "/" stays inside it) or a password= keyword or parameter.
+_URL_USERINFO = re.compile(r"^(?P<scheme>[A-Za-z][A-Za-z0-9+.-]*://)(?P<userinfo>[^?#]*)@")
+_PASSWORD_PARAM = re.compile(
+    r"(?P<key>password\s*=\s*)(?P<value>'(?:[^'\\]|\\.)*'|[^\s&]+)", re.IGNORECASE
+)
+
+
+def first_line(exc: BaseException) -> str:
+    text = str(exc).strip()
+    return f"{type(exc).__name__}: {text.splitlines()[0]}" if text else type(exc).__name__
+
+
+def _url_password(dsn: str) -> str | None:
+    match = _URL_USERINFO.match(dsn)
+    if match is None or ":" not in match.group("userinfo"):
+        return None
+    return match.group("userinfo").split(":", 1)[1]
+
+
+def _without_password(dsn: str) -> str:
+    """The DSN with its password replaced by ***, however malformed it is."""
+    match = _URL_USERINFO.match(dsn)
+    if match is not None and _url_password(dsn) is not None:
+        user = match.group("userinfo").split(":", 1)[0]
+        dsn = f"{match.group('scheme')}{user}:***@{dsn[match.end():]}"
+    return _PASSWORD_PARAM.sub(lambda m: m.group("key") + "***", dsn)
+
+
+def _scrub(text: str, dsn: str) -> str:
+    """`text` without the DSN's password or any piece of it libpq split off."""
+    secrets = [m.group("value").strip("'") for m in _PASSWORD_PARAM.finditer(dsn)]
+    if (password := _url_password(dsn)) is not None:
+        secrets.append(password)
+    pieces = {
+        piece
+        for secret in secrets
+        for piece in (secret, *re.split(r"[@/:?#%&]", secret))
+        if len(piece) >= 3
+    }
+    for piece in sorted(pieces, key=len, reverse=True):
+        text = text.replace(piece, "***")
+    return text
+
+
+def postgres_server(dsn: str) -> str:
+    """user@host:port/db, never the password."""
+    try:
+        info = conninfo_to_dict(_without_password(dsn))
+    except psycopg.Error:
+        return "the configured server"
+    host = info.get("host") or "localhost"
+    port = info.get("port") or 5432
+    return f"{info.get('user', '?')}@{host}:{port}/{info.get('dbname', '?')}"
+
+
+def _is_local(dsn: str) -> bool:
+    try:
+        return (conninfo_to_dict(_without_password(dsn)).get("host") or "") in _LOCAL_HOSTS
+    except psycopg.Error:
+        return False
+
+
+def connect_postgres(dsn: str) -> psycopg.Connection[DictRow]:
+    """An autocommit connection with dict rows, or a one-line ScriptError that names
+    the server and never the password."""
+    malformed = (
+        f"malformed connection string for {postgres_server(dsn)}: URL-encode special "
+        "characters in the password (@ is %40, / is %2F, % is %25)"
+    )
+    # libpq would read an unencoded "@" or "/" as the host, and look the rest of
+    # the password up in DNS: refuse before connecting.
+    if re.search(r"[@/?#]", _url_password(dsn) or ""):
+        raise ScriptError(malformed)
+    try:
+        return psycopg.connect(
+            dsn, autocommit=True, connect_timeout=10, row_factory=dict_row
+        )
+    except psycopg.ProgrammingError as exc:  # libpq can't parse it
+        raise ScriptError(malformed) from exc
+    except psycopg.Error as exc:
+        hint = (
+            "start it with `make infra`"
+            if _is_local(dsn)
+            else "check the connection string, and that the server accepts this machine"
+        )
+        reason = _scrub(first_line(exc), dsn)
+        raise ScriptError(
+            f"can't reach Postgres at {postgres_server(dsn)}: {reason} ({hint})"
+        ) from exc

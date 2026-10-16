@@ -9,8 +9,12 @@ lists its options. `_common.py` holds what both scripts share; it isn't run on i
 
 ## `db.py`: conversations and run history
 
-Reads `harness.sqlite` read-only: the file `HARNESS_CHECKPOINTER_URL` names, or `--db PATH`.
-SQLite only for now.
+Reads the API's database read-only. With `HARNESS_CHECKPOINTER=sqlite` (the default) that's the
+file `HARNESS_CHECKPOINTER_URL` names, or `--db PATH`; with `HARNESS_CHECKPOINTER=postgres` it's the
+Postgres `HARNESS_CHECKPOINTER_URL` names, taken from the environment or `.env`, never the command
+line. A query against Neon wakes it for a few minutes. Neon's production connection string names
+the image's Debian CA file (`sslrootcert=/etc/ssl/certs/ca-certificates.crt`); on a Mac, point
+`sslrootcert` at certifi's bundle instead (`uv run python -m certifi` prints its path).
 
 | Command | Shows |
 |---|---|
