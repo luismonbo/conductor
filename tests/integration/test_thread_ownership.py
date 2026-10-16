@@ -34,9 +34,6 @@ async def two_clients(request, monkeypatch, tmp_path):
         async with httpx2.AsyncClient(transport=transport, base_url="https://test", headers=headers) as b:
             yield a, b
 
-    if _main._run_store is not None:
-        await _main._run_store._conn.close()
-
 
 async def test_listing_shows_only_own_threads(two_clients):
     alice, bob = two_clients
@@ -177,9 +174,10 @@ async def test_resuming_another_visitors_thread_is_404(two_clients, monkeypatch)
     assert sse_frames(own)[-1]["type"] == "final"
 
 
-async def test_a_failed_run_store_setup_is_retried_not_cached(monkeypatch):
-    """A store cached before its schema is in place would 404 every continued
-    thread until restart, so a failed setup is discarded (and closed)."""
+async def test_a_failed_storage_setup_is_retried_not_cached(monkeypatch):
+    """A runtime cached before its tables exist would 404 every continued thread
+    until restart, so a failed setup is discarded (and closed)."""
+    monkeypatch.setenv("HARNESS_LLM_BACKEND", "fake")
     real_create_table = SqliteRunStore.create_table
     attempts: list[SqliteRunStore] = []
 
@@ -193,10 +191,11 @@ async def test_a_failed_run_store_setup_is_retried_not_cached(monkeypatch):
 
     with pytest.raises(aiosqlite.OperationalError):
         await _main._get_run_store()
-    assert _main._run_store is None
+    assert _main._runtime is None
     with pytest.raises(ValueError):
         await attempts[0]._conn.execute("SELECT 1")  # its connection was closed
 
     store = await _main._get_run_store()
+    assert _main._runtime is not None and store is _main._runtime.storage.run_store
     await store.start_run("r1", "t1", "default", "fake", "sid-a")
     assert await store.owns_thread("sid-a", "t1") is True

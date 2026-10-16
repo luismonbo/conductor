@@ -26,8 +26,6 @@ from starlette.responses import Response
 from langgraph.types import Command
 from slowapi.errors import RateLimitExceeded
 
-import aiosqlite
-
 from harness.api.auth import require_api_key
 from harness.api.rate_limit import default_limit, limiter, strict_limit
 from harness.api.session import attach as attach_session_cookie, read_or_mint
@@ -38,7 +36,6 @@ from harness.core.types import AgentEvent, Message, Role
 from harness.observability.langfuse_tracing import langfuse_configured
 from harness.observability.logging_setup import configure_logging
 from harness.observability.run_store import RunStore
-from harness.observability.run_store.sqlite import SqliteRunStore
 from harness.observability.token_accumulator import TokenAccumulator
 from harness.orchestration.build import AgentRuntime, build_input_guard, build_runtime
 from harness.security import egress
@@ -52,8 +49,6 @@ from harness.security.input_guard import GuardContext, InputGuard
 load_dotenv(override=False)
 
 # Lazy-initialized module-level state
-_run_store: SqliteRunStore | None = None
-_run_store_lock: asyncio.Lock | None = None
 _runtime: AgentRuntime | None = None
 _runtime_lock: asyncio.Lock | None = None
 _input_guard: InputGuard | None = None
@@ -61,11 +56,11 @@ _input_guard: InputGuard | None = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _run_store, _runtime, _input_guard
+    global _runtime, _input_guard
     try:
         # Logging first, so everything startup logs below goes through it.
         configure_logging(get_settings().log_level)
-        # Build the entry agent at boot (settings, definition, checkpointer, tools,
+        # Build the entry agent at boot (settings, definition, storage, tools,
         # graph): a missing agent folder or an unavailable required backend stops
         # startup, and /health only answers once the agent can serve.
         await _get_runtime()
@@ -73,17 +68,13 @@ async def lifespan(app: FastAPI):
         _get_input_guard()
         yield
     finally:
-        # Also after a failed startup: an open checkpointer connection (aiosqlite's
+        # Also after a failed startup: open storage connections (aiosqlite's
         # worker thread is not a daemon) would keep the process from exiting.
         if _input_guard is not None:
             await _input_guard.aclose()
             _input_guard = None
-        if _run_store is not None:
-            await _run_store._conn.close()
         if _runtime is not None:
-            conn = getattr(_runtime.checkpointer, "conn", None)
-            if conn is not None:
-                await conn.close()
+            await _runtime.aclose()
             _runtime = None
 
 
@@ -158,45 +149,14 @@ _running: dict[str, tuple[str, asyncio.Task]] = {}
 # add it here. See docs/devlog/010.
 _MODEL_OVERRIDE_SAFE_BACKENDS = {"openai_compatible", "fake"}
 
-def _get_run_store_lock() -> asyncio.Lock:
-    global _run_store_lock
-    if _run_store_lock is None:
-        _run_store_lock = asyncio.Lock()
-    return _run_store_lock
-
-
 async def _get_run_store() -> RunStore:
-    """The process-wide run store, opened on first use.
+    """The entry agent's run store, opened with its checkpointer at startup.
 
-    Every checkpointer mode has one, because thread ownership is checked
-    against it. Memory mode keeps it in an in-process sqlite database, which
-    lives exactly as long as this one connection: the process.
-
-    Cached only once its schema is in place. A store cached before
-    create_table() succeeded would lack the session_id column, so every
-    continued thread would 404 until restart.
+    Every checkpointer mode has one, because thread ownership is checked against
+    it: memory mode keeps it in an in-process sqlite database that lives as long
+    as the runtime.
     """
-    global _run_store
-    if _run_store is not None:
-        return _run_store
-    settings = get_settings()
-    async with _get_run_store_lock():
-        if _run_store is None:
-            path = (
-                ":memory:"
-                if settings.checkpointer == "memory"
-                else settings.checkpointer_url
-            )
-            conn = await aiosqlite.connect(path)
-            store = SqliteRunStore(conn)
-            try:
-                await store.create_table()
-            except BaseException:
-                # Not cached, so the next request retries on a fresh connection.
-                await conn.close()
-                raise
-            _run_store = store
-        return _run_store
+    return (await _get_runtime()).storage.run_store
 
 
 def _get_runtime_lock() -> asyncio.Lock:

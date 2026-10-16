@@ -32,7 +32,7 @@ from harness.core.rag.ports import Embedder, Retriever as RetrieverPort, VectorS
 from harness.core.rag.serve import DiversifiedRetriever, RagPipeline, Retriever
 from harness.core.wiki import Wiki, WikiSource
 from harness.orchestration.agents import load_agent
-from harness.orchestration.checkpointer import build_checkpointer
+from harness.orchestration.storage import Storage, open_storage
 from harness.security.input_guard import GuardLimits, InputGuard
 
 
@@ -322,29 +322,31 @@ class AgentRuntime:
     """Everything the API needs to serve the entry agent, built once at startup.
 
     One immutable snapshot: the graph, the guard's prompt, the run rows' agent
-    name and every agent-related setting come from here, so they cannot drift
-    apart even if .env changes while the process runs.
+    name, every agent-related setting and the storage they write to come from
+    here, so they cannot drift apart even if .env changes while the process runs.
     """
 
     settings: Settings
     definition: AgentDefinition
     graph: Any
-    checkpointer: Any
+    storage: Storage
+
+    async def aclose(self) -> None:
+        """Close the storage's connections; the runtime serves nothing after this."""
+        await self.storage.aclose()
 
 
 async def build_runtime(settings: Settings) -> AgentRuntime:
-    """Load the entry agent, open its checkpointer, compile it on the shared loop."""
+    """Load the entry agent, open its storage, compile it on the shared loop."""
     definition = load_agent(settings.agent)
-    checkpointer = await build_checkpointer(settings)
+    storage = await open_storage(settings)
     try:
-        graph = build_agent(settings, checkpointer)
+        graph = build_agent(settings, storage.checkpointer)
     except BaseException:
-        conn = getattr(checkpointer, "conn", None)
-        if conn is not None:
-            await conn.close()
+        await storage.aclose()
         raise
     return AgentRuntime(
-        settings=settings, definition=definition, graph=graph, checkpointer=checkpointer
+        settings=settings, definition=definition, graph=graph, storage=storage
     )
 
 

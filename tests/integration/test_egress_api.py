@@ -109,7 +109,8 @@ async def test_a_filtered_prompt_mid_run_reaches_the_browser_as_the_filter_sente
     frames = sse_frames(response)
     assert [f.get("type") for f in frames[1:]] == ["tool_call", "tool_result", "error"]
     assert (frames[-1]["text"], frames[-1]["stopped_reason"]) == (CONTENT_FILTERED_TEXT, "content_filter")
-    cursor = await _main._run_store._conn.execute("SELECT stopped_reason FROM runs")
+    store = await _main._get_run_store()
+    cursor = await store._conn.execute("SELECT stopped_reason FROM runs")
     assert await cursor.fetchall() == [("content_filter",)]
     [record] = [r for r in caplog.records if "content filter" in r.getMessage()]
     assert "6*7" not in record.getMessage()  # never the visitor's text

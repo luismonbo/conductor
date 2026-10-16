@@ -25,26 +25,18 @@ async def clean_app_state(monkeypatch):
     _main._running.clear()
     _main._runtime = None
     _main._runtime_lock = None
-    _main._run_store = None
-    _main._run_store_lock = None
     _main._input_guard = None
     yield
     for _sid, task in list(_main._running.values()):
         if not task.done():
             task.cancel()
     _main._running.clear()
-    # Every checkpointer mode opens a run store (memory mode's is an in-process
-    # sqlite database), so there is always a connection to close.
-    if _main._run_store is not None:
-        await _main._run_store._conn.close()
+    # Every checkpointer mode opens storage (memory mode's run store is an
+    # in-process sqlite database), so a built runtime always has connections to close.
     if _main._runtime is not None:
-        conn = getattr(_main._runtime.checkpointer, "conn", None)
-        if conn is not None:
-            await conn.close()
+        await _main._runtime.aclose()
     _main._runtime = None
     _main._runtime_lock = None
-    _main._run_store = None
-    _main._run_store_lock = None
     _main._input_guard = None
 
 
@@ -70,9 +62,6 @@ async def client_with_fake(monkeypatch, tmp_path):
     ) as client:
         yield client, fake
 
-    if _main._run_store is not None:
-        await _main._run_store._conn.close()
-
 
 @pytest.fixture
 async def client_with_fake_azure_backend(monkeypatch, tmp_path):
@@ -93,9 +82,6 @@ async def client_with_fake_azure_backend(monkeypatch, tmp_path):
         headers={"Authorization": f"Bearer {_TEST_API_KEY}"},
     ) as client:
         yield client, fake
-
-    if _main._run_store is not None:
-        await _main._run_store._conn.close()
 
 
 def sse_frames(resp: httpx2.Response) -> list[dict]:
