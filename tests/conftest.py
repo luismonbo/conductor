@@ -13,6 +13,7 @@ import psycopg
 import pytest
 from psycopg import sql
 
+from harness.adapters.postgres.pool import host_of
 from harness.observability.logging_setup import _PRIVATE_AT_DEBUG
 
 # The loggers whose levels configure_logging (run by the app's startup) sets.
@@ -68,7 +69,8 @@ def _no_wiki_by_default(monkeypatch):
 
 # --- Postgres ------------------------------------------------------------------
 # The server the Postgres tests use: `make infra` locally, a service container in
-# CI. A postgresql:// URL: the API's settings accept only that form.
+# CI. A postgresql:// URL: the API's settings accept only that form. Without it the
+# Postgres tests skip, unless HARNESS_TEST_POSTGRES_REQUIRED=1 (see require_postgres).
 POSTGRES_DSN = os.environ.get(
     "HARNESS_TEST_POSTGRES_DSN", "postgresql://harness:harness@localhost:5432/harness"
 )
@@ -85,10 +87,19 @@ def _postgres_unreachable() -> str | None:
 
 
 def require_postgres() -> None:
-    """Skip the calling test unless the test Postgres answers."""
+    """Skip the calling test unless the test Postgres answers.
+
+    With HARNESS_TEST_POSTGRES_REQUIRED=1 (CI sets it) the test fails instead: a
+    Postgres service that never came up must not turn every Postgres test into a
+    quiet skip behind a green run. Either message names the host, never the DSN.
+    """
     reason = _postgres_unreachable()
-    if reason is not None:
-        pytest.skip(f"Postgres unreachable at {POSTGRES_DSN}: {reason}")
+    if reason is None:
+        return
+    message = f"Postgres unreachable at {host_of(POSTGRES_DSN)}: {reason}"
+    if os.environ.get("HARNESS_TEST_POSTGRES_REQUIRED") == "1":
+        pytest.fail(message, pytrace=False)
+    pytest.skip(message)
 
 
 def with_options(dsn: str, options: str) -> str:
