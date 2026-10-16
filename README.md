@@ -34,7 +34,7 @@ api ──► orchestration ──► agents ──► adapters ──► core
 | **HITL approval gate** | Tools opt in with `requires_approval = True`; graph suspends via `interrupt()`, state persisted to checkpointer |
 | **Resume endpoint** | `POST /resume/{thread_id}` — approve or reject a paused run, stream resumes |
 | **Swappable LLM** | Azure OpenAI / OpenAI-compatible (llama.cpp, vLLM) / fake (tests) |
-| **Swappable checkpointer** | `MemorySaver` (tests) · `SqliteSaver` (local default) · Postgres (Phase 5) |
+| **Swappable storage** | Checkpointer and run store opened together: `MemorySaver` (tests) · SQLite (local default) · Postgres (production, on Neon) |
 | **SSE streaming** | Real-time `thinking`, `tool_call`, `tool_result`, `interrupt`, `final`, `error` events |
 | **React frontend** | Interrupt state UI: amber dot, "Waiting for approval", Reject button |
 | **RAG** | docling/markitdown ingestion → LLM-normalized sections → structure-aware chunks → pgvector + Milvus Lite; retrieval, grounded generation, and a RAG eval harness |
@@ -53,7 +53,7 @@ src/harness/
 │   ├── definition.py     ← AgentDefinition + ToolDeps: the contract every agent folder implements
 │   └── default/          ← one folder per agent: prompt.py, tools.py, agent.py
 ├── api/                  ← FastAPI endpoints + SSE
-├── orchestration/        ← shared agent loop, agent loader, composition root, checkpointer factory
+├── orchestration/        ← shared agent loop, agent loader, composition root, storage (checkpointer + run store)
 ├── adapters/
 │   ├── llm/              ← Azure, OpenAI-compatible, fake
 │   ├── tools/            ← calculator, remember, recall, search_documents, wiki
@@ -132,8 +132,9 @@ cd frontend && pnpm install && pnpm dev
 
 Tests (no network, no credentials):
 ```bash
-uv run pytest -q   # 354 tests
-# the pgvector contract cases skip cleanly unless `docker compose up -d postgres` is running
+uv run pytest -q   # 932 tests
+# the Postgres tests (run store, checkpointer, db.py, pgvector) skip unless `make infra` runs;
+# HARNESS_TEST_POSTGRES_DSN points them at another server (CI runs them on Postgres 18)
 ```
 
 ---
@@ -143,7 +144,8 @@ uv run pytest -q   # 354 tests
 | Env var | Default | Options |
 |---------|---------|---------|
 | `HARNESS_LLM_BACKEND` | `fake` | `fake` · `openai_compatible` · `azure` |
-| `HARNESS_CHECKPOINTER` | `sqlite` | `memory` · `sqlite` · `postgres` (Phase 5) |
+| `HARNESS_CHECKPOINTER` | `sqlite` | `memory` · `sqlite` · `postgres`: where threads and the run store live |
+| `HARNESS_CHECKPOINTER_URL` | `./harness.sqlite` | the SQLite file, or for `postgres` a `postgresql://` connection string (a secret) |
 | `HARNESS_AGENT` | `default` | entry agent: a folder under `src/harness/agents/` (see [Agents](#agents)) |
 | `HARNESS_TOOL_PARSER` | `native` | `native` · `prompted` |
 | `HARNESS_MAX_ITERATIONS` | `8` | integer |
@@ -344,7 +346,7 @@ exists. The eval runs clean against an empty index and reports a baseline.
 - [x] **Langfuse Cloud tracing** — LangChain callbacks + `langfuse.openai` generation tracing + explicit tool spans, fire-and-forget
 - [x] **Model picker + thread sidebar** — `GET /models`, `GET /threads`, transcript reload
 - [ ] Full HITL UI (approve button, editable args)
-- [ ] Postgres checkpointer
+- [x] **Postgres storage** — checkpointer and run store on one pool; Neon in production
 - [ ] Multi-agent: supervisor + specialized sub-agents
 - [ ] Verify gate (post-execution fact-checking)
 - [ ] RAG Phase 2 (hybrid retrieval, reranking, enforced idempotent re-ingestion,

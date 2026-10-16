@@ -8,9 +8,8 @@
 # HARNESS_TYPESAFE_API_KEY, HARNESS_CHECKPOINTER_URL (the Postgres DSN) and,
 # unless the app's managed identity is used, HARNESS_AZURE_API_KEY.
 #
-# Boots once the Postgres checkpointer lands and the wiki's Blob container is set
-# (Wiki, below). An environment variable overrides any value here, e.g.
-# HARNESS_CHECKPOINTER=sqlite for a local test.
+# Boots once the wiki's Blob container is set (Wiki, below). An environment
+# variable overrides any value here, e.g. HARNESS_CHECKPOINTER=sqlite for a local test.
 
 # --- Model -------------------------------------------------------------------
 llm_backend: azure
@@ -28,7 +27,8 @@ agent: website
 # wiki_blob_container: <container>
 
 # --- State -------------------------------------------------------------------
-# Threads and the run store live in Azure Database for PostgreSQL.
+# Threads and the run store live in Postgres on Neon (AWS Frankfurt). The DSN in
+# HARNESS_CHECKPOINTER_URL decides the host: any Postgres works the same.
 checkpointer: postgres
 # Shared long-term memory stays off on a public site; in memory, it writes nothing.
 memory_backend: in_memory
