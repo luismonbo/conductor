@@ -898,11 +898,12 @@ def _open_store(db: str | None, settings: Settings) -> Store:
         raise ScriptError(
             f"HARNESS_CHECKPOINTER={settings.checkpointer!r} is not memory, sqlite or postgres"
         )
-    if settings.checkpointer_url.startswith(("postgresql://", "postgres://")):
-        # SqliteStore would report this as a missing file, password and all.
+    if "://" in settings.checkpointer_url:
+        # A SQLite file path never holds "://", and any URL may carry a password, in
+        # whatever scheme. SqliteStore would report it as a missing file, password and all.
         raise ScriptError(
-            "HARNESS_CHECKPOINTER_URL is a Postgres connection string but "
-            "HARNESS_CHECKPOINTER is 'sqlite': set HARNESS_CHECKPOINTER=postgres"
+            "HARNESS_CHECKPOINTER_URL is a connection string, not a SQLite file, but "
+            "HARNESS_CHECKPOINTER is 'sqlite': for Postgres, set HARNESS_CHECKPOINTER=postgres"
         )
     return SqliteStore(Path(settings.checkpointer_url))
 

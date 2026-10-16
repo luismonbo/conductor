@@ -309,12 +309,14 @@ def test_an_unknown_checkpointer_is_an_error(monkeypatch, capsys):
     assert "'redis'" in err
 
 
-@pytest.mark.parametrize("scheme", ["postgresql", "postgres"])
+@pytest.mark.parametrize(
+    "scheme", ["postgresql", "postgres", "postgresql+psycopg", "POSTGRESQL"]
+)
 def test_a_postgres_url_under_the_sqlite_checkpointer_is_never_printed(
     scheme, monkeypatch, capsys
 ):
     """A forgotten HARNESS_CHECKPOINTER=postgres must not echo the connection string
-    as if it were a missing file."""
+    as if it were a missing file, whatever its scheme: any URL may carry a password."""
     _use_settings(
         monkeypatch,
         checkpointer="sqlite",
@@ -322,9 +324,11 @@ def test_a_postgres_url_under_the_sqlite_checkpointer_is_never_printed(
     )
     code, out, err = run(capsys, "threads")
     assert code == 1
-    assert "HARNESS_CHECKPOINTER=postgres" in err
+    assert err == (
+        "db.py: HARNESS_CHECKPOINTER_URL is a connection string, not a SQLite file, but "
+        "HARNESS_CHECKPOINTER is 'sqlite': for Postgres, set HARNESS_CHECKPOINTER=postgres\n"
+    )
     assert "hunter2" not in out + err
-    assert err.count("\n") == 1
 
 
 def test_an_unreachable_postgres_is_one_line_without_the_password(monkeypatch, capsys):
