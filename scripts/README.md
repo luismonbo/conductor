@@ -29,7 +29,7 @@ Exports and `--json` output can contain visitors' messages: don't commit them.
 ## `rag.py`: the vector index
 
 Milvus or pgvector: `--store`, default `HARNESS_RAG_VECTOR_STORE_BACKEND`. `--dsn` points pgvector
-at another database, such as an Azure server with `sslmode=require`.
+at another database, such as a remote server with `sslmode=require`.
 
 | Command | Shows |
 |---|---|

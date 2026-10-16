@@ -406,17 +406,22 @@ class PostgresStore:
 
     def __init__(self, dsn: str) -> None:
         self._conn = connect_postgres(dsn)
-        # Every statement after this one runs in a read-only transaction.
-        self._conn.execute("SET default_transaction_read_only = on")
-        rows = self._conn.execute(
-            "SELECT table_name FROM information_schema.tables "
-            "WHERE table_schema = current_schema()"
-        )
-        self._tables = {row["table_name"] for row in rows}
-        self._saver: PostgresSaver | None = None
-        if _POSTGRES_SAVER_TABLES <= self._tables:
-            serde = JsonPlusSerializer(allowed_msgpack_modules=_HARNESS_TYPES)
-            self._saver = PostgresSaver(self._conn, serde=serde)
+        try:
+            # Every statement after this one runs in a read-only transaction.
+            self._conn.execute("SET default_transaction_read_only = on")
+            rows = self._conn.execute(
+                "SELECT table_name FROM information_schema.tables "
+                "WHERE table_schema = current_schema()"
+            )
+            self._tables = {row["table_name"] for row in rows}
+            self._saver: PostgresSaver | None = None
+            if _POSTGRES_SAVER_TABLES <= self._tables:
+                serde = JsonPlusSerializer(allowed_msgpack_modules=_HARNESS_TYPES)
+                self._saver = PostgresSaver(self._conn, serde=serde)
+        except BaseException:
+            # main() closes only a store it got back, and this one never gets out.
+            self._conn.close()
+            raise
 
     def close(self) -> None:
         self._conn.close()
@@ -892,6 +897,12 @@ def _open_store(db: str | None, settings: Settings) -> Store:
     if settings.checkpointer != "sqlite":
         raise ScriptError(
             f"HARNESS_CHECKPOINTER={settings.checkpointer!r} is not memory, sqlite or postgres"
+        )
+    if settings.checkpointer_url.startswith(("postgresql://", "postgres://")):
+        # SqliteStore would report this as a missing file, password and all.
+        raise ScriptError(
+            "HARNESS_CHECKPOINTER_URL is a Postgres connection string but "
+            "HARNESS_CHECKPOINTER is 'sqlite': set HARNESS_CHECKPOINTER=postgres"
         )
     return SqliteStore(Path(settings.checkpointer_url))
 

@@ -578,7 +578,7 @@ def _parser() -> argparse.ArgumentParser:
     common.add_argument(
         "--dsn",
         help="pgvector connection string (default: HARNESS_PGVECTOR_URL), "
-        "e.g. an Azure server with sslmode=require",
+        "e.g. a remote server with sslmode=require",
     )
     parser = argparse.ArgumentParser(
         prog="rag.py",

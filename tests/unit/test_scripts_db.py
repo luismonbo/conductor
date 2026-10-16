@@ -31,6 +31,7 @@ from harness.observability.run_store import RunStore
 from harness.observability.token_accumulator import TokenAccumulator
 from harness.orchestration.loop import build_graph
 from harness.orchestration.storage import open_storage
+from tests.conftest import postgres_schema
 
 CHAT = "aaaa1111-0000-4000-8000-000000000001"  # two turns, tool calls, a repeated question
 QUIET = "aaaa2222-0000-4000-8000-000000000002"  # one turn and no runs, like older local data
@@ -158,6 +159,12 @@ async def _build(settings: Settings) -> None:
         await _record_runs(storage.run_store)
     finally:
         await storage.aclose()
+
+
+async def _create_tables(settings: Settings) -> None:
+    """The API's tables with no rows: what its first start leaves in a new database."""
+    storage = await open_storage(settings)
+    await storage.aclose()
 
 
 def _set_times_sqlite(path: Path) -> None:
@@ -302,6 +309,24 @@ def test_an_unknown_checkpointer_is_an_error(monkeypatch, capsys):
     assert "'redis'" in err
 
 
+@pytest.mark.parametrize("scheme", ["postgresql", "postgres"])
+def test_a_postgres_url_under_the_sqlite_checkpointer_is_never_printed(
+    scheme, monkeypatch, capsys
+):
+    """A forgotten HARNESS_CHECKPOINTER=postgres must not echo the connection string
+    as if it were a missing file."""
+    _use_settings(
+        monkeypatch,
+        checkpointer="sqlite",
+        checkpointer_url=f"{scheme}://harness:hunter2@db.example.com/harness",
+    )
+    code, out, err = run(capsys, "threads")
+    assert code == 1
+    assert "HARNESS_CHECKPOINTER=postgres" in err
+    assert "hunter2" not in out + err
+    assert err.count("\n") == 1
+
+
 def test_an_unreachable_postgres_is_one_line_without_the_password(monkeypatch, capsys):
     _use_settings(
         monkeypatch,
@@ -324,6 +349,27 @@ def test_a_postgres_database_the_api_never_opened(postgres_dsn, monkeypatch, cap
     code, out, _ = run(capsys, "usage", "--json")
     assert code == 0
     assert json.loads(out)["all_time"] == {"runs": 0, "tokens": 0}
+
+
+def test_a_failed_postgres_setup_closes_its_connection(postgres_dsn, monkeypatch):
+    """A store that fails half-built never reaches main()'s finally: nothing else
+    can close its connection."""
+    asyncio.run(_create_tables(_storage_settings("postgres", postgres_dsn)))
+    connections: list[psycopg.Connection] = []
+    connect = db.connect_postgres
+
+    def spy(dsn: str) -> psycopg.Connection:
+        connections.append(connect(dsn))
+        return connections[-1]
+
+    def refuse(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("saver refused")
+
+    monkeypatch.setattr(db, "connect_postgres", spy)
+    monkeypatch.setattr(db, "PostgresSaver", refuse)
+    with pytest.raises(RuntimeError, match="saver refused"):
+        db.PostgresStore(postgres_dsn)
+    assert [conn.closed for conn in connections] == [True]
 
 
 # --- thread ------------------------------------------------------------------
@@ -552,6 +598,64 @@ def test_every_command_leaves_the_database_untouched(settings, capsys):
         assert db.main(argv) == 0
     capsys.readouterr()
     assert _snapshot(settings) == before
+
+
+def test_the_postgres_reader_refuses_writes(postgres_dsn):
+    """No command writes, so the test above can't tell a session left writable."""
+    store = db.PostgresStore(postgres_dsn)
+    try:
+        with pytest.raises(psycopg.errors.ReadOnlySqlTransaction):
+            store._conn.execute("CREATE TABLE should_not_exist (a int)")
+    finally:
+        store.close()
+
+
+# --- session time zone -------------------------------------------------------
+
+# In New York (UTC-4 in October) both fall on the 14th: a day bucket or a timestamp
+# that follows the session's zone instead of UTC lands on the wrong day.
+_LATE_RUN = datetime(2026, 10, 15, 2, 0, tzinfo=timezone.utc)  # 22:00 on the 14th there
+_LATE_BLOCK = datetime(2026, 10, 15, 3, 30, tzinfo=timezone.utc)  # 23:30 the 14th there
+
+
+def _insert_late_night_rows(dsn: str) -> None:
+    with psycopg.connect(dsn, autocommit=True) as conn:
+        conn.execute(
+            "INSERT INTO runs "
+            "(run_id, thread_id, agent, backend, started_at, session_id) "
+            "VALUES ('run-late', %s, 'default', 'fake', %s, 'session-1')",
+            (RUNS_ONLY, _LATE_RUN),
+        )
+        conn.execute(
+            "INSERT INTO guard_decisions (decision_id, created_at, session_id, "
+            "thread_id, allowed, reason, stage, message_chars, message_text) "
+            "VALUES ('decision-late', %s, 'session-1', %s, false, 'off_topic', "
+            "'classifier', 4, 'late')",
+            (_LATE_BLOCK, RUNS_ONLY),
+        )
+
+
+def test_postgres_reads_are_utc_whatever_the_session_time_zone(monkeypatch, capsys):
+    """The session's zone must not move a row to another day or change how its time
+    reads: both stay the UTC ones the SQLite reader gives."""
+    with postgres_schema("-c TimeZone=America/New_York") as dsn:
+        asyncio.run(_create_tables(_storage_settings("postgres", dsn)))
+        _insert_late_night_rows(dsn)
+        _use_settings(monkeypatch, checkpointer="postgres", checkpointer_url=dsn)
+
+        _, out, _ = run(capsys, "usage", "--json")
+        per_day = {day["day"]: day for day in json.loads(out)["days"]}
+        assert (per_day["2026-10-15"]["runs"], per_day["2026-10-15"]["blocked"]) == (1, 1)
+        assert (per_day["2026-10-14"]["runs"], per_day["2026-10-14"]["blocked"]) == (0, 0)
+
+        _, out, _ = run(capsys, "thread", RUNS_ONLY, "--json")
+        thread = json.loads(out)
+        assert thread["runs"][0]["started_at"] == "2026-10-15T02:00:00+00:00"
+        assert thread["guard_decisions"][0]["created_at"] == "2026-10-15T03:30:00+00:00"
+
+        _, out, _ = run(capsys, "thread", RUNS_ONLY)
+        assert "2026-10-15 02:00" in out
+        assert "2026-10-15 03:30" in out
 
 
 # --- untrusted text ------------------------------------------------------------
