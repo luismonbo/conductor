@@ -22,6 +22,10 @@ MIN_SIZE = 1
 MAX_SIZE = 5
 # Covers a cold start (Neon wakes "within a few hundred milliseconds") with margin.
 CONNECT_TIMEOUT_SECONDS = 10
+# A checkout waits this long for a connection: one full connect timeout plus margin,
+# so a checkout that must replace a dead connection still succeeds. psycopg_pool's
+# 30 s default would keep a request waiting 30 s per store call during an outage.
+CHECKOUT_TIMEOUT_SECONDS = 15
 # Startup waits this long for its first connection: an unreachable database stops
 # the boot, not the first request.
 OPEN_TIMEOUT_SECONDS = 30
@@ -107,6 +111,7 @@ async def open_pool(dsn: str) -> PostgresPool:
         kwargs=CONNECTION_KWARGS,
         min_size=MIN_SIZE,
         max_size=MAX_SIZE,
+        timeout=CHECKOUT_TIMEOUT_SECONDS,
         check=AsyncConnectionPool.check_connection,
         name="harness",
         open=False,

@@ -45,6 +45,21 @@ async def test_an_unreachable_database_fails_naming_only_the_host(monkeypatch, c
     assert opened[0].closed  # no reconnection attempts left running
 
 
+async def test_a_checkout_gives_up_after_one_connect_timeout_plus_margin(monkeypatch):
+    # Final review: psycopg_pool's default of 30 s kept a request waiting 30 s per
+    # store call during an outage, and a new chat makes three before its first byte.
+    monkeypatch.setattr(pool_module, "OPEN_TIMEOUT_SECONDS", 1)
+    opened = _record_pools(monkeypatch)
+
+    with pytest.raises(ConnectionError):
+        await open_pool(_UNREACHABLE)
+
+    assert opened[0].timeout == 15
+    assert pool_module.CHECKOUT_TIMEOUT_SECONDS == 15
+    # Room for a checkout that must replace a dead connection (one full connect) to succeed.
+    assert pool_module.CONNECT_TIMEOUT_SECONDS < opened[0].timeout
+
+
 @pytest.mark.parametrize("dsn", _MALFORMED)
 async def test_a_malformed_url_is_refused_before_anything_connects_or_logs(
     dsn, monkeypatch, caplog
