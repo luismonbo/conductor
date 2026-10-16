@@ -180,3 +180,21 @@ def test_postgres_takes_either_url_scheme(url):
         _env_file=None, api_key="test-key", checkpointer="postgres", checkpointer_url=url
     )
     assert settings.checkpointer_url == url
+
+
+def test_a_validation_error_never_shows_the_settings_input(monkeypatch):
+    # pydantic ends its error text with input_value=, the first and last characters of
+    # the settings dict, which holds HARNESS_API_KEY, HARNESS_AZURE_API_KEY and the
+    # connection string. An API log must not carry pieces of them.
+    monkeypatch.delenv("HARNESS_API_KEY", raising=False)
+    monkeypatch.setenv("HARNESS_INPUT_GUARD_ENABLED", "false")  # the guard's check passes
+    with pytest.raises(ValidationError) as excinfo:
+        Settings(
+            _env_file=None, checkpointer="postgres", checkpointer_url="./harness.sqlite",
+            api_key="SECRETKEY",
+        )
+
+    text = str(excinfo.value)
+    assert _POSTGRES_URL_ERROR in text  # the error under test
+    assert "SECRETKEY" not in text
+    assert "input_value" not in text

@@ -27,7 +27,14 @@ class Settings(BaseSettings):
     # extra="ignore": .env is shared with docker-compose (litellm/langfuse
     # container config) and main.py's direct os.environ reads for Langfuse —
     # those keys aren't HARNESS_-prefixed and must not fail validation here.
-    model_config = SettingsConfigDict(env_prefix="HARNESS_", env_file=".env", extra="ignore")
+    # hide_input_in_errors: a validation error otherwise ends with input_value=, the
+    # first and last characters of every setting, and the API keys are among them.
+    model_config = SettingsConfigDict(
+        env_prefix="HARNESS_",
+        env_file=".env",
+        extra="ignore",
+        hide_input_in_errors=True,
+    )
 
     # Backend selection
     llm_backend: str = "fake"          # fake | openai_compatible | azure
