@@ -41,7 +41,7 @@ api ──► orchestration ──► agents ──► adapters ──► core
 | **Multi-provider models** | LiteLLM proxy fans one adapter out to Ollama/Anthropic/OpenAI/Gemini/DeepSeek by model name; `resolve_model()` precedence: tool pin > agent pin > UI picker > default |
 | **Langfuse Cloud tracing** | Trace grouping via LangChain callbacks, per-call `generation`/`tool` observations via `langfuse.openai` + explicit spans (neither the LLM call nor tool dispatch goes through LangChain itself) — a dead/misconfigured Langfuse never blocks chat |
 | **Threaded chat UI** | Model picker, thread sidebar with transcript reload (`GET /models`, `GET /threads`) |
-| **354 tests** | Unit, integration, contract, graph scenarios — all pass with zero credentials |
+| **932 tests** | Unit, integration, contract, graph scenarios — all pass with zero credentials |
 
 ---
 
