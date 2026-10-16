@@ -254,13 +254,31 @@ def _title_from(messages: list[Message]) -> str:
     return (first_user.content[:60] if first_user else "")
 
 
+def _is_issued_thread_id(thread_id: str) -> bool:
+    """True for the text this API issues thread ids in: a uuid4, hyphenated, lower case.
+
+    The id comes from a visitor (the JSON body or the URL path). Anything else cannot
+    be a thread of ours, and must not reach the run store: Postgres rejects NUL in
+    text, and the store logs its error with the id as typed, newlines and all.
+    uuid.UUID() alone also accepts braces, "urn:uuid:", capitals, hyphens anywhere
+    and whitespace around the digits, so the text must round-trip.
+    """
+    try:
+        return str(uuid.UUID(thread_id)) == thread_id
+    except ValueError:
+        return False
+
+
 async def _require_owned_thread(request: Request, thread_id: str) -> None:
     """404 unless this visitor's session owns thread_id.
 
     Enforced identically in every checkpointer mode: there is always a run
     store to check against (see _get_run_store). 404 rather than 403, so a
-    thread that is not yours is indistinguishable from one that does not exist.
+    thread that is not yours is indistinguishable from one that does not exist,
+    and so is an id the server never issued (answered without asking the store).
     """
+    if not _is_issued_thread_id(thread_id):
+        raise HTTPException(status_code=404, detail="unknown thread")
     run_store = await _get_run_store()
     if not await run_store.owns_thread(request.state.sid, thread_id):
         raise HTTPException(status_code=404, detail="unknown thread")

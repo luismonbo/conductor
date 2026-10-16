@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from urllib.parse import quote
 
 import httpx2
 import pytest
@@ -75,3 +76,22 @@ async def test_debug_logging_never_carries_the_visitors_message(postgres_client,
     assert response.status_code == 200
     assert any(record.name == "psycopg" for record in caplog.records)  # DEBUG really ran
     assert _SECRET not in caplog.text
+
+
+async def test_a_thread_id_with_nul_is_a_quiet_404(postgres_client, caplog):
+    """Postgres rejects NUL in text. The run store used to log that as an ERROR
+    traceback carrying the visitor's own text, newlines included: a forged log line."""
+    forged = "x\x00\nERROR forged line"
+    in_path = quote(forged, safe="")
+
+    responses = [
+        await postgres_client.post("/chat/stream", json={"message": "hi", "thread_id": forged}),
+        await postgres_client.get(f"/threads/{in_path}"),
+        await postgres_client.post(f"/resume/{in_path}", json={"decision": {"approved": False}}),
+    ]
+
+    assert [(r.status_code, r.json()) for r in responses] == [
+        (404, {"detail": "unknown thread"})
+    ] * 3
+    assert [r for r in caplog.records if r.levelno >= logging.ERROR] == []
+    assert "forged" not in caplog.text
