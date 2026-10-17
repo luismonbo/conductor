@@ -10,7 +10,7 @@ import harness.orchestration.build as build_module
 from harness.adapters.llm.fake import FakeLLMClient
 from harness.core.llm.errors import ContentFiltered
 from harness.core.types import LLMResponse, ToolCall
-from harness.observability.run_store import RunStore
+from harness.observability.run_store.sqlite import SqliteRunStore
 from harness.security.egress import CONTENT_FILTERED_TEXT, UNAVAILABLE_TEXT
 from tests.integration.conftest import _TEST_API_KEY, sse_frames, thread_id_from
 
@@ -109,7 +109,8 @@ async def test_a_filtered_prompt_mid_run_reaches_the_browser_as_the_filter_sente
     frames = sse_frames(response)
     assert [f.get("type") for f in frames[1:]] == ["tool_call", "tool_result", "error"]
     assert (frames[-1]["text"], frames[-1]["stopped_reason"]) == (CONTENT_FILTERED_TEXT, "content_filter")
-    cursor = await _main._run_store._conn.execute("SELECT stopped_reason FROM runs")
+    store = await _main._get_run_store()
+    cursor = await store._conn.execute("SELECT stopped_reason FROM runs")
     assert await cursor.fetchall() == [("content_filter",)]
     [record] = [r for r in caplog.records if "content filter" in r.getMessage()]
     assert "6*7" not in record.getMessage()  # never the visitor's text
@@ -139,7 +140,7 @@ async def test_a_failure_before_the_stream_starts_is_a_bare_500(monkeypatch):
     async def _broken_start_run(self, *args, **kwargs):
         raise RuntimeError("database is locked at /app/state/harness.sqlite")
 
-    monkeypatch.setattr(RunStore, "start_run", _broken_start_run)
+    monkeypatch.setattr(SqliteRunStore, "start_run", _broken_start_run)
     transport = httpx2.ASGITransport(app=_main.app, raise_app_exceptions=False)
     async with httpx2.AsyncClient(
         transport=transport, base_url="https://test",

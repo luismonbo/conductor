@@ -44,8 +44,6 @@ async def website_app(monkeypatch, tmp_path):
         headers={"Authorization": f"Bearer {_TEST_API_KEY}"},
     ) as client:
         yield client, fake
-    if _main._run_store is not None:
-        await _main._run_store._conn.close()
 
 
 async def test_answers_from_the_wiki_and_shows_browsers_tool_names_only(website_app):

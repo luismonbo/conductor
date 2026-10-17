@@ -1,10 +1,12 @@
 """Read-only views of the harness's conversations and run history.
 
-Reads harness.sqlite: LangGraph's checkpoints (the conversations), `runs` (one
-row per agent run: agent, tokens, stop reason) and `guard_decisions` (one row
-per screened message). The file is opened read-only, so nothing here writes,
-and a wrong path is an error instead of a new empty database. SQLite only for
-now: a Postgres reader joins when the checkpointer and run store move there.
+Reads the database the API writes: LangGraph's checkpoints (the conversations),
+`runs` (one row per agent run: agent, tokens, stop reason) and `guard_decisions`
+(one row per screened message). With HARNESS_CHECKPOINTER=sqlite that's the
+harness.sqlite file, opened read-only, so a wrong path is an error instead of a
+new empty database. With HARNESS_CHECKPOINTER=postgres it's the Postgres
+HARNESS_CHECKPOINTER_URL names, read in read-only transactions; a query against
+Neon wakes it for a few minutes. Nothing here writes.
 """
 from __future__ import annotations
 
@@ -18,14 +20,14 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
-from langgraph.checkpoint.sqlite import SqliteSaver
+import psycopg
 
 from harness.config.settings import Settings, get_settings
 
 from _common import (
     ScriptError,
     cut,
+    first_line,
     load_settings,
     positive_int,
     print_json,
@@ -33,6 +35,7 @@ from _common import (
     resolve,
     visible,
 )
+from _stores import Conversation, PostgresStore, SqliteStore, Store
 
 _EXAMPLES = """examples:
   uv run scripts/db.py threads
@@ -41,11 +44,6 @@ _EXAMPLES = """examples:
   uv run scripts/db.py usage --days 14
   uv run scripts/db.py guard --blocked
 """
-
-# The harness's own types inside checkpoints. Allowing them explicitly stops
-# LangGraph's "unregistered type" warning on every read, and keeps reads working
-# once LangGraph refuses unregistered types.
-_HARNESS_TYPES = [("harness.core.types", name) for name in ("Message", "Role", "ToolCall")]
 
 _TITLE_CHARS = 60
 _CALL_CHARS = 150
@@ -172,12 +170,6 @@ def _transcript_lines(messages: list[Any], *, full: bool, tools: bool) -> list[s
 
 
 @dataclass(frozen=True)
-class Conversation:
-    messages: list[Any]
-    last_activity: str | None  # the latest checkpoint's timestamp
-
-
-@dataclass(frozen=True)
 class RunSummary:
     runs: int
     input_tokens: int
@@ -203,144 +195,6 @@ def _summarize_runs(rows: list[dict[str, Any]]) -> dict[str, RunSummary]:
         )
         for thread_id, thread_rows in by_thread.items()
     }
-
-
-def _connect_ro(path: Path) -> sqlite3.Connection:
-    # mode=ro: a missing file is an error rather than a new empty database.
-    uri = path.resolve().as_uri() + "?mode=ro"
-    return sqlite3.connect(uri, uri=True, check_same_thread=False)
-
-
-class Store:
-    """Read-only access to one SQLite file; a Postgres version joins later."""
-
-    def __init__(self, path: Path) -> None:
-        if not path.is_file():
-            raise ScriptError(
-                f"no database at {path} (run from the repo root, or pass --db PATH)"
-            )
-        self._sql = _connect_ro(path)
-        self._sql.row_factory = sqlite3.Row
-        tables = self._sql.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
-        self._tables = {row["name"] for row in tables}
-        self._saver_conn: sqlite3.Connection | None = None
-        self._saver: SqliteSaver | None = None
-        # Without its tables the saver's setup would try to create them.
-        if {"checkpoints", "writes"} <= self._tables:
-            self._saver_conn = _connect_ro(path)
-            serde = JsonPlusSerializer(allowed_msgpack_modules=_HARNESS_TYPES)
-            self._saver = SqliteSaver(self._saver_conn, serde=serde)
-
-    def close(self) -> None:
-        self._sql.close()
-        if self._saver_conn is not None:
-            self._saver_conn.close()
-
-    def thread_ids(self) -> list[str]:
-        """Threads with a conversation, newest first: checkpoint ids sort by time."""
-        if "checkpoints" not in self._tables:
-            return []
-        rows = self._sql.execute(
-            "SELECT thread_id FROM checkpoints GROUP BY thread_id "
-            "ORDER BY MAX(checkpoint_id) DESC"
-        )
-        return [row["thread_id"] for row in rows]
-
-    def run_thread_ids(self) -> list[str]:
-        if "runs" not in self._tables:
-            return []
-        rows = self._sql.execute(
-            "SELECT DISTINCT thread_id FROM runs WHERE thread_id IS NOT NULL"
-        )
-        return [row["thread_id"] for row in rows]
-
-    def conversation(self, thread_id: str) -> Conversation | None:
-        if self._saver is None:
-            return None
-        found = self._saver.get_tuple({"configurable": {"thread_id": thread_id}})
-        if found is None:
-            return None
-        values = found.checkpoint.get("channel_values") or {}
-        return Conversation(list(values.get("messages") or []), found.checkpoint.get("ts"))
-
-    def runs(self, thread_id: str | None = None) -> list[dict[str, Any]]:
-        """Run rows in start order: all of them, or one thread's."""
-        if "runs" not in self._tables:
-            return []
-        if thread_id is None:
-            rows = self._sql.execute("SELECT * FROM runs ORDER BY started_at")
-        else:
-            rows = self._sql.execute(
-                "SELECT * FROM runs WHERE thread_id = ? ORDER BY started_at", (thread_id,)
-            )
-        return [dict(row) for row in rows]
-
-    def guard_decisions(
-        self,
-        *,
-        thread_id: str | None = None,
-        blocked_only: bool = False,
-        limit: int | None = None,
-    ) -> list[dict[str, Any]]:
-        """Guard rows, newest first."""
-        if "guard_decisions" not in self._tables:
-            return []
-        clauses: list[str] = []
-        params: list[Any] = []
-        if thread_id is not None:
-            clauses.append("thread_id = ?")
-            params.append(thread_id)
-        if blocked_only:
-            clauses.append("allowed = 0")
-        sql = "SELECT * FROM guard_decisions"
-        if clauses:
-            sql += " WHERE " + " AND ".join(clauses)
-        sql += " ORDER BY created_at DESC"
-        if limit is not None:
-            sql += " LIMIT ?"
-            params.append(limit)
-        return [dict(row) for row in self._sql.execute(sql, params)]
-
-    def runs_per_day(self, since_day: str) -> dict[str, dict[str, int]]:
-        """Runs, threads and tokens per UTC day, from `since_day` (YYYY-MM-DD) on."""
-        if "runs" not in self._tables:
-            return {}
-        rows = self._sql.execute(
-            "SELECT substr(started_at, 1, 10) AS day, COUNT(*) AS runs, "
-            "COUNT(DISTINCT thread_id) AS threads, "
-            "SUM(COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0)) AS tokens "
-            "FROM runs WHERE started_at >= ? GROUP BY day",
-            (since_day,),
-        )
-        return {
-            row["day"]: {
-                "runs": row["runs"],
-                "threads": row["threads"],
-                "tokens": row["tokens"] or 0,
-            }
-            for row in rows
-        }
-
-    def blocked_per_day(self, since_day: str) -> dict[str, int]:
-        if "guard_decisions" not in self._tables:
-            return {}
-        rows = self._sql.execute(
-            "SELECT substr(created_at, 1, 10) AS day, COUNT(*) AS blocked "
-            "FROM guard_decisions WHERE allowed = 0 AND created_at >= ? GROUP BY day",
-            (since_day,),
-        )
-        return {row["day"]: row["blocked"] for row in rows}
-
-    def run_totals(self) -> tuple[int, int]:
-        """All-time runs, and their input + output tokens."""
-        if "runs" not in self._tables:
-            return 0, 0
-        row = self._sql.execute(
-            "SELECT COUNT(*) AS runs, "
-            "SUM(COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0)) AS tokens "
-            "FROM runs"
-        ).fetchone()
-        return row["runs"], row["tokens"] or 0
 
 
 # --- commands ----------------------------------------------------------------
@@ -641,11 +495,11 @@ def cmd_guard(store: Store, args: argparse.Namespace, settings: Settings) -> Non
 def _parser() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument(
-        "--db", help="the SQLite file (default: HARNESS_CHECKPOINTER_URL)"
+        "--db", help="a SQLite file to read instead of the API's own database"
     )
     parser = argparse.ArgumentParser(
         prog="db.py",
-        description="Conversations, runs and guard decisions in harness.sqlite (read-only).",
+        description="Conversations, runs and guard decisions in the API's database (read-only).",
         epilog=_EXAMPLES,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -698,20 +552,29 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _db_path(arg: str | None, settings: Settings) -> Path:
-    if arg:
-        return Path(arg)
+def _open_store(db: str | None, settings: Settings) -> Store:
+    """The SQLite file --db names, or else the database the API uses (HARNESS_CHECKPOINTER)."""
+    if db:
+        return SqliteStore(Path(db))
     if settings.checkpointer == "memory":
         raise ScriptError(
             "HARNESS_CHECKPOINTER=memory keeps conversations inside the API process; "
             "there is nothing on disk to read (pass --db PATH)"
         )
+    if settings.checkpointer == "postgres":
+        return PostgresStore(settings.checkpointer_url)
     if settings.checkpointer != "sqlite":
         raise ScriptError(
-            f"HARNESS_CHECKPOINTER={settings.checkpointer}: db.py reads SQLite only "
-            "for now (pass --db PATH)"
+            f"HARNESS_CHECKPOINTER={settings.checkpointer!r} is not memory, sqlite or postgres"
         )
-    return Path(settings.checkpointer_url)
+    if "://" in settings.checkpointer_url:
+        # A SQLite file path never holds "://", and any URL may carry a password, in
+        # whatever scheme. SqliteStore would report it as a missing file, password and all.
+        raise ScriptError(
+            "HARNESS_CHECKPOINTER_URL is a connection string, not a SQLite file, but "
+            "HARNESS_CHECKPOINTER is 'sqlite': for Postgres, set HARNESS_CHECKPOINTER=postgres"
+        )
+    return SqliteStore(Path(settings.checkpointer_url))
 
 
 Command = Callable[[Store, argparse.Namespace, Settings], None]
@@ -728,7 +591,7 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
         settings = load_settings(get_settings)
-        store = Store(_db_path(args.db, settings))
+        store = _open_store(args.db, settings)
         try:
             _COMMANDS[args.command](store, args, settings)
         finally:
@@ -738,6 +601,9 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     except sqlite3.Error as exc:
         print(f"db.py: can't read the database: {exc}", file=sys.stderr)
+        return 1
+    except psycopg.Error as exc:
+        print(f"db.py: can't read the database: {first_line(exc)}", file=sys.stderr)
         return 1
     return 0
 

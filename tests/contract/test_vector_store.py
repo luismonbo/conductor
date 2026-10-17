@@ -5,17 +5,13 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
-import os
 import uuid
 
 import pytest
 
 from harness.adapters.vectorstore.in_memory import InMemoryVectorStore
 from harness.core.rag.document import Chunk
-
-_PGVECTOR_DSN = os.environ.get(
-    "HARNESS_TEST_PGVECTOR_DSN", "postgresql://harness:harness@localhost:5432/harness"
-)
+from tests.conftest import POSTGRES_DSN, require_postgres
 
 
 def _chunk(chunk_id: str, document_id: str, collection: str, text: str) -> Chunk:
@@ -32,32 +28,17 @@ def _chunk(chunk_id: str, document_id: str, collection: str, text: str) -> Chunk
     )
 
 
-def _require_postgres() -> None:
-    """Skip rather than fail when Postgres isn't up — `docker compose up -d
-    postgres` is a local prerequisite, not something every checkout has."""
-    psycopg = pytest.importorskip("psycopg", reason="pgvector extra not installed")
-    try:
-        asyncio.run(_ping_postgres(psycopg))
-    except Exception as exc:  # pragma: no cover - environment-dependent
-        pytest.skip(f"Postgres unreachable at {_PGVECTOR_DSN}: {exc}")
-
-
-async def _ping_postgres(psycopg) -> None:
-    conn = await psycopg.AsyncConnection.connect(_PGVECTOR_DSN, connect_timeout=3)
-    await conn.close()
-
-
 @pytest.fixture(params=["in_memory", "pgvector", "milvus"])
 def store(request, tmp_path):
     if request.param == "in_memory":
         yield InMemoryVectorStore()
         return
     if request.param == "pgvector":
-        _require_postgres()
+        require_postgres()
         from harness.adapters.vectorstore.pgvector_store import PgVectorStore
 
         table = f"test_rag_chunks_{uuid.uuid4().hex[:8]}"
-        real_store = PgVectorStore(dsn=_PGVECTOR_DSN, table=table, vector_size=3)
+        real_store = PgVectorStore(dsn=POSTGRES_DSN, table=table, vector_size=3)
         yield real_store
         asyncio.run(real_store.drop())
         return

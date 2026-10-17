@@ -27,7 +27,14 @@ class Settings(BaseSettings):
     # extra="ignore": .env is shared with docker-compose (litellm/langfuse
     # container config) and main.py's direct os.environ reads for Langfuse —
     # those keys aren't HARNESS_-prefixed and must not fail validation here.
-    model_config = SettingsConfigDict(env_prefix="HARNESS_", env_file=".env", extra="ignore")
+    # hide_input_in_errors: a validation error otherwise ends with input_value=, the
+    # first and last characters of every setting, and the API keys are among them.
+    model_config = SettingsConfigDict(
+        env_prefix="HARNESS_",
+        env_file=".env",
+        extra="ignore",
+        hide_input_in_errors=True,
+    )
 
     # Backend selection
     llm_backend: str = "fake"          # fake | openai_compatible | azure
@@ -90,8 +97,10 @@ class Settings(BaseSettings):
     wiki_blob_container: str = ""
     wiki_blob_prefix: str = ""  # optional folder inside the container, e.g. wiki/
 
-    # Checkpointer
-    checkpointer: str = "sqlite"       # memory | sqlite | postgres
+    # Checkpointer and run store (orchestration/storage.py): memory | sqlite | postgres.
+    # The URL is the SQLite file, or for postgres a postgresql:// connection string:
+    # a secret, which the production target gets from the Container App's environment.
+    checkpointer: str = "sqlite"
     checkpointer_url: str = "./harness.sqlite"
 
     # The entry agent: a folder under src/harness/agents/. Its prompt.py holds
@@ -169,6 +178,19 @@ class Settings(BaseSettings):
                 "HARNESS_INPUT_GUARD_ENABLED is true but HARNESS_TYPESAFE_API_KEY is "
                 "empty. Set HARNESS_TYPESAFE_API_KEY, or set "
                 "HARNESS_INPUT_GUARD_ENABLED=false."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _postgres_needs_a_postgresql_url(self) -> "Settings":
+        # Without this, a missing secret would leave the SQLite default
+        # ./harness.sqlite, which psycopg rejects with an unhelpful parse error.
+        if self.checkpointer == "postgres" and not self.checkpointer_url.startswith(
+            ("postgresql://", "postgres://")
+        ):
+            raise ValueError(
+                "HARNESS_CHECKPOINTER=postgres needs HARNESS_CHECKPOINTER_URL set to "
+                "a postgresql:// connection string"
             )
         return self
 

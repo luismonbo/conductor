@@ -26,10 +26,7 @@ from typing import Any, Protocol
 # and a GRPC_VERBOSITY already in the environment wins.
 os.environ.setdefault("GRPC_VERBOSITY", "ERROR")
 
-import psycopg
 import yaml
-from psycopg.conninfo import conninfo_to_dict
-from psycopg.rows import dict_row
 from psycopg.sql import SQL, Identifier
 from pymilvus import MilvusClient
 from pymilvus.exceptions import ConnectionConfigException
@@ -42,9 +39,12 @@ from harness.orchestration.build import build_retriever, build_vector_store
 
 from _common import (
     ScriptError,
+    connect_postgres,
     cut,
+    first_line,
     load_settings,
     positive_int,
+    postgres_server,
     print_json,
     print_table,
     resolve,
@@ -65,23 +65,11 @@ _INDEX_CONFIG_DIR = Path("data/index_config")
 
 _STORES = ("milvus", "pgvector")
 _NAME = re.compile(r"^[A-Za-z0-9_.-]+$")  # also keeps quotes out of Milvus filters
-_LOCAL_HOSTS = {"", "localhost", "127.0.0.1", "::1"}
-# Where a connection string keeps its password: URL userinfo (up to the last "@",
-# so an unencoded "@" or "/" stays inside it) or a password= keyword or parameter.
-_URL_USERINFO = re.compile(r"^(?P<scheme>[A-Za-z][A-Za-z0-9+.-]*://)(?P<userinfo>[^?#]*)@")
-_PASSWORD_PARAM = re.compile(
-    r"(?P<key>password\s*=\s*)(?P<value>'(?:[^'\\]|\\.)*'|[^\s&]+)", re.IGNORECASE
-)
 _CELL_CHARS = 50
 _SNIPPET_CHARS = 200
 
 
 # --- formatting --------------------------------------------------------------
-
-
-def _first_line(exc: BaseException) -> str:
-    text = str(exc).strip()
-    return f"{type(exc).__name__}: {text.splitlines()[0]}" if text else type(exc).__name__
 
 
 def _collection_name(text: str) -> str:
@@ -221,88 +209,17 @@ class MilvusReader:
         self._client.close()
 
 
-def _url_password(dsn: str) -> str | None:
-    match = _URL_USERINFO.match(dsn)
-    if match is None or ":" not in match.group("userinfo"):
-        return None
-    return match.group("userinfo").split(":", 1)[1]
-
-
-def _without_password(dsn: str) -> str:
-    """The DSN with its password replaced by ***, however malformed it is."""
-    match = _URL_USERINFO.match(dsn)
-    if match is not None and _url_password(dsn) is not None:
-        user = match.group("userinfo").split(":", 1)[0]
-        dsn = f"{match.group('scheme')}{user}:***@{dsn[match.end():]}"
-    return _PASSWORD_PARAM.sub(lambda m: m.group("key") + "***", dsn)
-
-
-def _scrub(text: str, dsn: str) -> str:
-    """`text` without the DSN's password or any piece of it libpq split off."""
-    secrets = [m.group("value").strip("'") for m in _PASSWORD_PARAM.finditer(dsn)]
-    if (password := _url_password(dsn)) is not None:
-        secrets.append(password)
-    pieces = {
-        piece
-        for secret in secrets
-        for piece in (secret, *re.split(r"[@/:?#%&]", secret))
-        if len(piece) >= 3
-    }
-    for piece in sorted(pieces, key=len, reverse=True):
-        text = text.replace(piece, "***")
-    return text
-
-
-def _server(dsn: str) -> str:
-    """user@host:port/db, never the password."""
-    try:
-        info = conninfo_to_dict(_without_password(dsn))
-    except psycopg.Error:
-        return "the configured server"
-    host = info.get("host") or "localhost"
-    port = info.get("port") or 5432
-    return f"{info.get('user', '?')}@{host}:{port}/{info.get('dbname', '?')}"
-
-
-def _is_local(dsn: str) -> bool:
-    try:
-        return (conninfo_to_dict(_without_password(dsn)).get("host") or "") in _LOCAL_HOSTS
-    except psycopg.Error:
-        return False
-
-
 class PgVectorReader:
     def __init__(self, dsn: str, table: str) -> None:
         if not dsn:
             raise ScriptError("HARNESS_PGVECTOR_URL is empty: set it, or pass --dsn")
-        malformed = (
-            f"malformed connection string for {_server(dsn)}: URL-encode special "
-            "characters in the password (@ is %40, / is %2F, % is %25)"
-        )
-        # libpq would read an unencoded "@" or "/" as the host, and look the rest of
-        # the password up in DNS: refuse before connecting.
-        if re.search(r"[@/?#]", _url_password(dsn) or ""):
-            raise ScriptError(malformed)
-        try:
-            self._conn = psycopg.connect(
-                dsn, autocommit=True, connect_timeout=10, row_factory=dict_row
-            )
-        except psycopg.ProgrammingError as exc:  # libpq can't parse it
-            raise ScriptError(malformed) from exc
-        except psycopg.Error as exc:
-            hint = (
-                "start it with `make infra`"
-                if _is_local(dsn)
-                else "check the server's firewall rule for your IP and sslmode=require"
-            )
-            reason = _scrub(_first_line(exc), dsn)
-            raise ScriptError(f"can't reach Postgres at {_server(dsn)}: {reason} ({hint})") from exc
+        self._conn = connect_postgres(dsn)
         self._table = Identifier(table)
         found = self._conn.execute("SELECT to_regclass(%s) AS name", (table,)).fetchone()
         if found is None or found["name"] is None:
             self._conn.close()
             raise ScriptError(
-                f"nothing ingested in pgvector yet ({_server(dsn)} has no {table!r} table)"
+                f"nothing ingested in pgvector yet ({postgres_server(dsn)} has no {table!r} table)"
             )
 
     def collections(self) -> list[str]:
@@ -586,7 +503,7 @@ def cmd_search(args: argparse.Namespace, settings: Settings, store: str) -> None
     try:
         hits = asyncio.run(_retrieve(search_settings, store, args.query, k, collection))
     except Exception as exc:  # the embedding service, or the store mid-query
-        raise ScriptError(f"search failed: {_first_line(exc)}") from exc
+        raise ScriptError(f"search failed: {first_line(exc)}") from exc
     _print_hits(args, hits, collection=collection, store=store, k=k, quota=quota)
 
 
@@ -643,7 +560,7 @@ def cmd_delete(args: argparse.Namespace, settings: Settings, store: str) -> None
     try:
         remaining = asyncio.run(_delete(settings, store, sorted(targets), args.collection))
     except Exception as exc:  # the store failed mid-delete
-        raise ScriptError(f"delete failed: {_first_line(exc)}") from exc
+        raise ScriptError(f"delete failed: {first_line(exc)}") from exc
     still_there = sorted(d for d in targets if d in remaining)
     if still_there:
         raise ScriptError(f"still present after delete: {', '.join(still_there)}")
@@ -661,7 +578,7 @@ def _parser() -> argparse.ArgumentParser:
     common.add_argument(
         "--dsn",
         help="pgvector connection string (default: HARNESS_PGVECTOR_URL), "
-        "e.g. an Azure server with sslmode=require",
+        "e.g. a remote server with sslmode=require",
     )
     parser = argparse.ArgumentParser(
         prog="rag.py",

@@ -52,9 +52,6 @@ async def guarded(monkeypatch, tmp_path):
     ) as client:
         yield SimpleNamespace(client=client, llm=llm, install=install)
 
-    if _main._run_store is not None:
-        await _main._run_store._conn.close()
-
 
 async def _count(table: str) -> int:
     store = await _main._get_run_store()

@@ -10,6 +10,27 @@ jobs:
   backend:
     name: Backend tests
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Neon's Postgres and pgvector versions, pinned: the Postgres tests (run store,
+    # checkpointer, db.py, pgvector, rag.py) run against stock Postgres on every PR,
+    # which is what keeps any Postgres host working.
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.6-pg18
+        env:
+          POSTGRES_USER: harness
+          POSTGRES_PASSWORD: harness
+          POSTGRES_DB: harness
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U harness"
+          --health-interval 3s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      HARNESS_TEST_POSTGRES_DSN: postgresql://harness:harness@localhost:5432/harness
+      # A Postgres service that never came up fails its tests; it must not skip them.
+      HARNESS_TEST_POSTGRES_REQUIRED: "1"
     steps:
       - uses: actions/checkout@v7
 
