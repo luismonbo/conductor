@@ -233,6 +233,8 @@ wiki only and does not start without it.
 `src/harness/agents/`; the Dockerfile's `COPY src/ src/` still bakes it into the image. That relies
 on the editable install `uv sync` performs (a `.pth` file pointing at `src/`): a non-editable wheel
 build drops gitignored files.
+`TARGET_NAME=<target> make proxy` runs that same image locally behind Caddy, with
+`config/targets/<target>.yaml` baked in and only secrets taken from the environment.
 
 ---
 

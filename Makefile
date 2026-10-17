@@ -15,8 +15,11 @@ infra:
 
 # Bring up the Caddy-fronted stack (api + caddy) — the auth/proxy topology
 # from docs/superpowers/specs/2026-08-28-authentication-design.md. Port 8000
-# is Caddy; api itself is not published to the host in this mode.
+# is Caddy; api itself is not published to the host in this mode. The api
+# image is the deployment image: TARGET_NAME=<target> make proxy bakes
+# config/targets/<target>.yaml into it.
 proxy:
+	@test -n "$(TARGET_NAME)" || { echo "TARGET_NAME is required: TARGET_NAME=<target> make proxy" >&2; exit 1; }
 	docker compose up -d --build postgres api caddy
 	@echo "proxied stack up — http://localhost:8000 (Caddy; api is internal-only)"
 

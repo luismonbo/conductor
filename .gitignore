@@ -77,6 +77,10 @@ frontend/.vite/
 .vite/
 *.tsbuildinfo
 
+# Agent skills installed into frontend/ by the skills CLI: third-party copies, reinstallable
+# from frontend/skills-lock.json.
+/frontend/.agents/
+
 # OS / editor
 .DS_Store
 .idea/
