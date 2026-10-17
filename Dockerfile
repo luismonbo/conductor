@@ -3,28 +3,26 @@
 # ---- Builder: resolve dependencies + install the project ------------------
 FROM python:3.13-slim-trixie AS builder
 
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+# Pinned: a new uv release must not change the build under the lockfile.
+COPY --from=ghcr.io/astral-sh/uv:0.13.1 /uv /uvx /bin/
 
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
-    UV_NO_DEV=1 \
     UV_PROJECT_ENVIRONMENT=/app/.venv
 
 WORKDIR /app
 
 # Dependencies first, in their own layer, so code-only changes below don't
-# invalidate the install. Extras are named explicitly rather than
-# --all-extras: pyproject.toml defines a `dev` group under
-# [project.optional-dependencies] (separate from the [dependency-groups] one
-# UV_NO_DEV covers) — --all-extras would pull pytest/ruff/mypy into a
-# production image.
+# invalidate the install. --no-dev leaves out the dependency group that holds
+# pytest, ruff and mypy. No extras are named: every runtime dependency is in the
+# base [project] table, and the optional `dev` and `docling` extras stay out.
 COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --locked --no-install-project --extra azure --extra pgvector --extra local
+    uv sync --locked --no-dev --no-install-project
 
 COPY src/ src/
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --locked --extra azure --extra pgvector --extra local
+    uv sync --locked --no-dev
 
 # ---- Runtime: no compiler, no uv, no build cache ---------------------------
 FROM python:3.13-slim-trixie AS runtime
@@ -52,9 +50,10 @@ COPY --from=builder /app/src /app/src
 # are gitignored, not dockerignored, so that could silently include every
 # other deployment's config too). Build with, e.g.:
 #   docker build --build-arg TARGET_NAME=luismonbo-com .
-# No default on purpose: a build that forgets to specify a target fails
-# here, loudly, rather than shipping with no config or the wrong one. Use
-# TARGET_NAME=example for a config-free smoke-test build.
+# No default on purpose: with an empty name the COPY below finds no file and the
+# build stops, rather than shipping with no config or the wrong one. `make
+# proxy` says so before it starts. There is no config-free target: example.yaml
+# is a template that can't boot.
 ARG TARGET_NAME
 COPY config/targets/${TARGET_NAME}.yaml config/targets/${TARGET_NAME}.yaml
 
@@ -65,6 +64,9 @@ COPY config/targets/${TARGET_NAME}.yaml config/targets/${TARGET_NAME}.yaml
 ENV HARNESS_TARGET=${TARGET_NAME}
 ENV PATH="/app/.venv/bin:$PATH"
 
+# Nothing under /app is writable by this user: state lives in Postgres (the
+# deployment targets set checkpointer: postgres), so a SQLite default fails at
+# boot instead of writing into the image.
 USER harness
 
 EXPOSE 8000
