@@ -97,6 +97,18 @@ def host_of(dsn: str) -> str:
         return "an unreadable connection string"
 
 
+async def check_connection(conn: AsyncConnection[DictRow]) -> None:
+    """The pool's check of a connection before it is handed out: one round trip.
+
+    psycopg_pool's own check runs `execute("")`. Under `prepare_threshold: 0` psycopg
+    prepares that empty query on every call and never reuses it: two round trips, and
+    one more statement left on the connection each time. Pool connections are always
+    autocommit (CONNECTION_KWARGS), so the non-autocommit branch of psycopg_pool's check
+    isn't needed.
+    """
+    await conn.execute("", prepare=False)
+
+
 async def open_pool(dsn: str) -> PostgresPool:
     """An open pool with its first connection made, or ConnectionError naming the host.
 
@@ -112,7 +124,7 @@ async def open_pool(dsn: str) -> PostgresPool:
         min_size=MIN_SIZE,
         max_size=MAX_SIZE,
         timeout=CHECKOUT_TIMEOUT_SECONDS,
-        check=AsyncConnectionPool.check_connection,
+        check=check_connection,
         name="harness",
         open=False,
     )

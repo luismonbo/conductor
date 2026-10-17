@@ -36,6 +36,23 @@ async def test_a_connection_the_server_closed_is_replaced_on_checkout(postgres_d
         await pool.close()
 
 
+async def test_a_checkout_prepares_nothing_on_the_server(postgres_dsn):
+    # Live check on Neon: under prepare_threshold 0, psycopg_pool's own check prepared the
+    # empty query on every call and never reused it: a second round trip per checkout
+    # (41.5 ms against 21.0 ms), and one more statement left on the connection each time.
+    pool = await open_pool(postgres_dsn)
+    try:
+        for _ in range(3):  # each checkout runs the pool's check first
+            async with pool.connection() as conn:
+                # Unprepared itself, so the listing doesn't list its own statement.
+                listing = await conn.execute(
+                    "SELECT name FROM pg_prepared_statements", prepare=False
+                )
+                assert await listing.fetchall() == []
+    finally:
+        await pool.close()
+
+
 async def _hold_a_query(pool: PostgresPool) -> None:
     async with pool.connection() as conn:
         await conn.execute("SELECT pg_sleep(10)")

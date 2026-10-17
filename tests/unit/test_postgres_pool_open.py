@@ -1,4 +1,4 @@
-"""open_pool's failures, which need no database: nothing answers on port 1."""
+"""open_pool and its check, which need no database: nothing answers on port 1."""
 from __future__ import annotations
 
 import logging
@@ -6,7 +6,7 @@ import logging
 import pytest
 
 import harness.adapters.postgres.pool as pool_module
-from harness.adapters.postgres.pool import check_dsn, host_of, open_pool
+from harness.adapters.postgres.pool import check_connection, check_dsn, host_of, open_pool
 
 _UNREACHABLE = "postgresql://harness_app:hunter2secret@127.0.0.1:1/harness"
 
@@ -58,6 +58,37 @@ async def test_a_checkout_gives_up_after_one_connect_timeout_plus_margin(monkeyp
     assert pool_module.CHECKOUT_TIMEOUT_SECONDS == 15
     # Room for a checkout that must replace a dead connection (one full connect) to succeed.
     assert pool_module.CONNECT_TIMEOUT_SECONDS < opened[0].timeout
+
+
+class _RecordingConnection:
+    """What check_connection executes, recorded as (args, kwargs)."""
+
+    def __init__(self) -> None:
+        self.executed: list[tuple[tuple, dict]] = []
+
+    async def execute(self, *args, **kwargs) -> None:
+        self.executed.append((args, kwargs))
+
+
+async def test_the_pools_check_runs_the_empty_query_without_preparing_it():
+    # Live check on Neon: prepare_threshold 0 makes psycopg prepare a plain execute("")
+    # on every call, which is two round trips.
+    conn = _RecordingConnection()
+
+    await check_connection(conn)
+
+    assert conn.executed == [(("",), {"prepare": False})]
+
+
+async def test_open_pool_hands_the_pool_that_check(monkeypatch):
+    # Not psycopg_pool's own check_connection, which runs the plain execute("").
+    monkeypatch.setattr(pool_module, "OPEN_TIMEOUT_SECONDS", 1)
+    opened = _record_pools(monkeypatch)
+
+    with pytest.raises(ConnectionError):
+        await open_pool(_UNREACHABLE)
+
+    assert opened[0]._check is check_connection  # psycopg_pool keeps the callback here
 
 
 @pytest.mark.parametrize("dsn", _MALFORMED)
