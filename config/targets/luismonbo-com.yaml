@@ -23,8 +23,8 @@ agent: website
 # --- Wiki --------------------------------------------------------------------
 # The website agent's knowledge: a private Blob container, read at startup with
 # the Container App's managed identity (Storage Blob Data Reader on the container).
-# wiki_blob_account_url: https://<account>.blob.core.windows.net
-# wiki_blob_container: <container>
+wiki_blob_account_url: https://prodstwikiwesteu001.blob.core.windows.net
+wiki_blob_container: wiki
 
 # --- State -------------------------------------------------------------------
 # Threads and the run store live in Postgres on Neon (AWS Frankfurt). The DSN in
