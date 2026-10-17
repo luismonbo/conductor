@@ -22,6 +22,7 @@ from psycopg.rows import dict_row
 from psycopg.sql import SQL, Identifier, Literal
 from psycopg.types.json import Jsonb
 
+from harness.adapters.postgres.pool import check_dsn
 from harness.core.rag.document import Chunk, ScoredChunk
 
 # Chunk fields that have their own column; everything else round-trips via chunk_json.
@@ -73,8 +74,16 @@ class PgVectorStore:
         self._vector_size = vector_size
         self._ready = False
 
+    async def _open(self) -> psycopg.AsyncConnection:
+        """The one place this store connects."""
+        # Refuse a malformed string before psycopg or libpq can put its password in an
+        # error (see check_dsn). Here, not in __init__: the store is built at startup,
+        # and a bad string fails at first use.
+        check_dsn(self._dsn)
+        return await psycopg.AsyncConnection.connect(self._dsn, autocommit=True)
+
     async def _connect(self) -> psycopg.AsyncConnection:
-        conn = await psycopg.AsyncConnection.connect(self._dsn, autocommit=True)
+        conn = await self._open()
         if not self._ready:
             await self._ensure_schema(conn)
             self._ready = True
@@ -222,7 +231,7 @@ class PgVectorStore:
 
     async def drop(self) -> None:
         """Test-only cleanup — not part of the VectorStore protocol."""
-        conn = await psycopg.AsyncConnection.connect(self._dsn, autocommit=True)
+        conn = await self._open()
         async with conn:
             await conn.execute(
                 SQL("DROP TABLE IF EXISTS {table}").format(table=Identifier(self._table))
