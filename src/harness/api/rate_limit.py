@@ -6,14 +6,15 @@ a literal string baked in at import time, so HARNESS_RATE_LIMIT_* changes
 (including the ones test fixtures set after this module is first imported)
 take effect immediately.
 
-The identity key is visitor_key: the socket address, except for a request that
-carries the valid shared API key and an X-Visitor-IP header. Only the proxy in
-front of the API holds the key (the Cloudflare Worker in production, Caddy and
-the dev-server proxies locally), so "carries the valid key" means "came through
-that proxy", and the header it sets names the real visitor. Without this every
-visitor on Azure Container Apps shares one bucket, because the socket address
-there is the platform's ingress proxy. A proxy that injects the key must set or
-strip the header. See docs/superpowers/specs/2026-08-27-rate-limiting-design.md
+The identity key is visitor_key: the connection's address, except for a request
+that carries the valid shared API key and an X-Visitor-IP header. Only a proxy in
+front of the API holds the key, so "carries the valid key" means "came through
+that proxy". In production that proxy is a Cloudflare Worker, which sets the
+header to the real visitor's address; without it every visitor on Azure Container
+Apps would share one bucket, because the connection's address there is the
+platform's ingress proxy. A proxy that injects the key must own the header: set
+it, or strip it as Caddy and the dev-server proxies do (behind them the key is the
+address uvicorn sees). See docs/superpowers/specs/2026-08-27-rate-limiting-design.md
 and docs/superpowers/specs/2026-10-18-production-proxy-design.md.
 """
 from __future__ import annotations
