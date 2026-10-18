@@ -142,6 +142,11 @@ class Settings(BaseSettings):
     # development on a browser that does not treat http://localhost as a
     # secure context.
     session_cookie_secure: bool = True
+    # How long sid lasts. True keeps it for a year, so a personal deployment
+    # remembers its visitor. False sends it without a Max-Age, so the browser
+    # drops it when it closes: the public site's target, whose privacy notice
+    # says so.
+    session_cookie_persistent: bool = True
 
     # Input guard (SL-2) — see docs/superpowers/specs/2026-09-27-input-guard-design.md.
     # input_guard_enabled gates only the TypeSafe (Jev) checks and fails closed

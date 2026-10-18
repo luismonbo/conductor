@@ -42,3 +42,6 @@ max_message_chars: 2000
 max_output_tokens: 1500
 max_thread_turns: 20
 daily_token_budget: 33000        # provider monthly token quota / 30
+# The privacy page says the chat's one cookie is a session cookie: the browser
+# drops it when it closes, instead of keeping it for a year.
+session_cookie_persistent: false
