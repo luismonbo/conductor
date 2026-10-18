@@ -183,6 +183,8 @@ uv run pytest -q   # 970 tests
 | `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` | — | empty = tracing disabled, chat unaffected |
 | `LANGFUSE_HOST` | `https://cloud.langfuse.com` | Langfuse Cloud project (EU region; US: `https://us.cloud.langfuse.com`) |
 
+**Rate limiting and visitors.** The limiter keys on the connection's address as uvicorn sees it. In production a Cloudflare Worker holds `HARNESS_API_KEY`, adds it to every request and sets `X-Visitor-IP` to the visitor's address; the limiter then keys on that address, so each visitor gets their own limit instead of the whole internet sharing the platform ingress's address. The header is honored only on a request that carries the valid `HARNESS_API_KEY`; every other request is limited by its connection address. An IPv6 address counts as its /64, and a missing, malformed or repeated header counts as absent. Any proxy that injects the key must therefore own the header: set it to the real visitor's address, or strip it. Caddy and the dev-server proxies strip it, so behind them the limiter keys on whatever address uvicorn sees (with Caddy in the Compose stack, the caller's, taken from `X-Forwarded-For`). Neither the harness nor slowapi logs the limiter key (slowapi's own 429 line, which names it, is silenced), but uvicorn's access log prints the connection's address: on Container Apps that is the platform's proxy, in the Compose stack it is the caller.
+
 Azure example:
 ```bash
 export HARNESS_LLM_BACKEND=azure

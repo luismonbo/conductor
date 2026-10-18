@@ -15,15 +15,24 @@ from fastapi import HTTPException, Request
 from harness.config.settings import get_settings
 
 
+def has_valid_api_key(request: Request, api_key: str) -> bool:
+    """True only for ``Authorization: Bearer <api_key>``.
+
+    The one place the shared key is compared (constant time, on bytes, so a
+    non-ASCII token cannot raise). The rate limiter's key function uses it too,
+    to tell requests that came through the key-injecting proxy from the rest.
+    """
+    authorization = request.headers.get("Authorization", "")
+    scheme, _, token = authorization.partition(" ")
+    return scheme == "Bearer" and bool(token) and hmac.compare_digest(token.encode(), api_key.encode())
+
+
 def require_api_key(request: Request) -> None:
     settings = get_settings()
     if not settings.auth_enabled:
         return
 
-    authorization = request.headers.get("Authorization", "")
-    scheme, _, token = authorization.partition(" ")
-
-    if scheme != "Bearer" or not token or not hmac.compare_digest(token.encode(), settings.api_key.encode()):
+    if not has_valid_api_key(request, settings.api_key):
         raise HTTPException(
             status_code=401,
             detail="Invalid or missing API key.",

@@ -1,5 +1,5 @@
-"""configure_logging: the API's own INFO lines reach stderr, and no SDK can log a
-visitor's message or session id, whatever the root logger's level."""
+"""configure_logging: the API's own INFO lines reach stderr, and no library can log a
+visitor's message, session id or IP address, whatever the root logger's level."""
 from __future__ import annotations
 
 import logging
@@ -93,3 +93,16 @@ def test_pinned_sdks_still_log_their_warnings(sdk_logger, caplog):
     logging.getLogger(sdk_logger).warning("an SDK warning")
 
     assert "an SDK warning" in caplog.text
+
+
+def test_slowapi_warnings_are_silenced_but_its_errors_are_not(caplog):
+    """slowapi's 429 warning names the limiter key, which is the visitor's IP."""
+    configure_logging("INFO")
+
+    logging.getLogger("slowapi").warning(
+        "ratelimit 15 per 1 minute (203.0.113.7) exceeded at endpoint: /chat/stream"
+    )
+    logging.getLogger("slowapi").error("Skipping limit: x")
+
+    assert "203.0.113.7" not in caplog.text
+    assert "Skipping limit" in caplog.text

@@ -126,7 +126,17 @@ async def _rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONR
     rate_limit_default) are per-minute by design -- see
     docs/superpowers/specs/2026-08-27-rate-limiting-design.md. Revisit if a
     non-minute granularity is ever introduced.
+
+    Logs that a limit tripped, with the route and the limit but never the limiter
+    key (the visitor's IP): slowapi's own line, which names it, is silenced in
+    configure_logging. The route is its template, so a thread id isn't logged.
     """
+    route = request.scope.get("route")
+    logging.getLogger(__name__).warning(
+        "rate limit exceeded route=%s limit=%s",
+        getattr(route, "path", request.url.path),
+        exc.detail,
+    )
     return JSONResponse(
         status_code=429,
         content={"detail": "Rate limit exceeded. Please slow down and try again shortly."},
