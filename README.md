@@ -183,6 +183,8 @@ uv run pytest -q   # 970 tests
 | `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` | — | empty = tracing disabled, chat unaffected |
 | `LANGFUSE_HOST` | `https://cloud.langfuse.com` | Langfuse Cloud project (EU region; US: `https://us.cloud.langfuse.com`) |
 
+**Rate limiting and visitors.** The limiter keys on the connection's address. Behind a proxy that holds `HARNESS_API_KEY` and adds it to every request (a Cloudflare Worker in production, Caddy or a dev-server proxy locally), it keys on the visitor's IP in the `X-Visitor-IP` header instead, so each visitor gets their own limit rather than the whole internet sharing the proxy's. The header is honored only on a request that carries the valid `HARNESS_API_KEY`; every other request is limited by its socket address. An IPv6 address counts as its /64, and a missing or malformed header counts as absent. So any proxy that injects the key must also own this header: set it to the real visitor's address, or strip it. Visitor IPs live in the limiter's memory only: no log line carries one (slowapi's own 429 line, which names the key, is silenced).
+
 Azure example:
 ```bash
 export HARNESS_LLM_BACKEND=azure
