@@ -8,12 +8,15 @@ concern. See docs/superpowers/specs/2026-08-27-rate-limiting-design.md.
 from __future__ import annotations
 
 import json
+import logging
+import uuid
 
 import pytest
 from httpx2 import ASGITransport, AsyncClient
 
 from harness.api.main import app
 from harness.config.settings import get_settings
+from harness.observability.logging_setup import configure_logging
 
 
 def _sse_frames(response) -> list[dict]:
@@ -203,3 +206,53 @@ async def test_hostile_visitor_ip_headers_do_not_break_requests(value):
         response = await client.get("/threads", headers={"X-Visitor-IP": value})
 
     assert response.status_code == 200
+
+
+# --- a tripped limit leaves no visitor IP in the logs (launch gate 14f) ------------
+
+
+def _rate_limit_lines(caplog) -> list[str]:
+    return [
+        record.getMessage()
+        for record in caplog.records
+        if record.name == "harness.api.main" and record.getMessage().startswith("rate limit exceeded")
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_429_logs_no_visitor_ip(monkeypatch, caplog):
+    """slowapi would log the limiter key, which is the visitor's IP; the handler's own line must not."""
+    monkeypatch.setenv("HARNESS_LLM_BACKEND", "fake")
+    configure_logging("INFO")  # the app's lifespan does this in production; ASGITransport does not run it
+    caplog.set_level(logging.INFO)
+
+    async with _keyed_client() as client:
+        for _ in range(15):
+            assert (await _chat(client, "203.0.113.77")).status_code == 200
+        rejected = await _chat(client, "203.0.113.77")
+
+    assert rejected.status_code == 429
+    assert "203.0.113.77" not in caplog.text
+    assert _rate_limit_lines(caplog) == ["rate limit exceeded route=/chat/stream limit=15 per 1 minute"]
+
+
+@pytest.mark.asyncio
+async def test_the_429_line_names_the_route_template_not_the_thread_id(monkeypatch, caplog):
+    """/resume/<thread id> is logged as its route template, so no thread id reaches the logs."""
+    monkeypatch.setenv("HARNESS_LLM_BACKEND", "fake")
+    configure_logging("INFO")
+    caplog.set_level(logging.INFO)
+    thread_id = str(uuid.uuid4())
+
+    async with _keyed_client() as client:
+        statuses = [
+            (
+                await client.post(
+                    f"/resume/{thread_id}", json={"decision": {"approved": True}}, timeout=10.0
+                )
+            ).status_code
+            for _ in range(16)
+        ]
+
+    assert statuses == [404] * 15 + [429]
+    assert _rate_limit_lines(caplog) == ["rate limit exceeded route=/resume/{thread_id} limit=15 per 1 minute"]

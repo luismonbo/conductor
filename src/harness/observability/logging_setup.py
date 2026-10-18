@@ -18,6 +18,12 @@ _FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
 # run this, so they still override it: never set them in production.
 _PRIVATE_AT_DEBUG = ("typesafe_sdk", "openai", "aiosqlite", "langfuse")
 
+# slowapi logs "ratelimit 15 per 1 minute (<limiter key>) exceeded at endpoint: ..."
+# at WARNING whenever a limit trips, and the limiter key is the visitor's IP
+# address. Held at ERROR, where its lines carry no key. The API's own 429 handler
+# logs the trip without the address.
+_VISITOR_IP_AT_WARNING = ("slowapi",)
+
 
 def configure_logging(level: str) -> None:
     """Send harness.* lines at `level`, and every other library's at WARNING, to stderr.
@@ -29,3 +35,5 @@ def configure_logging(level: str) -> None:
     logging.getLogger("harness").setLevel(level)
     for name in _PRIVATE_AT_DEBUG:
         logging.getLogger(name).setLevel(logging.WARNING)
+    for name in _VISITOR_IP_AT_WARNING:
+        logging.getLogger(name).setLevel(logging.ERROR)

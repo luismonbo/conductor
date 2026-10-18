@@ -14,10 +14,10 @@ import pytest
 from psycopg import sql
 
 from harness.adapters.postgres.pool import host_of
-from harness.observability.logging_setup import _PRIVATE_AT_DEBUG
+from harness.observability.logging_setup import _PRIVATE_AT_DEBUG, _VISITOR_IP_AT_WARNING
 
 # The loggers whose levels configure_logging (run by the app's startup) sets.
-_CONFIGURED_LOGGERS = ("harness", *_PRIVATE_AT_DEBUG)
+_CONFIGURED_LOGGERS = ("harness", *_PRIVATE_AT_DEBUG, *_VISITOR_IP_AT_WARNING)
 
 
 @pytest.fixture(autouse=True)
