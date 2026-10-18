@@ -7,6 +7,10 @@
 		uri strip_prefix /api
 		reverse_proxy api:8000 {
 			header_up Authorization "Bearer {$HARNESS_API_KEY}"
+			# This proxy injects the shared key for every caller, so it also owns
+			# X-Visitor-IP (the API trusts it on keyed requests): drop any copy a
+			# caller sent, or they could pick their own rate-limit bucket.
+			header_up -X-Visitor-IP
 		}
 	}
 

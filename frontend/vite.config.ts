@@ -22,6 +22,10 @@ export default defineConfig(({ mode }) => {
           rewrite: (path) => path.replace(/^\/api/, ''),
           configure: (proxy) => {
             proxy.on('proxyReq', (proxyReq) => {
+              // This proxy injects the shared key for every caller, so it also owns
+              // X-Visitor-IP (the API trusts it on keyed requests): drop any copy a
+              // caller sent, or they could pick their own rate-limit bucket.
+              proxyReq.removeHeader('x-visitor-ip')
               if (env.HARNESS_API_KEY) {
                 proxyReq.setHeader('Authorization', `Bearer ${env.HARNESS_API_KEY}`)
               }
