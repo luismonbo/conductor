@@ -108,8 +108,12 @@ async def _visitor_session(
     request.state.sid = sid
     response = await call_next(request)
     if minted:
+        settings = get_settings()
         attach_session_cookie(
-            response, sid, secure=get_settings().session_cookie_secure
+            response,
+            sid,
+            secure=settings.session_cookie_secure,
+            persistent=settings.session_cookie_persistent,
         )
     return response
 
