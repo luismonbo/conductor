@@ -77,7 +77,10 @@ def visitor_key(request: Request) -> str:
     """
     settings = get_settings()
     if settings.auth_enabled and has_valid_api_key(request, settings.api_key):
-        visitor = normalize_visitor_ip(request.headers.get(VISITOR_IP_HEADER))
+        # Two X-Visitor-IP lines mean the same as the comma-separated list "a, b" (RFC 9110),
+        # which normalize_visitor_ip refuses: use the header only when there is exactly one.
+        lines = request.headers.getlist(VISITOR_IP_HEADER)
+        visitor = normalize_visitor_ip(lines[0]) if len(lines) == 1 else None
         if visitor is not None:
             return visitor
     return get_remote_address(request)

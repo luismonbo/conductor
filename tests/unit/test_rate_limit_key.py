@@ -23,13 +23,15 @@ def _auth_on(monkeypatch):
 
 
 def _request(
-    headers: dict[str, str] | None = None,
+    headers: dict[str, str] | list[tuple[str, str]] | None = None,
     client: tuple[str, int] | None = (SOCKET, 5555),
 ) -> Request:
+    # A list of pairs can repeat a header name; a dict cannot.
+    pairs = list(headers.items()) if isinstance(headers, dict) else list(headers or [])
     scope = {
         "type": "http",
         # Starlette hands headers to the app as lower-cased latin-1 bytes.
-        "headers": [(k.lower().encode(), v.encode("latin-1")) for k, v in (headers or {}).items()],
+        "headers": [(k.lower().encode(), v.encode("latin-1")) for k, v in pairs],
         "client": client,
     }
     return Request(scope)
@@ -97,6 +99,23 @@ def test_a_keyed_request_without_a_usable_header_falls_back_to_the_socket(header
     headers = dict(BEARER)
     if header is not None:
         headers["X-Visitor-IP"] = header
+
+    assert visitor_key(_request(headers)) == SOCKET
+
+
+@pytest.mark.parametrize(
+    "lines",
+    [
+        ["203.0.113.7", "198.51.100.2"],
+        ["198.51.100.2", "203.0.113.7"],
+        ["203.0.113.7", "203.0.113.7"],
+    ],
+    ids=["two-different", "reversed", "the-same-twice"],
+)
+def test_a_repeated_header_counts_as_absent(lines):
+    # HTTP treats two X-Visitor-IP lines as the comma-separated list "a, b", which counts as
+    # absent. Taking the first (or last) line would let a caller's copy win over a proxy's.
+    headers = [("Authorization", "Bearer test-key"), *[("X-Visitor-IP", line) for line in lines]]
 
     assert visitor_key(_request(headers)) == SOCKET
 
