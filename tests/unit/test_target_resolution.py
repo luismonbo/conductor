@@ -50,7 +50,6 @@ def test_secret_fields_is_exactly_the_expected_set():
         "memory_url",
         "pgvector_url",
         "checkpointer_url",
-        "typesafe_api_key",
         "api_key",
     }
 

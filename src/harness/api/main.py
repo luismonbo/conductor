@@ -64,7 +64,8 @@ async def lifespan(app: FastAPI):
         # graph): a missing agent folder or an unavailable required backend stops
         # startup, and /health only answers once the agent can serve.
         await _get_runtime()
-        # Build the guard now too, so a malformed TypeSafe key fails the boot.
+        # Build the guard now too, so a guard that cannot be built fails the boot
+        # instead of the first visitor's request.
         _get_input_guard()
         yield
     finally:

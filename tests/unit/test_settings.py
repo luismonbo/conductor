@@ -111,7 +111,7 @@ def _personal_target(monkeypatch, tmp_path, body: str) -> None:
 def test_a_target_file_can_turn_the_input_guard_off(monkeypatch, tmp_path):
     # Only the target file says false: the suite-wide env default is removed.
     monkeypatch.delenv("HARNESS_INPUT_GUARD_ENABLED", raising=False)
-    monkeypatch.delenv("HARNESS_TYPESAFE_API_KEY", raising=False)
+    monkeypatch.delenv("HARNESS_AZURE_ENDPOINT", raising=False)
     monkeypatch.setenv("HARNESS_API_KEY", "test-key")
     _personal_target(monkeypatch, tmp_path, "input_guard_enabled: false\n")
 
@@ -129,7 +129,7 @@ def test_a_target_file_can_turn_auth_off(monkeypatch, tmp_path):
 def test_an_explicit_env_var_beats_the_target_file_even_at_its_default(monkeypatch, tmp_path):
     # true is also the field's default; an operator who sets it must still win.
     monkeypatch.setenv("HARNESS_INPUT_GUARD_ENABLED", "true")
-    monkeypatch.setenv("HARNESS_TYPESAFE_API_KEY", "ts-key")
+    monkeypatch.setenv("HARNESS_AZURE_ENDPOINT", "https://foundry.example")
     monkeypatch.setenv("HARNESS_API_KEY", "test-key")
     _personal_target(monkeypatch, tmp_path, "input_guard_enabled: false\n")
 

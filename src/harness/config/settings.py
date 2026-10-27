@@ -149,13 +149,16 @@ class Settings(BaseSettings):
     session_cookie_persistent: bool = True
 
     # Input guard (SL-2) — see docs/superpowers/specs/2026-09-27-input-guard-design.md.
-    # input_guard_enabled gates only the TypeSafe (Jev) checks and fails closed
-    # without a key (validator below). The four limits are independent of it
-    # and each is off at 0. Defaults are the public website's values; a
+    # input_guard_enabled gates only the Microsoft-Decision-1 checks and fails
+    # closed without an Azure endpoint (validator below). The checks run on the
+    # Foundry resource azure_endpoint names, with the LLM's credentials
+    # (azure_api_key, else the managed identity). The four limits are independent
+    # of it and each is off at 0. Defaults are the public website's values; a
     # single-operator deployment turns all of it off in its target file.
     input_guard_enabled: bool = True
-    typesafe_api_key: str = ""
-    guard_model: str = "jev-1.13.0"  # pinned: thresholds are calibrated against it
+    # The deployment's name, not the model's. Thresholds are calibrated against
+    # one model version, so pin the version on the deployment (no auto-upgrade).
+    guard_deployment: str = "Decision-1"
     guard_timeout_seconds: float = Field(3.0, gt=0)
     max_message_chars: int = Field(2000, ge=0)
     max_output_tokens: int = Field(1500, ge=0)  # per LLM call
@@ -177,11 +180,21 @@ class Settings(BaseSettings):
         return self
 
     @model_validator(mode="after")
-    def _require_typesafe_key_when_guard_enabled(self) -> "Settings":
-        if self.input_guard_enabled and not self.typesafe_api_key:
+    def _require_a_guard_target_when_guard_enabled(self) -> "Settings":
+        # The guard fails open, so a typo here would switch it off silently.
+        if not self.input_guard_enabled:
+            return self
+        if not self.azure_endpoint.startswith(("https://", "http://")):
             raise ValueError(
-                "HARNESS_INPUT_GUARD_ENABLED is true but HARNESS_TYPESAFE_API_KEY is "
-                "empty. Set HARNESS_TYPESAFE_API_KEY, or set "
+                "HARNESS_INPUT_GUARD_ENABLED is true but HARNESS_AZURE_ENDPOINT is "
+                "empty or not an http(s) URL. Set HARNESS_AZURE_ENDPOINT to the "
+                "Foundry resource that has the Decision-1 deployment, or set "
+                "HARNESS_INPUT_GUARD_ENABLED=false."
+            )
+        if not self.guard_deployment.strip():
+            raise ValueError(
+                "HARNESS_INPUT_GUARD_ENABLED is true but HARNESS_GUARD_DEPLOYMENT is "
+                "empty. Set it to the Decision-1 deployment's name, or set "
                 "HARNESS_INPUT_GUARD_ENABLED=false."
             )
         return self

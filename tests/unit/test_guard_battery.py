@@ -12,9 +12,9 @@ def test_battery_order_is_the_precedence_order():
     assert [check.id for check in BATTERY] == ["extraction", "private_info", "off_topic"]
 
 
-def test_starting_thresholds():
+def test_thresholds_calibrated_on_decision_1():
     assert (EXTRACTION.threshold, PRIVATE_INFO.threshold, OFF_TOPIC.threshold) == (
-        0.70, 0.70, 0.80,
+        0.70, 0.70, 0.90,
     )
 
 

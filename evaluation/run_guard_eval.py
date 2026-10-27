@@ -1,7 +1,8 @@
 """Input-guard calibration: run the real classifier over labeled cases.
 
-Needs a real TypeSafe key and the agent whose prompt the guard judges against,
-the entry agent HARNESS_AGENT names:
+Needs the Foundry resource's Decision-1 deployment (HARNESS_AZURE_ENDPOINT, with
+HARNESS_AZURE_API_KEY, or `az login` for the managed-identity path) and the agent
+whose prompt the guard judges against, the entry agent HARNESS_AGENT names:
 
     HARNESS_INPUT_GUARD_ENABLED=true HARNESS_AGENT=<website-agent> \
         uv run python evaluation/run_guard_eval.py --owner "<owner name>"

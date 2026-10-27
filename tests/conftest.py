@@ -32,9 +32,9 @@ def _restore_logger_levels():
 
 @pytest.fixture(autouse=True)
 def _input_guard_off_by_default(monkeypatch):
-    """The input guard is default-on and refuses to start without a TypeSafe
-    key, so every test runs with it off. Guard tests opt back in explicitly
-    (delenv this, or pass input_guard_enabled=True with a key)."""
+    """The input guard is default-on and refuses to start without an Azure
+    endpoint, so every test runs with it off. Guard tests opt back in explicitly
+    (delenv this, or pass input_guard_enabled=True with an endpoint)."""
     monkeypatch.setenv("HARNESS_INPUT_GUARD_ENABLED", "false")
 
 

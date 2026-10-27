@@ -91,7 +91,7 @@ Configuration below), then API and frontend each in their own terminal:
 uv sync
 cp .env.example .env   # fill in provider keys for the profiles you'll use
 echo "HARNESS_API_KEY=$(openssl rand -hex 32)" >> .env   # required: auth fails closed with no key
-# Local dev: the input guard (fails closed without a TypeSafe key) and the
+# Local dev: the input guard (fails closed without an Azure endpoint) and the
 # public website's limits off. A public deployment keeps the defaults.
 cat >> .env <<'EOF'
 HARNESS_INPUT_GUARD_ENABLED=false
@@ -112,7 +112,7 @@ in a model profile fails fast instead of surfacing as an opaque proxy 400.
 Fallback — raw commands, no proxy/tracing, fake LLM, zero credentials:
 ```bash
 export HARNESS_API_KEY=$(openssl rand -hex 32)
-export HARNESS_INPUT_GUARD_ENABLED=false   # the input guard fails closed without a TypeSafe key
+export HARNESS_INPUT_GUARD_ENABLED=false   # the input guard fails closed without an Azure endpoint
 uv run uvicorn harness.api.main:app --reload --app-dir src
 
 # health check (the one route auth never gates)
@@ -153,15 +153,14 @@ uv run pytest -q   # 970 tests
 | `HARNESS_SHOW_TOOL_DETAILS` | `false` | `true` · `false` — whether tool arguments and results reach the browser (the chat stream and `GET /threads/{id}`); off, a browser gets each tool's name only. Keep it off on a public deployment |
 | `HARNESS_SESSION_COOKIE_SECURE` | `true` | `true` · `false` — marks the visitor `sid` cookie `Secure`, so browsers only send it over HTTPS; set `false` only for local development on a browser that does not treat `http://localhost` as a secure context |
 | `HARNESS_SESSION_COOKIE_PERSISTENT` | `true` | `true` · `false` — how long the visitor `sid` cookie lasts: `true` keeps it for a year, `false` sends it without a `Max-Age`, so the browser drops it when it closes (the public site's target sets `false`, as its privacy page says) |
-| `HARNESS_LOG_LEVEL` | `INFO` | `DEBUG` · `INFO` · `WARNING` · `ERROR` — level of the harness's own log lines (stderr); every other library stays at `WARNING`. Never set an SDK's own debug switch in production (`TYPESAFE_LOG_LEVEL=debug`, `OPENAI_LOG=debug`, `LANGFUSE_DEBUG=true`), nor run uvicorn with `--log-level trace`: they log visitor messages, the `sid` cookie or the API key |
+| `HARNESS_LOG_LEVEL` | `INFO` | `DEBUG` · `INFO` · `WARNING` · `ERROR` — level of the harness's own log lines (stderr); every other library stays at `WARNING`. Never set an SDK's own debug switch in production (`OPENAI_LOG=debug`, `LANGFUSE_DEBUG=true`), nor run uvicorn with `--log-level trace`: they log visitor messages, the `sid` cookie or the API key |
 | `HARNESS_RATE_LIMIT_ENABLED` | `true` | `true` · `false` |
 | `HARNESS_RATE_LIMIT_STRICT` | `15/minute` | slowapi rate string; applies to LLM-invoking endpoints |
 | `HARNESS_RATE_LIMIT_DEFAULT` | `60/minute` | slowapi rate string; applies to all other rate-limited endpoints |
 | `HARNESS_AUTH_ENABLED` | `true` | `true` · `false` — fails closed: refuses to start if `true` with no `HARNESS_API_KEY` set |
 | `HARNESS_API_KEY` | — | shared bearer key gating every route except `/health`; generate with `openssl rand -hex 32` |
-| `HARNESS_INPUT_GUARD_ENABLED` | `true` | `true` · `false` — TypeSafe (Jev) screens every chat message for extraction, private-info and off-topic requests before the agent sees it; fails closed: refuses to start if `true` with no `HARNESS_TYPESAFE_API_KEY` |
-| `HARNESS_TYPESAFE_API_KEY` | — | TypeSafe API key |
-| `HARNESS_GUARD_MODEL` | `jev-1.13.0` | pinned Jev version the guard's thresholds are calibrated against |
+| `HARNESS_INPUT_GUARD_ENABLED` | `true` | `true` · `false` — Microsoft-Decision-1 (a Foundry deployment, called with the Azure LLM's endpoint and credentials) screens every chat message for extraction, private-info and off-topic requests before the agent sees it; fails closed: refuses to start if `true` with no `HARNESS_AZURE_ENDPOINT`. Without `HARNESS_AZURE_API_KEY` the managed identity needs the Cognitive Services User role on the resource |
+| `HARNESS_GUARD_DEPLOYMENT` | `Decision-1` | name of the Foundry deployment of Microsoft-Decision-1; pin its model version there, since the guard's thresholds are calibrated against one version |
 | `HARNESS_MAX_MESSAGE_CHARS` | `2000` | integer; `0` = off |
 | `HARNESS_MAX_OUTPUT_TOKENS` | `1500` | integer, per LLM call; `0` = off |
 | `HARNESS_MAX_THREAD_TURNS` | `20` | integer, runs per thread; `0` = off |

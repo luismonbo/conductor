@@ -104,7 +104,7 @@ async def test_below_every_threshold_is_allowed_with_full_metadata():
     assert (decision.allowed, decision.stage, decision.reason) == (True, "classifier", None)
     assert decision.probabilities == {"first": 0.69, "second": 0.79}
     assert decision.battery_version == "test-v"
-    assert decision.model == "fake-jev"
+    assert decision.model == "fake-decision"
     assert decision.request_id == "fake-request"
     assert decision.latency_ms is not None
 
@@ -165,13 +165,11 @@ async def test_timeout_fails_open():
     "misconfigured,level", [(False, logging.WARNING), (True, logging.ERROR)]
 )
 async def test_classifier_error_fails_open_and_logs_by_severity(caplog, misconfigured, level):
-    error = GuardClassifierError(
-        "boom", cause="TypeSafeAuthenticationError", misconfigured=misconfigured
-    )
+    error = GuardClassifierError("boom", cause="HTTP401", misconfigured=misconfigured)
     with caplog.at_level(logging.WARNING, logger="harness.security.input_guard"):
         decision = await _guard(FakeClassifier(error=error)).screen(_ctx())
     assert (decision.allowed, decision.stage, decision.error) == (
-        True, "fallback", "TypeSafeAuthenticationError",
+        True, "fallback", "HTTP401",
     )
     assert caplog.records[-1].levelno == level
 

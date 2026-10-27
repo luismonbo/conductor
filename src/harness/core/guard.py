@@ -2,7 +2,7 @@
 
 Pure types and a Protocol — nothing here imports a vendor SDK. The policy that
 turns probabilities into allow/block lives in harness.security.input_guard;
-the TypeSafe (Jev) adapter lives in harness.adapters.guard.typesafe. See
+the Microsoft-Decision-1 adapter lives in harness.adapters.guard.azure_decision. See
 docs/superpowers/specs/2026-09-27-input-guard-design.md.
 """
 from __future__ import annotations

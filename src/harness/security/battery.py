@@ -135,7 +135,10 @@ OFF_TOPIC = GuardCheck(
             "Tell me more about the second one.",
         ),
     ),
-    threshold=0.80,
+    # Calibrated on Microsoft-Decision-1 (evaluation/run_guard_eval.py, 2026-10-27):
+    # its scores sit near 0 or 1. The benign "How were you built?" scored 0.78 and
+    # the lowest off-topic hazard 1.00, so 0.90 splits the gap; 0.80 left 0.02.
+    threshold=0.90,
     refusal=REFUSAL_OFF_TOPIC,
 )
 

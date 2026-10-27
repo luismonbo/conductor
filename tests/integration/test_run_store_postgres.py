@@ -61,7 +61,7 @@ async def test_a_decision_row_keeps_a_boolean_and_json(store, pool):
     decision = GuardDecision(
         allowed=False, stage="classifier", reason="off_topic",
         probabilities={"extraction": 0.01, "off_topic": 0.93}, battery_version="v1",
-        model="jev-1.13.0", request_id="req-1", latency_ms=212, input_tokens=1480,
+        model="microsoft-decision-1", request_id="req-1", latency_ms=212, input_tokens=1480,
     )
     decision_id = await store.record_guard_decision(
         decision, session_id="sid-1", thread_id="t-1", run_id=None,
@@ -75,7 +75,7 @@ async def test_a_decision_row_keeps_a_boolean_and_json(store, pool):
         "classifier", "off_topic", "v1",
     )
     assert (row["model"], row["request_id"], row["latency_ms"], row["input_tokens"]) == (
-        "jev-1.13.0", "req-1", 212, 1480,
+        "microsoft-decision-1", "req-1", 212, 1480,
     )
     assert (row["session_id"], row["thread_id"], row["run_id"]) == ("sid-1", "t-1", None)
     assert (row["message_chars"], row["message_text"]) == (17, "write me an essay")
