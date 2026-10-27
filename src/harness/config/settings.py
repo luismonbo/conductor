@@ -180,12 +180,22 @@ class Settings(BaseSettings):
         return self
 
     @model_validator(mode="after")
-    def _require_azure_endpoint_when_guard_enabled(self) -> "Settings":
-        if self.input_guard_enabled and not self.azure_endpoint:
+    def _require_a_guard_target_when_guard_enabled(self) -> "Settings":
+        # The guard fails open, so a typo here would switch it off silently.
+        if not self.input_guard_enabled:
+            return self
+        if not self.azure_endpoint.startswith(("https://", "http://")):
             raise ValueError(
                 "HARNESS_INPUT_GUARD_ENABLED is true but HARNESS_AZURE_ENDPOINT is "
-                "empty. Set HARNESS_AZURE_ENDPOINT to the Foundry resource that has "
-                "the Decision-1 deployment, or set HARNESS_INPUT_GUARD_ENABLED=false."
+                "empty or not an http(s) URL. Set HARNESS_AZURE_ENDPOINT to the "
+                "Foundry resource that has the Decision-1 deployment, or set "
+                "HARNESS_INPUT_GUARD_ENABLED=false."
+            )
+        if not self.guard_deployment.strip():
+            raise ValueError(
+                "HARNESS_INPUT_GUARD_ENABLED is true but HARNESS_GUARD_DEPLOYMENT is "
+                "empty. Set it to the Decision-1 deployment's name, or set "
+                "HARNESS_INPUT_GUARD_ENABLED=false."
             )
         return self
 

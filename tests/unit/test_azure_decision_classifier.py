@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import threading
 
 import httpx
 import pytest
@@ -68,8 +69,9 @@ def _answers(**noul: float) -> httpx.Response:
     )
 
 
-def _error(status: int, code: str = "oops") -> httpx.Response:
-    return httpx.Response(status, json={"error": {"code": code, "message": "text"}})
+def _error(status: int, code: str | None = None) -> httpx.Response:
+    error = {"message": "text"} if code is None else {"code": code, "message": "text"}
+    return httpx.Response(status, json={"error": error})
 
 
 async def test_posts_the_deployment_state_and_one_noul_question_per_check():
@@ -281,6 +283,127 @@ async def test_an_error_names_the_service_code_and_never_the_visitor_message():
 
     assert "unsupported_request_argument" in str(info.value)
     assert "my private question" not in str(info.value)
+
+
+@pytest.mark.parametrize("value", [0, 0.0, 1, 1.0], ids=["int-0", "float-0", "int-1", "float-1"])
+async def test_the_probability_bounds_are_valid_answers(value):
+    # A saturated hazard scores exactly 1.0: rejecting it would fail open on the worst messages.
+    result = await _classifier(_Service(_answers(a=value))).classify({}, [CHECK_A])
+
+    assert result.probabilities == {"a": float(value)}
+
+
+async def test_a_reply_without_model_or_usage_still_answers():
+    reply = httpx.Response(200, json={"answers": {"a": {"noul": 0.4, "type": "noul"}}})
+    result = await _classifier(_Service(reply)).classify({}, [CHECK_A])
+
+    assert result.probabilities == {"a": 0.4}
+    assert result.model == "Decision-1"  # the deployment name stands in
+    assert result.input_tokens == 0
+
+
+async def test_the_token_provider_runs_off_the_event_loop_thread():
+    # azure-identity's provider is sync and refreshes over the network.
+    threads: list[int] = []
+
+    def provider() -> str:
+        threads.append(threading.get_ident())
+        return "entra-token"
+
+    await _classifier(_Service(_answers(a=0.1)), token_provider=provider).classify({}, [CHECK_A])
+
+    assert threads and threads != [threading.get_ident()]
+
+
+async def test_a_rejection_without_a_json_body_is_still_classified():
+    service = _Service(httpx.Response(403, text="<html>Forbidden</html>"))
+    with pytest.raises(GuardClassifierError) as info:
+        await _classifier(service).classify({}, [CHECK_A])
+
+    assert info.value.cause == "HTTP403"
+    assert info.value.misconfigured is True
+
+
+async def test_the_cause_names_the_status_and_the_service_error_code():
+    service = _Service(_error(404, code="DeploymentNotFound"))
+    with pytest.raises(GuardClassifierError) as info:
+        await _classifier(service).classify({}, [CHECK_A])
+
+    assert info.value.cause == "HTTP404 DeploymentNotFound"
+    assert "DeploymentNotFound" in str(info.value)
+
+
+async def test_an_error_code_that_is_free_text_is_left_out_of_the_cause():
+    # `cause` reaches the logs and the guard_decisions table: only identifiers go in.
+    service = _Service(_error(400, code="cannot parse: my private question"))
+    with pytest.raises(GuardClassifierError) as info:
+        await _classifier(service).classify({}, [CHECK_A])
+
+    assert info.value.cause == "HTTP400"
+
+
+async def test_a_message_the_json_encoder_rejects_fails_the_call_without_sending_it():
+    # A lone surrogate (JSON "\ud800") has no UTF-8 encoding.
+    service = _Service()
+    with pytest.raises(GuardClassifierError) as info:
+        await _classifier(service).classify({"visitor_message": "bad \ud800 text"}, [CHECK_A])
+
+    assert info.value.cause == "UnicodeEncodeError"
+    assert info.value.misconfigured is False
+    assert service.requests == []
+
+
+async def test_a_reply_that_cannot_be_decoded_fails_the_call_and_is_not_retried():
+    broken = httpx.Response(
+        200, headers={"content-encoding": "gzip"}, stream=httpx.ByteStream(b"not gzip")
+    )
+    service = _Service(broken)
+    with pytest.raises(GuardClassifierError) as info:
+        await _classifier(service).classify({}, [CHECK_A])
+
+    assert info.value.cause == "DecodingError"
+    assert info.value.misconfigured is False
+    assert len(service.requests) == 1
+
+
+_SECRET = "sk-very-secret-key"
+_PRIVATE = "my private question"
+_ECHO = f"{_SECRET} {_PRIVATE}"
+
+
+def _raising(error: Exception):
+    def provider() -> str:
+        raise error
+
+    return provider
+
+
+# Each failure's own text echoes the credential and the visitor message; neither
+# may reach the exception message or `cause`, which are logged and stored.
+_FAILURES = {
+    "connect-error": lambda: (
+        _Service(httpx.ConnectError(_ECHO), httpx.ConnectError(_ECHO)), {"api_key": _SECRET}
+    ),
+    "token-error": lambda: (_Service(), {"token_provider": _raising(RuntimeError(_ECHO))}),
+    "service-message": lambda: (
+        _Service(httpx.Response(400, json={"error": {"code": "bad", "message": _ECHO}})),
+        {"api_key": _SECRET},
+    ),
+    "free-text-code": lambda: (
+        _Service(httpx.Response(400, json={"error": {"code": _ECHO}})), {"api_key": _SECRET}
+    ),
+    "invalid-body": lambda: (_Service(httpx.Response(200, text=_ECHO)), {"api_key": _SECRET}),
+}
+
+
+@pytest.mark.parametrize("name", list(_FAILURES))
+async def test_no_failure_leaks_the_visitor_message_or_a_credential(name):
+    service, auth = _FAILURES[name]()
+    with pytest.raises(GuardClassifierError) as info:
+        await _classifier(service, **auth).classify({"visitor_message": _PRIVATE}, [CHECK_A])
+
+    for text in (str(info.value), info.value.cause):
+        assert _SECRET not in text and _PRIVATE not in text
 
 
 async def test_aclose_closes_the_http_client():

@@ -35,8 +35,26 @@ def test_guard_on_with_an_azure_endpoint_constructs(clean_env):
     assert s.input_guard_enabled is True
 
 
-def test_guard_off_needs_no_endpoint(clean_env):
-    s = Settings(_env_file=None, api_key="test-key", input_guard_enabled=False)
+@pytest.mark.parametrize("endpoint", ["foundry.example", "ftp://foundry.example"])
+def test_the_guard_refuses_an_azure_endpoint_that_is_not_an_http_url(clean_env, endpoint):
+    # Without a scheme every call would fail, and the guard fails open: silently off.
+    with pytest.raises(ValueError, match="HARNESS_AZURE_ENDPOINT"):
+        Settings(_env_file=None, api_key="test-key", azure_endpoint=endpoint)
+
+
+def test_the_guard_refuses_an_empty_deployment_name(clean_env):
+    with pytest.raises(ValueError, match="HARNESS_GUARD_DEPLOYMENT"):
+        Settings(
+            _env_file=None, api_key="test-key", azure_endpoint="https://foundry.example",
+            guard_deployment=" ",
+        )
+
+
+def test_guard_off_needs_no_endpoint_or_deployment(clean_env):
+    s = Settings(
+        _env_file=None, api_key="test-key", input_guard_enabled=False,
+        azure_endpoint="not-a-url", guard_deployment="",
+    )
     assert s.input_guard_enabled is False
 
 

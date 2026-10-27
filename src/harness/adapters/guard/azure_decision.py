@@ -13,13 +13,15 @@ Auth is exactly one of the resource's api key (local development) or a bearer
 token provider (the Container App's managed identity), as in the LLM adapter.
 
 Every failure is re-raised as GuardClassifierError so the policy never sees a
-vendor type. Its message carries the HTTP status and the service's error code,
-never the service's free text or the request: either can hold the visitor's
-message, and this message reaches the logs.
+vendor type. Its message and `cause` carry the HTTP status and the service's
+error code (only when that is a plain identifier), never the service's free
+text or the request: either can hold the visitor's message, and `cause` reaches
+the logs and the guard_decisions table.
 """
 from __future__ import annotations
 
 import asyncio
+import re
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
@@ -34,6 +36,7 @@ from harness.core.guard import (
 
 _PATH = "/providers/microsoft/v1/systemone"
 _ATTEMPTS = 2  # the call and one retry; InputGuard's own timeout caps the total
+_ERROR_CODE = re.compile(r"[A-Za-z0-9_.\-]{1,60}")  # "DeploymentNotFound", "401"
 
 
 class AzureDecisionClassifier:
@@ -97,11 +100,12 @@ class AzureDecisionClassifier:
                 response = await self._client.post(self._url, json=body, headers=headers)
             except httpx.TransportError as exc:  # connect, timeout, read, protocol
                 if not attempts_left:
-                    raise GuardClassifierError(
-                        f"{type(exc).__name__} calling the decision endpoint",
-                        cause=type(exc).__name__, misconfigured=False,
-                    ) from exc
+                    raise _call_error(exc) from exc
                 continue
+            except (httpx.RequestError, UnicodeError) as exc:
+                # An undecodable reply, or a message JSON cannot encode (a lone
+                # surrogate): a retry would fail the same way.
+                raise _call_error(exc) from exc
             if attempts_left and _is_retried(response.status_code):
                 continue
             return response
@@ -113,6 +117,9 @@ class AzureDecisionClassifier:
             # The provider is sync (azure-identity) and refreshes over the network.
             token = await asyncio.to_thread(self._token_provider)
         except Exception as exc:
+            # Misconfigured whatever the cause, so it logs at ERROR: no token means
+            # the guard is off for every message, and azure-identity does not say
+            # which failures pass on their own.
             raise GuardClassifierError(
                 f"{type(exc).__name__} getting an Entra token for the decision endpoint",
                 cause=type(exc).__name__, misconfigured=True,
@@ -149,23 +156,29 @@ def _is_transient(status: int) -> bool:
     return status in (408, 429) or status >= 500
 
 
+def _call_error(exc: Exception) -> GuardClassifierError:
+    name = type(exc).__name__
+    return GuardClassifierError(
+        f"{name} calling the decision endpoint", cause=name, misconfigured=False
+    )
+
+
 def _status_error(response: httpx.Response) -> GuardClassifierError:
     status = response.status_code
     code = _error_code(response)
+    label = f"HTTP{status}" + (f" {code}" if code else "")
     return GuardClassifierError(
-        f"HTTP {status}" + (f" {code}" if code else ""),
-        cause=f"HTTP{status}",
-        misconfigured=not _is_transient(status),
+        label, cause=label, misconfigured=not _is_transient(status)
     )
 
 
 def _error_code(response: httpx.Response) -> str:
+    """The service's error code, or "" when it is missing or not a plain identifier."""
     try:
-        error = response.json()["error"]
-        code = error["code"]
+        code = response.json()["error"]["code"]
     except (ValueError, KeyError, TypeError):
         return ""
-    return code[:60] if isinstance(code, str) else ""
+    return code if isinstance(code, str) and _ERROR_CODE.fullmatch(code) else ""
 
 
 def _json_object(response: httpx.Response) -> dict[str, Any]:
