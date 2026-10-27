@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
+import httpx
 import yaml
 
 from harness.adapters.chunking.structure_aware import StructureAwareChunker
@@ -353,25 +354,35 @@ async def build_runtime(settings: Settings) -> AgentRuntime:
 def build_input_guard(settings: Settings) -> InputGuard:
     """The input guard for chat requests (SL-2).
 
-    The fixed limits always apply (each off at 0); the TypeSafe classifier
-    only when input_guard_enabled, and only then is the SDK imported. The
-    SDK's own defaults (10 s per request, 2 retries, 30 s total) are far too
-    slow for a chat reply: InputGuard enforces guard_timeout_seconds as a hard
-    ceiling, and the SDK gets the same budget with at most one retry.
+    The fixed limits always apply (each off at 0); the Microsoft-Decision-1
+    classifier only when input_guard_enabled. It calls the same Foundry resource
+    as the LLM, with the same credentials: the resource key when azure_api_key
+    is set, else the managed identity. A chat reply cannot wait on the guard:
+    InputGuard enforces guard_timeout_seconds as a hard ceiling, and the HTTP
+    client gets the same budget.
     """
     classifier = None
     if settings.input_guard_enabled:
-        from typesafe_sdk import AsyncTypeSafeClient, RetryPolicy
+        from harness.adapters.guard.azure_decision import AzureDecisionClassifier
 
-        from harness.adapters.guard.typesafe import TypeSafeClassifier
+        auth: dict[str, Any]
+        if settings.azure_api_key:
+            auth = {"api_key": settings.azure_api_key}
+        else:
+            from azure.identity import DefaultAzureCredential, get_bearer_token_provider
 
-        client = AsyncTypeSafeClient(
-            api_key=settings.typesafe_api_key,
-            model=settings.guard_model,
-            timeout=settings.guard_timeout_seconds,
-            retry=RetryPolicy(max_retries=1, timeout=settings.guard_timeout_seconds),
+            auth = {
+                "token_provider": get_bearer_token_provider(
+                    DefaultAzureCredential(),
+                    "https://cognitiveservices.azure.com/.default",
+                )
+            }
+        classifier = AzureDecisionClassifier(
+            httpx.AsyncClient(timeout=settings.guard_timeout_seconds),
+            settings.azure_endpoint,
+            settings.guard_deployment,
+            **auth,
         )
-        classifier = TypeSafeClassifier(client, model=settings.guard_model)
     return InputGuard(
         classifier=classifier,
         limits=GuardLimits(

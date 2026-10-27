@@ -18,7 +18,6 @@ services:
       HARNESS_AZURE_API_KEY: "${HARNESS_AZURE_API_KEY:-}"
       HARNESS_LLM_API_KEY: "${HARNESS_LLM_API_KEY:-}"
       HARNESS_EMBEDDING_API_KEY: "${HARNESS_EMBEDDING_API_KEY:-}"
-      HARNESS_TYPESAFE_API_KEY: "${HARNESS_TYPESAFE_API_KEY:-}"
       # postgres is a sibling container here, not localhost: the checkpointer and
       # run store, and the pgvector RAG store.
       HARNESS_CHECKPOINTER_URL: postgresql://harness:harness@postgres:5432/harness

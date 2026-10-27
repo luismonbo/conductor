@@ -5,8 +5,10 @@
 # only from what is in the repo. Only non-secret settings belong here; the loader
 # rejects credential fields (SECRET_FIELDS in src/harness/config/targets.py).
 # Secrets come from the Container App's environment: HARNESS_API_KEY,
-# HARNESS_TYPESAFE_API_KEY, HARNESS_CHECKPOINTER_URL (the Postgres DSN) and,
-# unless the app's managed identity is used, HARNESS_AZURE_API_KEY.
+# HARNESS_CHECKPOINTER_URL (the Postgres DSN) and, unless the app's managed
+# identity is used, HARNESS_AZURE_API_KEY. The identity needs the Cognitive
+# Services User role on the Foundry resource: the input guard's Decision-1 calls
+# are not OpenAI calls, so the OpenAI User role does not cover them.
 #
 # Boots once the wiki's Blob container is set (Wiki, below). An environment
 # variable overrides any value here, e.g. HARNESS_CHECKPOINTER=sqlite for a local test.
@@ -37,7 +39,7 @@ memory_tools_enabled: false
 # --- Public-site safety ------------------------------------------------------
 show_tool_details: false
 input_guard_enabled: true
-guard_model: jev-1.13.0          # pinned: thresholds are calibrated against it
+guard_deployment: Decision-1     # Data Zone Standard; pin its model version on the deployment
 max_message_chars: 2000
 max_output_tokens: 1500
 max_thread_turns: 20

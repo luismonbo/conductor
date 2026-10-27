@@ -108,7 +108,7 @@ def test_the_dataset_never_reuses_the_batterys_own_examples():
 async def test_a_live_report_names_the_agent_whose_prompt_it_judged(monkeypatch):
     settings = Settings(
         _env_file=None, api_key="k", input_guard_enabled=True,
-        typesafe_api_key="ts", agent="default",
+        azure_endpoint="https://foundry.example", agent="default",
     )
     monkeypatch.setattr(run_guard_eval, "get_settings", lambda: settings)
     monkeypatch.setattr(

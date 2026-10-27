@@ -73,7 +73,7 @@ def test_an_already_configured_root_logger_is_left_alone(caplog):
 
 
 # Where each SDK writes request bodies or SQL parameters at DEBUG.
-_SDK_BODY_LOGGERS = ["typesafe_sdk", "openai._base_client", "aiosqlite", "langfuse"]
+_SDK_BODY_LOGGERS = ["openai._base_client", "aiosqlite", "langfuse"]
 
 
 @pytest.mark.parametrize("sdk_logger", _SDK_BODY_LOGGERS)

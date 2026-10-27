@@ -118,12 +118,12 @@ async def test_blocked_text_never_reaches_the_model_on_later_turns(guarded):
 
 
 async def test_a_classifier_failure_fails_open_and_is_recorded(guarded):
-    guarded.install(error=GuardClassifierError("down", cause="TypeSafeInternalServerError"))
+    guarded.install(error=GuardClassifierError("down", cause="HTTP503"))
     resp = await guarded.client.post("/chat/stream", json={"message": "hi"})
     assert sse_frames(resp)[-1]["stopped_reason"] == "final_answer"
     [row] = await _decision_rows()
     assert (row[0], row[1], row[2], row[6]) == (
-        1, "fallback", "guard_unavailable", "TypeSafeInternalServerError",
+        1, "fallback", "guard_unavailable", "HTTP503",
     )
 
 

@@ -11,7 +11,7 @@ class FakeClassifier:
         self,
         probabilities: Mapping[str, float] | None = None,
         error: BaseException | None = None,
-        model: str = "fake-jev",
+        model: str = "fake-decision",
     ) -> None:
         self._probabilities = dict(probabilities or {})
         self._error = error

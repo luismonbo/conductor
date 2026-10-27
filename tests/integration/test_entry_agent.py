@@ -105,12 +105,12 @@ async def test_a_failed_startup_closes_the_storage(monkeypatch, tmp_path):
         return opened[-1]
 
     def failing_guard(settings):
-        raise ValueError("malformed TypeSafe key")
+        raise ValueError("malformed guard setting")
 
     monkeypatch.setattr(build_module, "open_storage", recording_open_storage)
     monkeypatch.setattr(_main, "build_input_guard", failing_guard)
 
-    with pytest.raises(ValueError, match="malformed TypeSafe key"):
+    with pytest.raises(ValueError, match="malformed guard setting"):
         async with _main.lifespan(_main.app):
             pass
 

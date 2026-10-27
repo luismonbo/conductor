@@ -1,17 +1,16 @@
-"""Pin the input-guard settings, their defaults, and the fail-closed key check."""
+"""Pin the input-guard settings, their defaults, and the fail-closed endpoint check."""
 from __future__ import annotations
 
 import pytest
 
 from harness.config.settings import Settings
-from harness.config.targets import resolve_target_overrides
 
 # main.py's load_dotenv() and pymilvus can copy the real .env into os.environ
 # during a test session, so every test of a default deletes the keys it reads.
 _GUARD_ENV = [
     "HARNESS_INPUT_GUARD_ENABLED",
-    "HARNESS_TYPESAFE_API_KEY",
-    "HARNESS_GUARD_MODEL",
+    "HARNESS_AZURE_ENDPOINT",
+    "HARNESS_GUARD_DEPLOYMENT",
     "HARNESS_GUARD_TIMEOUT_SECONDS",
     "HARNESS_MAX_MESSAGE_CHARS",
     "HARNESS_MAX_OUTPUT_TOKENS",
@@ -26,25 +25,24 @@ def clean_env(monkeypatch):
         monkeypatch.delenv(key, raising=False)
 
 
-def test_guard_is_on_by_default_and_refuses_to_start_without_a_key(clean_env):
-    with pytest.raises(ValueError, match="HARNESS_TYPESAFE_API_KEY"):
+def test_guard_is_on_by_default_and_refuses_to_start_without_an_azure_endpoint(clean_env):
+    with pytest.raises(ValueError, match="HARNESS_AZURE_ENDPOINT"):
         Settings(_env_file=None, api_key="test-key")
 
 
-def test_guard_on_with_a_key_constructs(clean_env):
-    s = Settings(_env_file=None, api_key="test-key", typesafe_api_key="ts-key")
+def test_guard_on_with_an_azure_endpoint_constructs(clean_env):
+    s = Settings(_env_file=None, api_key="test-key", azure_endpoint="https://foundry.example")
     assert s.input_guard_enabled is True
-    assert s.typesafe_api_key == "ts-key"
 
 
-def test_guard_off_needs_no_key(clean_env):
+def test_guard_off_needs_no_endpoint(clean_env):
     s = Settings(_env_file=None, api_key="test-key", input_guard_enabled=False)
     assert s.input_guard_enabled is False
 
 
 def test_guard_and_limit_defaults(clean_env):
     s = Settings(_env_file=None, api_key="test-key", input_guard_enabled=False)
-    assert s.guard_model == "jev-1.13.0"
+    assert s.guard_deployment == "Decision-1"
     assert s.guard_timeout_seconds == 3.0
     assert s.max_message_chars == 2000
     assert s.max_output_tokens == 1500
@@ -67,9 +65,3 @@ def test_the_guard_timeout_must_be_positive(clean_env):
     with pytest.raises(ValueError, match="guard_timeout_seconds"):
         Settings(_env_file=None, api_key="test-key", input_guard_enabled=False,
                  guard_timeout_seconds=0)
-
-
-def test_typesafe_key_is_rejected_in_a_target_file(tmp_path):
-    (tmp_path / "site.yaml").write_text("typesafe_api_key: leaked\n")
-    with pytest.raises(ValueError, match="typesafe_api_key"):
-        resolve_target_overrides("site", base_dir=tmp_path)
