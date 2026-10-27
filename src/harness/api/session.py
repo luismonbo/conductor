@@ -34,13 +34,17 @@ def read_or_mint(request: Request) -> tuple[str, bool]:
     return secrets.token_urlsafe(_TOKEN_BYTES), True
 
 
-def attach(response: Response, sid: str, *, secure: bool) -> None:
+def attach(
+    response: Response, sid: str, *, secure: bool, persistent: bool = True
+) -> None:
+    """Set the cookie. With `persistent` false it has no Max-Age or Expires, so the
+    browser drops it when it closes. (Max-Age=0 would make the browser delete it at once.)"""
     response.set_cookie(
         COOKIE_NAME,
         sid,
         httponly=True,
         secure=secure,
         samesite="lax",
-        max_age=COOKIE_MAX_AGE,
+        max_age=COOKIE_MAX_AGE if persistent else None,
         path="/",
     )

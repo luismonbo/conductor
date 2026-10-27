@@ -28,8 +28,14 @@ dependencies = [
     "msgpack>=1.2.1",
     "langsmith>=0.8.18",
     "setuptools>=78.1.1",
+    # eMudhra intermediate-CA key compromise (Oct 2026): 2026.10.19 is the first
+    # bundle without the emSign ECC Root CA - G3 root those intermediates chain to.
+    "certifi>=2026.10.19",
     "slowapi>=0.1.10",
-    "typesafe-sdk>=0.7.2",
+    "httpx>=0.28.1",
+    "langchain-azure-storage>=1.2.1",
+    "langgraph-checkpoint-postgres>=3.2.0",
+    "psycopg-pool>=3.3.3",
 ]
 
 [project.optional-dependencies]
@@ -68,7 +74,7 @@ explicit = true
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
-pythonpath = ["src", "."]
+pythonpath = ["src", ".", "scripts"]
 markers = [
     "unit: fast, isolated unit tests",
 ]

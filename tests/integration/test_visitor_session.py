@@ -48,6 +48,17 @@ async def test_secure_flag_can_be_disabled_for_plain_http_development(
     assert "Secure" not in _attributes(set_cookie)
 
 
+async def test_cookie_is_a_session_cookie_when_persistence_is_off(client_with_fake, monkeypatch):
+    # The public site's target turns this off, so the browser drops sid when it closes.
+    monkeypatch.setenv("HARNESS_SESSION_COOKIE_PERSISTENT", "false")
+    client, _ = client_with_fake
+
+    set_cookie = (await client.get("/health")).headers["set-cookie"]
+
+    assert set_cookie.startswith(f"{COOKIE_NAME}=")
+    assert not any(a.startswith(("Max-Age", "Expires")) for a in _attributes(set_cookie))
+
+
 async def test_existing_cookie_is_reused_not_reminted(client_with_fake):
     client, _ = client_with_fake
     first = await client.get("/health")

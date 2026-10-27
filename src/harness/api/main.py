@@ -26,8 +26,6 @@ from starlette.responses import Response
 from langgraph.types import Command
 from slowapi.errors import RateLimitExceeded
 
-import aiosqlite
-
 from harness.api.auth import require_api_key
 from harness.api.rate_limit import default_limit, limiter, strict_limit
 from harness.api.session import attach as attach_session_cookie, read_or_mint
@@ -51,8 +49,6 @@ from harness.security.input_guard import GuardContext, InputGuard
 load_dotenv(override=False)
 
 # Lazy-initialized module-level state
-_run_store: RunStore | None = None
-_run_store_lock: asyncio.Lock | None = None
 _runtime: AgentRuntime | None = None
 _runtime_lock: asyncio.Lock | None = None
 _input_guard: InputGuard | None = None
@@ -60,29 +56,26 @@ _input_guard: InputGuard | None = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _run_store, _runtime, _input_guard
+    global _runtime, _input_guard
     try:
         # Logging first, so everything startup logs below goes through it.
         configure_logging(get_settings().log_level)
-        # Build the entry agent at boot (settings, definition, checkpointer, tools,
+        # Build the entry agent at boot (settings, definition, storage, tools,
         # graph): a missing agent folder or an unavailable required backend stops
         # startup, and /health only answers once the agent can serve.
         await _get_runtime()
-        # Build the guard now too, so a malformed TypeSafe key fails the boot.
+        # Build the guard now too, so a guard that cannot be built fails the boot
+        # instead of the first visitor's request.
         _get_input_guard()
         yield
     finally:
-        # Also after a failed startup: an open checkpointer connection (aiosqlite's
+        # Also after a failed startup: open storage connections (aiosqlite's
         # worker thread is not a daemon) would keep the process from exiting.
         if _input_guard is not None:
             await _input_guard.aclose()
             _input_guard = None
-        if _run_store is not None:
-            await _run_store._conn.close()
         if _runtime is not None:
-            conn = getattr(_runtime.checkpointer, "conn", None)
-            if conn is not None:
-                await conn.close()
+            await _runtime.aclose()
             _runtime = None
 
 
@@ -116,8 +109,12 @@ async def _visitor_session(
     request.state.sid = sid
     response = await call_next(request)
     if minted:
+        settings = get_settings()
         attach_session_cookie(
-            response, sid, secure=get_settings().session_cookie_secure
+            response,
+            sid,
+            secure=settings.session_cookie_secure,
+            persistent=settings.session_cookie_persistent,
         )
     return response
 
@@ -134,7 +131,17 @@ async def _rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONR
     rate_limit_default) are per-minute by design -- see
     docs/superpowers/specs/2026-08-27-rate-limiting-design.md. Revisit if a
     non-minute granularity is ever introduced.
+
+    Logs that a limit tripped, with the route and the limit but never the limiter
+    key (the visitor's IP): slowapi's own line, which names it, is silenced in
+    configure_logging. The route is its template, so a thread id isn't logged.
     """
+    route = request.scope.get("route")
+    logging.getLogger(__name__).warning(
+        "rate limit exceeded route=%s limit=%s",
+        getattr(route, "path", request.url.path),
+        exc.detail,
+    )
     return JSONResponse(
         status_code=429,
         content={"detail": "Rate limit exceeded. Please slow down and try again shortly."},
@@ -157,45 +164,14 @@ _running: dict[str, tuple[str, asyncio.Task]] = {}
 # add it here. See docs/devlog/010.
 _MODEL_OVERRIDE_SAFE_BACKENDS = {"openai_compatible", "fake"}
 
-def _get_run_store_lock() -> asyncio.Lock:
-    global _run_store_lock
-    if _run_store_lock is None:
-        _run_store_lock = asyncio.Lock()
-    return _run_store_lock
-
-
 async def _get_run_store() -> RunStore:
-    """The process-wide run store, opened on first use.
+    """The entry agent's run store, opened with its checkpointer at startup.
 
-    Every checkpointer mode has one, because thread ownership is checked
-    against it. Memory mode keeps it in an in-process sqlite database, which
-    lives exactly as long as this one connection: the process.
-
-    Cached only once its schema is in place. A store cached before
-    create_table() succeeded would lack the session_id column, so every
-    continued thread would 404 until restart.
+    Every checkpointer mode has one, because thread ownership is checked against
+    it: memory mode keeps it in an in-process sqlite database that lives as long
+    as the runtime.
     """
-    global _run_store
-    if _run_store is not None:
-        return _run_store
-    settings = get_settings()
-    async with _get_run_store_lock():
-        if _run_store is None:
-            path = (
-                ":memory:"
-                if settings.checkpointer == "memory"
-                else settings.checkpointer_url
-            )
-            conn = await aiosqlite.connect(path)
-            store = RunStore(conn)
-            try:
-                await store.create_table()
-            except BaseException:
-                # Not cached, so the next request retries on a fresh connection.
-                await conn.close()
-                raise
-            _run_store = store
-        return _run_store
+    return (await _get_runtime()).storage.run_store
 
 
 def _get_runtime_lock() -> asyncio.Lock:
@@ -208,7 +184,7 @@ def _get_runtime_lock() -> asyncio.Lock:
 async def _get_runtime() -> AgentRuntime:
     """The entry agent's runtime, built once: at startup by lifespan, or by the
     first request when no lifespan ran (tests). The lock makes concurrent first
-    callers share one build instead of each opening a checkpointer."""
+    callers share one build instead of each opening storage."""
     global _runtime
     if _runtime is not None:
         return _runtime
@@ -293,13 +269,31 @@ def _title_from(messages: list[Message]) -> str:
     return (first_user.content[:60] if first_user else "")
 
 
+def _is_issued_thread_id(thread_id: str) -> bool:
+    """True for the text this API issues thread ids in: a uuid4, hyphenated, lower case.
+
+    The id comes from a visitor (the JSON body or the URL path). Anything else cannot
+    be a thread of ours, and must not reach the run store: Postgres rejects NUL in
+    text, and the store logs its error with the id as typed, newlines and all.
+    uuid.UUID() alone also accepts braces, "urn:uuid:", capitals, hyphens anywhere
+    and whitespace around the digits, so the text must round-trip.
+    """
+    try:
+        return str(uuid.UUID(thread_id)) == thread_id
+    except ValueError:
+        return False
+
+
 async def _require_owned_thread(request: Request, thread_id: str) -> None:
     """404 unless this visitor's session owns thread_id.
 
     Enforced identically in every checkpointer mode: there is always a run
     store to check against (see _get_run_store). 404 rather than 403, so a
-    thread that is not yours is indistinguishable from one that does not exist.
+    thread that is not yours is indistinguishable from one that does not exist,
+    and so is an id the server never issued (answered without asking the store).
     """
+    if not _is_issued_thread_id(thread_id):
+        raise HTTPException(status_code=404, detail="unknown thread")
     run_store = await _get_run_store()
     if not await run_store.owns_thread(request.state.sid, thread_id):
         raise HTTPException(status_code=404, detail="unknown thread")
@@ -314,10 +308,10 @@ async def _last_assistant_text(graph: Any, thread_id: str) -> str | None:
     )
 
 
-def _utc_midnight_iso() -> str:
-    """Start of the current UTC day, in the same format as runs.started_at."""
+def _utc_midnight() -> datetime:
+    """Start of the current UTC day: the daily token budget counts from here."""
     now = datetime.now(timezone.utc)
-    return now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+    return now.replace(hour=0, minute=0, second=0, microsecond=0)
 
 
 async def _guard_context(
@@ -339,7 +333,7 @@ async def _guard_context(
         else 0
     )
     tokens_today = (
-        await run_store.tokens_since(_utc_midnight_iso())
+        await run_store.tokens_since(_utc_midnight())
         if limits.daily_token_budget
         else 0
     )

@@ -27,7 +27,14 @@ class Settings(BaseSettings):
     # extra="ignore": .env is shared with docker-compose (litellm/langfuse
     # container config) and main.py's direct os.environ reads for Langfuse —
     # those keys aren't HARNESS_-prefixed and must not fail validation here.
-    model_config = SettingsConfigDict(env_prefix="HARNESS_", env_file=".env", extra="ignore")
+    # hide_input_in_errors: a validation error otherwise ends with input_value=, the
+    # first and last characters of every setting, and the API keys are among them.
+    model_config = SettingsConfigDict(
+        env_prefix="HARNESS_",
+        env_file=".env",
+        extra="ignore",
+        hide_input_in_errors=True,
+    )
 
     # Backend selection
     llm_backend: str = "fake"          # fake | openai_compatible | azure
@@ -81,8 +88,19 @@ class Settings(BaseSettings):
     milvus_uri: str = "./data/milvus_papers.db"
     milvus_collection: str = "rag_chunks"
 
-    # Checkpointer
-    checkpointer: str = "sqlite"       # memory | sqlite | postgres
+    # Wiki: the website agent's knowledge, loaded into memory at startup. One
+    # source: a local folder, or a private Azure Blob container read with
+    # DefaultAzureCredential (the Container App's managed identity). See
+    # docs/superpowers/specs/2026-10-13-wiki-search-design.md.
+    wiki_dir: str = ""
+    wiki_blob_account_url: str = ""  # e.g. https://<account>.blob.core.windows.net
+    wiki_blob_container: str = ""
+    wiki_blob_prefix: str = ""  # optional folder inside the container, e.g. wiki/
+
+    # Checkpointer and run store (orchestration/storage.py): memory | sqlite | postgres.
+    # The URL is the SQLite file, or for postgres a postgresql:// connection string:
+    # a secret, which the production target gets from the Container App's environment.
+    checkpointer: str = "sqlite"
     checkpointer_url: str = "./harness.sqlite"
 
     # The entry agent: a folder under src/harness/agents/. Its prompt.py holds
@@ -124,15 +142,23 @@ class Settings(BaseSettings):
     # development on a browser that does not treat http://localhost as a
     # secure context.
     session_cookie_secure: bool = True
+    # How long sid lasts. True keeps it for a year, so a personal deployment
+    # remembers its visitor. False sends it without a Max-Age, so the browser
+    # drops it when it closes: the public site's target, whose privacy notice
+    # says so.
+    session_cookie_persistent: bool = True
 
     # Input guard (SL-2) — see docs/superpowers/specs/2026-09-27-input-guard-design.md.
-    # input_guard_enabled gates only the TypeSafe (Jev) checks and fails closed
-    # without a key (validator below). The four limits are independent of it
-    # and each is off at 0. Defaults are the public website's values; a
+    # input_guard_enabled gates only the Microsoft-Decision-1 checks and fails
+    # closed without an Azure endpoint (validator below). The checks run on the
+    # Foundry resource azure_endpoint names, with the LLM's credentials
+    # (azure_api_key, else the managed identity). The four limits are independent
+    # of it and each is off at 0. Defaults are the public website's values; a
     # single-operator deployment turns all of it off in its target file.
     input_guard_enabled: bool = True
-    typesafe_api_key: str = ""
-    guard_model: str = "jev-1.13.0"  # pinned: thresholds are calibrated against it
+    # The deployment's name, not the model's. Thresholds are calibrated against
+    # one model version, so pin the version on the deployment (no auto-upgrade).
+    guard_deployment: str = "Decision-1"
     guard_timeout_seconds: float = Field(3.0, gt=0)
     max_message_chars: int = Field(2000, ge=0)
     max_output_tokens: int = Field(1500, ge=0)  # per LLM call
@@ -154,12 +180,55 @@ class Settings(BaseSettings):
         return self
 
     @model_validator(mode="after")
-    def _require_typesafe_key_when_guard_enabled(self) -> "Settings":
-        if self.input_guard_enabled and not self.typesafe_api_key:
+    def _require_a_guard_target_when_guard_enabled(self) -> "Settings":
+        # The guard fails open, so a typo here would switch it off silently.
+        if not self.input_guard_enabled:
+            return self
+        if not self.azure_endpoint.startswith(("https://", "http://")):
             raise ValueError(
-                "HARNESS_INPUT_GUARD_ENABLED is true but HARNESS_TYPESAFE_API_KEY is "
-                "empty. Set HARNESS_TYPESAFE_API_KEY, or set "
+                "HARNESS_INPUT_GUARD_ENABLED is true but HARNESS_AZURE_ENDPOINT is "
+                "empty or not an http(s) URL. Set HARNESS_AZURE_ENDPOINT to the "
+                "Foundry resource that has the Decision-1 deployment, or set "
                 "HARNESS_INPUT_GUARD_ENABLED=false."
+            )
+        if not self.guard_deployment.strip():
+            raise ValueError(
+                "HARNESS_INPUT_GUARD_ENABLED is true but HARNESS_GUARD_DEPLOYMENT is "
+                "empty. Set it to the Decision-1 deployment's name, or set "
+                "HARNESS_INPUT_GUARD_ENABLED=false."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _postgres_needs_a_postgresql_url(self) -> "Settings":
+        # Without this, a missing secret would leave the SQLite default
+        # ./harness.sqlite, which psycopg rejects with an unhelpful parse error.
+        if self.checkpointer == "postgres" and not self.checkpointer_url.startswith(
+            ("postgresql://", "postgres://")
+        ):
+            raise ValueError(
+                "HARNESS_CHECKPOINTER=postgres needs HARNESS_CHECKPOINTER_URL set to "
+                "a postgresql:// connection string"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _one_wiki_source(self) -> "Settings":
+        blob = (self.wiki_blob_account_url, self.wiki_blob_container)
+        if any(blob) and not all(blob):
+            raise ValueError(
+                "Set both HARNESS_WIKI_BLOB_ACCOUNT_URL and HARNESS_WIKI_BLOB_CONTAINER, "
+                "or neither."
+            )
+        if self.wiki_blob_prefix and not all(blob):
+            raise ValueError(
+                "HARNESS_WIKI_BLOB_PREFIX needs HARNESS_WIKI_BLOB_ACCOUNT_URL and "
+                "HARNESS_WIKI_BLOB_CONTAINER."
+            )
+        if self.wiki_dir and all(blob):
+            raise ValueError(
+                "Set one wiki source: HARNESS_WIKI_DIR, or the HARNESS_WIKI_BLOB_* "
+                "settings, not both."
             )
         return self
 

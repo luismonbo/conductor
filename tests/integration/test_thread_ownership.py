@@ -1,5 +1,7 @@
 """A visitor sees only their own threads and cannot read anyone else's."""
 import asyncio
+import logging
+from urllib.parse import quote
 
 import aiosqlite
 import httpx2
@@ -8,7 +10,7 @@ import pytest
 import harness.api.main as _main
 from harness.adapters.llm.fake import FakeLLMClient
 from harness.core.types import LLMResponse, ToolCall
-from harness.observability.run_store import RunStore
+from harness.observability.run_store.sqlite import SqliteRunStore
 from tests.integration.conftest import _TEST_API_KEY, sse_frames, thread_id_from
 
 
@@ -33,9 +35,6 @@ async def two_clients(request, monkeypatch, tmp_path):
     async with httpx2.AsyncClient(transport=transport, base_url="https://test", headers=headers) as a:
         async with httpx2.AsyncClient(transport=transport, base_url="https://test", headers=headers) as b:
             yield a, b
-
-    if _main._run_store is not None:
-        await _main._run_store._conn.close()
 
 
 async def test_listing_shows_only_own_threads(two_clients):
@@ -177,11 +176,53 @@ async def test_resuming_another_visitors_thread_is_404(two_clients, monkeypatch)
     assert sse_frames(own)[-1]["type"] == "final"
 
 
-async def test_a_failed_run_store_setup_is_retried_not_cached(monkeypatch):
-    """A store cached before its schema is in place would 404 every continued
-    thread until restart, so a failed setup is discarded (and closed)."""
-    real_create_table = RunStore.create_table
-    attempts: list[RunStore] = []
+# Every thread id this API issues is str(uuid.uuid4()), and a client may only name one it
+# already owns: anything else is 404 before the run store is asked. uuid.UUID() alone
+# also accepts the last three, which no thread of ours is called.
+_NEVER_ISSUED = [
+    pytest.param("x\x00\nERROR forged line", id="nul-and-newline"),
+    pytest.param("does-not-exist", id="not-a-uuid"),
+    pytest.param("{aaaa1111-0000-4000-8000-000000000001}", id="braces"),
+    pytest.param("AAAA1111-0000-4000-8000-000000000001", id="upper-case"),
+    pytest.param("\n" + "a" * 30 + "\n", id="padded-with-newlines"),
+]
+
+
+@pytest.mark.parametrize("thread_id", _NEVER_ISSUED)
+async def test_a_thread_id_the_server_never_issued_is_404_without_asking_the_run_store(
+    thread_id, two_clients, monkeypatch, caplog
+):
+    """A visitor writes the thread id: it reached the run store, and its log line, as typed."""
+    alice, _ = two_clients
+    asked: list[str] = []
+    real_owns_thread = SqliteRunStore.owns_thread
+
+    async def recording_owns_thread(self, session_id, asked_thread_id):
+        asked.append(asked_thread_id)
+        return await real_owns_thread(self, session_id, asked_thread_id)
+
+    monkeypatch.setattr(SqliteRunStore, "owns_thread", recording_owns_thread)
+    in_path = quote(thread_id, safe="")
+
+    responses = [
+        await alice.post("/chat/stream", json={"message": "hi", "thread_id": thread_id}),
+        await alice.get(f"/threads/{in_path}"),
+        await alice.post(f"/resume/{in_path}", json={"decision": {"approved": False}}),
+    ]
+
+    assert [(r.status_code, r.json()) for r in responses] == [
+        (404, {"detail": "unknown thread"})
+    ] * 3
+    assert asked == []
+    assert [r for r in caplog.records if r.levelno >= logging.ERROR] == []
+
+
+async def test_a_failed_storage_setup_is_retried_not_cached(monkeypatch):
+    """A runtime cached before its tables exist would 404 every continued thread
+    until restart, so a failed setup is discarded (and closed)."""
+    monkeypatch.setenv("HARNESS_LLM_BACKEND", "fake")
+    real_create_table = SqliteRunStore.create_table
+    attempts: list[SqliteRunStore] = []
 
     async def _fails_once(self):
         attempts.append(self)
@@ -189,14 +230,15 @@ async def test_a_failed_run_store_setup_is_retried_not_cached(monkeypatch):
             raise aiosqlite.OperationalError("database is locked")
         await real_create_table(self)
 
-    monkeypatch.setattr(RunStore, "create_table", _fails_once)
+    monkeypatch.setattr(SqliteRunStore, "create_table", _fails_once)
 
     with pytest.raises(aiosqlite.OperationalError):
         await _main._get_run_store()
-    assert _main._run_store is None
+    assert _main._runtime is None
     with pytest.raises(ValueError):
         await attempts[0]._conn.execute("SELECT 1")  # its connection was closed
 
     store = await _main._get_run_store()
+    assert _main._runtime is not None and store is _main._runtime.storage.run_store
     await store.start_run("r1", "t1", "default", "fake", "sid-a")
     assert await store.owns_thread("sid-a", "t1") is True

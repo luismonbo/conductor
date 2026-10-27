@@ -1,9 +1,9 @@
 """Deployment-target config resolution.
 
-A target is a named, checked-in-but-gitignored YAML file
-(config/targets/<name>.yaml) holding non-secret Settings overrides for one
-deployment of this codebase — e.g. the daily driver vs. luismonbo.com.
-Selected via HARNESS_TARGET; see config/targets/example.yaml for the shape
+A target is a named YAML file (config/targets/<name>.yaml) holding non-secret
+Settings overrides for one deployment of this codebase — e.g. the daily driver
+vs. luismonbo.com. Personal targets stay gitignored; luismonbo-com.yaml is
+committed so CI can build the public site's image. Selected via HARNESS_TARGET; see config/targets/example.yaml for the shape
 and settings.get_settings() for how it's layered under real environment
 variables.
 """
@@ -27,7 +27,6 @@ SECRET_FIELDS = frozenset(
         "memory_url",
         "pgvector_url",
         "checkpointer_url",
-        "typesafe_api_key",
         "api_key",
     }
 )

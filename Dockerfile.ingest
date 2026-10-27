@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # Separate, lean image for offline RAG ingestion — kept out of the api image
-# (src/harness/api/Dockerfile) because docling pulls in torch/transformers/
+# (the root Dockerfile) because docling pulls in torch/transformers/
 # opencv, none of which the served API ever needs. Runs ONLY in this Linux
 # container: docling's torch + onnxruntime crash via libomp on macOS, see
 # harness/adapters/parsing/docling_parser.py.

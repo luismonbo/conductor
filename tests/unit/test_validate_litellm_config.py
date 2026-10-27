@@ -1,7 +1,7 @@
 """litellm_config.yaml sanity: parseable, non-empty, unique model names."""
 from pathlib import Path
 
-from scripts.validate_litellm_config import validate_config
+from scripts.infra.validate_litellm_config import validate_config
 
 
 def _write(tmp_path: Path, text: str) -> str:

@@ -1,9 +1,35 @@
 services:
   api:
-    build: { context: ., dockerfile: src/harness/api/Dockerfile }
-    env_file: .env
+    # The image a deployment builds: the root Dockerfile with one target baked
+    # in. TARGET_NAME names a gitignored config/targets/<name>.yaml (example.yaml
+    # is a template, not a bootable target). It is empty by default, so that
+    # `make up`, `make infra` and `make ingest` still work without it; an api
+    # build without it fails, and `make proxy` says so first.
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        TARGET_NAME: "${TARGET_NAME:-}"
+    # As in a deployment, only secrets come from the environment; every other
+    # setting comes from the baked target. Loading the whole .env here would let
+    # personal values, like the guard switched off, override the target.
+    environment:
+      HARNESS_API_KEY: "${HARNESS_API_KEY:?HARNESS_API_KEY must be set}"
+      HARNESS_AZURE_API_KEY: "${HARNESS_AZURE_API_KEY:-}"
+      HARNESS_LLM_API_KEY: "${HARNESS_LLM_API_KEY:-}"
+      HARNESS_EMBEDDING_API_KEY: "${HARNESS_EMBEDDING_API_KEY:-}"
+      # postgres is a sibling container here, not localhost: the checkpointer and
+      # run store, and the pgvector RAG store.
+      HARNESS_CHECKPOINTER_URL: postgresql://harness:harness@postgres:5432/harness
+      HARNESS_PGVECTOR_URL: postgresql://harness:harness@postgres:5432/harness
+      LANGFUSE_PUBLIC_KEY: "${LANGFUSE_PUBLIC_KEY:-}"
+      LANGFUSE_SECRET_KEY: "${LANGFUSE_SECRET_KEY:-}"
+      LANGFUSE_HOST: "${LANGFUSE_HOST:-https://cloud.langfuse.com}"
+    volumes:
+      - "./data:/app/data"   # collection manifests, and Milvus Lite if a target uses it
     command: ["uvicorn", "harness.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--app-dir", "src", "--proxy-headers", "--forwarded-allow-ips=172.28.0.0/24"]
-    depends_on: [postgres]
+    depends_on:
+      postgres: { condition: service_healthy }
   caddy:
     build: { context: ., dockerfile: Dockerfile.caddy }
     ports: ["8000:8000"]
@@ -44,7 +70,7 @@ services:
     ports: ["5432:5432"]
     volumes:
       - "postgres_data:/var/lib/postgresql/data"
-      - "./scripts/create-databases.sql:/docker-entrypoint-initdb.d/create-databases.sql"
+      - "./scripts/infra/create-databases.sql:/docker-entrypoint-initdb.d/create-databases.sql"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U harness"]
       interval: 3s

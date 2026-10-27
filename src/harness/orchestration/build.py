@@ -13,12 +13,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
+import httpx
 import yaml
 
 from harness.adapters.chunking.structure_aware import StructureAwareChunker
 from harness.adapters.embedding.fake import FakeEmbedder
 from harness.adapters.llm.parsers import NativeToolCallParser, PromptedToolCallParser
 from harness.adapters.memory.in_memory import InMemoryLongTerm
+from harness.adapters.wiki.azure_blob import AzureBlobWikiSource
+from harness.adapters.wiki.local import LocalWikiSource
+from harness.adapters.wiki.pages import build_wiki
 from harness.agents.definition import AgentDefinition, ToolDeps
 from harness.config.settings import Settings
 from harness.core.llm.client import LLMClient
@@ -27,8 +31,9 @@ from harness.core.memory.store import LongTermMemory
 from harness.core.rag.ingest import IngestionPipeline
 from harness.core.rag.ports import Embedder, Retriever as RetrieverPort, VectorStore
 from harness.core.rag.serve import DiversifiedRetriever, RagPipeline, Retriever
+from harness.core.wiki import Wiki, WikiSource
 from harness.orchestration.agents import load_agent
-from harness.orchestration.checkpointer import build_checkpointer
+from harness.orchestration.storage import Storage, open_storage
 from harness.security.input_guard import GuardLimits, InputGuard
 
 
@@ -223,17 +228,42 @@ def resolve_system_prompt(settings: Settings) -> str:
     return load_agent(settings.agent).prompt
 
 
+def build_wiki_source(settings: Settings) -> WikiSource | None:
+    """The deployment's wiki source, or None when it has none (Settings allows one)."""
+    if settings.wiki_blob_account_url:
+        return AzureBlobWikiSource(
+            settings.wiki_blob_account_url, settings.wiki_blob_container, settings.wiki_blob_prefix
+        )
+    if settings.wiki_dir:
+        return LocalWikiSource(settings.wiki_dir)
+    return None
+
+
+def _load_wiki(settings: Settings) -> tuple[Wiki | None, BaseException | None]:
+    """The wiki, or why it failed to load. No source configured is not a failure."""
+    source = build_wiki_source(settings)
+    if source is None:
+        return None, None
+    try:
+        return build_wiki(source), None
+    except Exception as exc:
+        logging.getLogger(__name__).warning(
+            "Wiki unavailable; an agent that needs it will not start", exc_info=True
+        )
+        return None, exc
+
+
 def build_tool_deps(settings: Settings, long_term: LongTermMemory | None = None) -> ToolDeps:
     """The shared infrastructure every agent's tools draw from, built once.
 
-    RAG degrades gracefully: with its backend unavailable the retriever and
-    vector store are None, and rag_error holds the reason, so an agent that
-    cannot work without RAG fails with the real cause while the others simply
-    go without search_documents. `long_term` lets a caller (the eval harness)
-    pre-seed memory.
+    RAG and the wiki degrade gracefully: with a backend unavailable its value is
+    None and its error says why, so an agent that cannot work without it fails
+    with the real cause while the others simply go without. `long_term` lets a
+    caller (the eval harness) pre-seed memory.
     """
     if long_term is None:
         long_term = build_long_term(settings)
+    wiki, wiki_error = _load_wiki(settings)
     try:
         vector_store = build_vector_store(settings, settings.rag_vector_store_backend)
         retriever = build_retriever(settings, vector_store)
@@ -249,6 +279,8 @@ def build_tool_deps(settings: Settings, long_term: LongTermMemory | None = None)
             vector_store=None,
             collections=(),
             rag_error=exc,
+            wiki=wiki,
+            wiki_error=wiki_error,
         )
     return ToolDeps(
         settings=settings,
@@ -256,6 +288,8 @@ def build_tool_deps(settings: Settings, long_term: LongTermMemory | None = None)
         retriever=retriever,
         vector_store=vector_store,
         collections=tuple(collections),
+        wiki=wiki,
+        wiki_error=wiki_error,
     )
 
 
@@ -289,54 +323,66 @@ class AgentRuntime:
     """Everything the API needs to serve the entry agent, built once at startup.
 
     One immutable snapshot: the graph, the guard's prompt, the run rows' agent
-    name and every agent-related setting come from here, so they cannot drift
-    apart even if .env changes while the process runs.
+    name, every agent-related setting and the storage they write to come from
+    here, so they cannot drift apart even if .env changes while the process runs.
     """
 
     settings: Settings
     definition: AgentDefinition
     graph: Any
-    checkpointer: Any
+    storage: Storage
+
+    async def aclose(self) -> None:
+        """Close the storage's connections; the runtime serves nothing after this."""
+        await self.storage.aclose()
 
 
 async def build_runtime(settings: Settings) -> AgentRuntime:
-    """Load the entry agent, open its checkpointer, compile it on the shared loop."""
+    """Load the entry agent, open its storage, compile it on the shared loop."""
     definition = load_agent(settings.agent)
-    checkpointer = await build_checkpointer(settings)
+    storage = await open_storage(settings)
     try:
-        graph = build_agent(settings, checkpointer)
+        graph = build_agent(settings, storage.checkpointer)
     except BaseException:
-        conn = getattr(checkpointer, "conn", None)
-        if conn is not None:
-            await conn.close()
+        await storage.aclose()
         raise
     return AgentRuntime(
-        settings=settings, definition=definition, graph=graph, checkpointer=checkpointer
+        settings=settings, definition=definition, graph=graph, storage=storage
     )
 
 
 def build_input_guard(settings: Settings) -> InputGuard:
     """The input guard for chat requests (SL-2).
 
-    The fixed limits always apply (each off at 0); the TypeSafe classifier
-    only when input_guard_enabled, and only then is the SDK imported. The
-    SDK's own defaults (10 s per request, 2 retries, 30 s total) are far too
-    slow for a chat reply: InputGuard enforces guard_timeout_seconds as a hard
-    ceiling, and the SDK gets the same budget with at most one retry.
+    The fixed limits always apply (each off at 0); the Microsoft-Decision-1
+    classifier only when input_guard_enabled. It calls the same Foundry resource
+    as the LLM, with the same credentials: the resource key when azure_api_key
+    is set, else the managed identity. A chat reply cannot wait on the guard:
+    InputGuard enforces guard_timeout_seconds as a hard ceiling, and the HTTP
+    client gets the same budget.
     """
     classifier = None
     if settings.input_guard_enabled:
-        from typesafe_sdk import AsyncTypeSafeClient, RetryPolicy
+        from harness.adapters.guard.azure_decision import AzureDecisionClassifier
 
-        from harness.adapters.guard.typesafe import TypeSafeClassifier
+        auth: dict[str, Any]
+        if settings.azure_api_key:
+            auth = {"api_key": settings.azure_api_key}
+        else:
+            from azure.identity import DefaultAzureCredential, get_bearer_token_provider
 
-        client = AsyncTypeSafeClient(
-            api_key=settings.typesafe_api_key,
-            model=settings.guard_model,
-            timeout=settings.guard_timeout_seconds,
-            retry=RetryPolicy(max_retries=1, timeout=settings.guard_timeout_seconds),
+            auth = {
+                "token_provider": get_bearer_token_provider(
+                    DefaultAzureCredential(),
+                    "https://cognitiveservices.azure.com/.default",
+                )
+            }
+        classifier = AzureDecisionClassifier(
+            httpx.AsyncClient(timeout=settings.guard_timeout_seconds),
+            settings.azure_endpoint,
+            settings.guard_deployment,
+            **auth,
         )
-        classifier = TypeSafeClassifier(client, model=settings.guard_model)
     return InputGuard(
         classifier=classifier,
         limits=GuardLimits(

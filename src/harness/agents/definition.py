@@ -14,6 +14,7 @@ from harness.config.settings import Settings
 from harness.core.memory.store import LongTermMemory
 from harness.core.rag.ports import Retriever, VectorStore
 from harness.core.tools.registry import ToolRegistry
+from harness.core.wiki import Wiki
 
 
 @dataclass(frozen=True)
@@ -28,6 +29,10 @@ class ToolDeps:
     # Why RAG is unavailable: an agent that cannot work without it raises from
     # its tools factory with this chained, so startup shows the real cause.
     rag_error: BaseException | None = None
+    # The wiki, when a source is configured and it loaded; wiki_error says why it
+    # didn't, so an agent that cannot work without it fails with the real cause.
+    wiki: Wiki | None = None
+    wiki_error: BaseException | None = None
 
 
 @dataclass(frozen=True)

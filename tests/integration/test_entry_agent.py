@@ -32,8 +32,6 @@ async def good_agent_app(monkeypatch, tmp_path, fixture_agents):
         headers={"Authorization": f"Bearer {_TEST_API_KEY}"},
     ) as client:
         yield client, fake
-    if _main._run_store is not None:
-        await _main._run_store._conn.close()
 
 
 async def test_chat_runs_the_entry_agent(good_agent_app):
@@ -90,31 +88,33 @@ async def test_startup_fails_when_the_entry_agent_is_missing(monkeypatch):
             pass
 
 
-async def test_a_failed_startup_closes_the_checkpointer(monkeypatch, tmp_path):
-    # The runtime opens the sqlite checkpointer before the guard is built. If a
-    # later startup step fails, that connection's worker thread (not a daemon)
+async def test_a_failed_startup_closes_the_storage(monkeypatch, tmp_path):
+    # The runtime opens its storage before the guard is built. If a later startup
+    # step fails, those connections (aiosqlite's worker threads are not daemons)
     # would keep the process alive after uvicorn gives up.
     monkeypatch.setenv("HARNESS_LLM_BACKEND", "fake")
     monkeypatch.setenv("HARNESS_EMBEDDING_BACKEND", "fake")
     monkeypatch.setenv("HARNESS_RAG_VECTOR_STORE_BACKEND", "in_memory")
     monkeypatch.setenv("HARNESS_CHECKPOINTER", "sqlite")
     monkeypatch.setenv("HARNESS_CHECKPOINTER_URL", str(tmp_path / "h.sqlite"))
-    savers = []
-    real_build_checkpointer = build_module.build_checkpointer
+    opened = []
+    real_open_storage = build_module.open_storage
 
-    async def recording_build_checkpointer(settings):
-        savers.append(await real_build_checkpointer(settings))
-        return savers[-1]
+    async def recording_open_storage(settings):
+        opened.append(await real_open_storage(settings))
+        return opened[-1]
 
     def failing_guard(settings):
-        raise ValueError("malformed TypeSafe key")
+        raise ValueError("malformed guard setting")
 
-    monkeypatch.setattr(build_module, "build_checkpointer", recording_build_checkpointer)
+    monkeypatch.setattr(build_module, "open_storage", recording_open_storage)
     monkeypatch.setattr(_main, "build_input_guard", failing_guard)
 
-    with pytest.raises(ValueError, match="malformed TypeSafe key"):
+    with pytest.raises(ValueError, match="malformed guard setting"):
         async with _main.lifespan(_main.app):
             pass
 
-    with pytest.raises(ValueError, match="no active connection"):
-        await savers[0].conn.execute("select 1")
+    [storage] = opened
+    for conn in (storage.checkpointer.conn, storage.run_store._conn):
+        with pytest.raises(ValueError, match="no active connection"):
+            await conn.execute("select 1")

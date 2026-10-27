@@ -34,13 +34,15 @@ htmlcov/
 .env.*.local
 *.pem
 
-# Deployment target configs (real per-deployment configs; example.yaml stays tracked as the template)
+# Deployment target configs: personal ones stay local. Tracked: example.yaml (the template) and
+# luismonbo-com.yaml (the public site's; CI builds its image from the repo).
 config/targets/*.yaml
 !config/targets/example.yaml
+!config/targets/luismonbo-com.yaml
 
-# Private agents: not in this public repo. The Dockerfile's COPY src/ src/
-# bakes them into the image (see the README's Agents section).
-src/harness/agents/website/
+# The website agent's wiki (HARNESS_WIKI_DIR=wiki): local only. Production reads its
+# pages from a private Azure Blob container. Anchored, so adapters/wiki/ stays tracked.
+/wiki/
 
 # Eval reports (on-demand run outputs; commit selectively as benchmark snapshots)
 evaluation/reports/
@@ -75,6 +77,10 @@ frontend/.vite/
 .vite/
 *.tsbuildinfo
 
+# Agent skills installed into frontend/ by the skills CLI: third-party copies, reinstallable
+# from frontend/skills-lock.json.
+/frontend/.agents/
+
 # OS / editor
 .DS_Store
 .idea/
@@ -105,9 +111,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
-
-# Scripts directory
-scripts/
 
 # MCP servers
 .playwright-mcp

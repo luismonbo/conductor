@@ -1,7 +1,7 @@
 # Template for a deployment target. Copy this file to <name>.yaml (e.g.
 # daily-driver.yaml, luismonbo-com.yaml) and set HARNESS_TARGET=<name> to
-# select it. Real target files are gitignored — this example is the only
-# one committed, since this repo is public.
+# select it. Real target files are gitignored, except luismonbo-com.yaml: the
+# public site's, committed so CI can build its image (this repo is public).
 #
 # Only non-secret Settings fields belong here. Fields that can carry a
 # credential (API keys, DSNs — see SECRET_FIELDS in
@@ -46,10 +46,12 @@ memory_tools_enabled: false
 show_tool_details: false
 
 # --- Input guard -------------------------------------------------------------
-# TypeSafe (Jev) screens every chat message before the agent sees it. The key
-# is a secret: HARNESS_TYPESAFE_API_KEY in the environment, never here.
+# Microsoft-Decision-1, a deployment on the Foundry resource azure_endpoint names,
+# screens every chat message before the agent sees it, with the LLM's credentials:
+# HARNESS_AZURE_API_KEY in the environment (never here), or the managed identity,
+# which needs the Cognitive Services User role on that resource.
 input_guard_enabled: true
-guard_model: jev-1.13.0          # pinned: thresholds are calibrated against it
+guard_deployment: Decision-1     # the deployment's name; pin its model version there
 guard_timeout_seconds: 3.0
 
 # Fixed limits, each off at 0. A single-operator deployment sets all four to 0

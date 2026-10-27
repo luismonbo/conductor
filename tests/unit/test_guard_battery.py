@@ -12,14 +12,19 @@ def test_battery_order_is_the_precedence_order():
     assert [check.id for check in BATTERY] == ["extraction", "private_info", "off_topic"]
 
 
-def test_starting_thresholds():
+def test_thresholds_calibrated_on_decision_1():
     assert (EXTRACTION.threshold, PRIVATE_INFO.threshold, OFF_TOPIC.threshold) == (
-        0.70, 0.70, 0.80,
+        0.70, 0.70, 0.90,
     )
 
 
 def test_extraction_and_private_info_share_one_refusal():
     assert EXTRACTION.refusal == PRIVATE_INFO.refusal != OFF_TOPIC.refusal
+
+
+def test_the_shared_refusal_sends_salary_and_rate_questions_to_the_contact_links():
+    assert "salary or rates" in PRIVATE_INFO.refusal
+    assert "contact links on this site" in PRIVATE_INFO.refusal
 
 
 def test_every_check_targets_the_visitor_message_and_has_examples_on_both_sides():
