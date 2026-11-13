@@ -11,7 +11,6 @@ import asyncio
 import dataclasses
 import json
 import logging
-import os
 import uuid
 from collections.abc import Callable, Coroutine, Iterator
 from contextlib import asynccontextmanager, contextmanager
@@ -20,7 +19,6 @@ from typing import Any
 
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.middleware.base import RequestResponseEndpoint
 from starlette.responses import Response
@@ -43,9 +41,10 @@ from harness.security import egress
 from harness.security.input_guard import GuardContext, InputGuard
 from harness.security.visitor_text import VisitorLanguage, configured_language
 
-# Settings() reads HARNESS_-prefixed vars straight from .env itself, but this
-# module's own os.environ.get() calls (Langfuse keys in _build_callbacks)
-# need the file loaded into the real process environment first — Docker's
+# Settings() reads HARNESS_-prefixed vars straight from .env itself, but the
+# readers that go through os.environ (the Langfuse keys, behind
+# langfuse_configured() and the SDK, and HARNESS_TARGET in get_settings()) need
+# the file loaded into the real process environment first — Docker's
 # env_file: only does this for the containerized api service, not `make api`.
 # override=False: a real shell export always wins over .env.
 load_dotenv(override=False)
@@ -82,20 +81,6 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Agent Harness", lifespan=lifespan)
-
-_cors_origins = [
-    o.strip()
-    for o in os.environ.get("CORS_ORIGINS", "http://localhost:5173").split(",")
-    if o.strip()
-]
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=_cors_origins,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    expose_headers=["Retry-After"],
-    allow_credentials=False,
-)
 
 
 @app.middleware("http")
