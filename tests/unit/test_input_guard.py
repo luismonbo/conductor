@@ -139,6 +139,31 @@ async def test_first_message_uses_the_no_previous_reply_sentinel():
     assert fake.calls[0]["previous_assistant_reply"] == NO_PREVIOUS_REPLY
 
 
+# --- the visitor's language ----------------------------------------------------
+
+async def test_the_language_questions_ride_in_the_checks_request():
+    fake = FakeClassifier()
+    await _guard(fake).screen(_ctx())
+    assert fake.asked == [
+        ("first", "second", "language_es", "language_it", "language_fr", "language_de")
+    ]
+
+
+async def test_the_decision_carries_the_language_with_its_scores_kept_apart():
+    decision = await _guard(FakeClassifier({"first": 0.1, "language_it": 0.95})).screen(_ctx())
+    assert decision.language == "it"
+    assert decision.probabilities == {"first": 0.1, "second": 0.0}
+    assert decision.language_probabilities == {
+        "language_es": 0.0, "language_it": 0.95, "language_fr": 0.0, "language_de": 0.0,
+    }
+
+
+async def test_no_classifier_or_a_failed_one_means_english():
+    assert (await _guard().screen(_ctx())).language == "en"
+    failing = _guard(FakeClassifier(error=KeyError("bug")))
+    assert (await failing.screen(_ctx())).language == "en"
+
+
 # --- fail open ------------------------------------------------------------------
 
 class _SlowClassifier(FakeClassifier):

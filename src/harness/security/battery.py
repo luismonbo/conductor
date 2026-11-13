@@ -9,10 +9,18 @@ Questions refer to the state keys InputGuard builds: `visitor_message`,
 `assistant_system_prompt` and `previous_assistant_reply`. Examples are name-
 and gender-neutral because this file is committed code; the site's own scope
 comes from its system prompt.
+
+LANGUAGE_QUESTIONS ride in the same request and only pick the language of the
+visitor's refusals and errors: they never block and take no part in BATTERY's
+precedence. Their threshold is calibrated on
+evaluation/guard/datasets/language_v1.json.
 """
 from __future__ import annotations
 
-from harness.core.guard import Criterion, GuardCheck
+from collections.abc import Mapping
+
+from harness.core.guard import Criterion, GuardCheck, GuardQuestion
+from harness.core.language import Language
 
 BATTERY_VERSION = "v1"
 
@@ -144,3 +152,33 @@ OFF_TOPIC = GuardCheck(
 
 # Precedence order: the first check at or above its threshold picks the refusal.
 BATTERY: tuple[GuardCheck, ...] = (EXTRACTION, PRIVATE_INFO, OFF_TOPIC)
+
+
+def _language_question(code: Language, name: str) -> GuardQuestion:
+    return GuardQuestion(
+        id=f"language_{code}",
+        question=f"Is `visitor_message` written in {name}?",
+        yes=Criterion(
+            definition=(
+                f"Most of its words are {name}. A message too short to tell, such as a "
+                f"name, an emoji or \"ok\", counts when `previous_assistant_reply` is in "
+                f"{name}."
+            ),
+        ),
+        no=Criterion(
+            definition=(
+                f"It is written in another language, even one close to {name}. A message "
+                f"too short to tell counts as no when `previous_assistant_reply` is not "
+                f"in {name}, or there is none."
+            ),
+        ),
+    )
+
+
+# English needs no question: it is what a visitor gets when none of these wins.
+LANGUAGE_QUESTIONS: Mapping[Language, GuardQuestion] = {
+    code: _language_question(code, name)
+    for code, name in (("es", "Spanish"), ("it", "Italian"), ("fr", "French"), ("de", "German"))
+}
+# A language wins at or above this; below it for all four, the visitor gets English.
+LANGUAGE_THRESHOLD = 0.5

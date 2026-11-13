@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 
-from harness.core.guard import ClassifierResult, GuardCheck
+from harness.core.guard import ClassifierResult, GuardQuestion
 
 
 class FakeClassifier:
@@ -16,17 +16,19 @@ class FakeClassifier:
         self._probabilities = dict(probabilities or {})
         self._error = error
         self._model = model
-        self.calls: list[dict[str, str]] = []
+        self.calls: list[dict[str, str]] = []  # the state of each call
+        self.asked: list[tuple[str, ...]] = []  # the question ids of each call, in order
         self.closed = False
 
     async def classify(
-        self, state: Mapping[str, str], checks: Sequence[GuardCheck]
+        self, state: Mapping[str, str], questions: Sequence[GuardQuestion]
     ) -> ClassifierResult:
         self.calls.append(dict(state))
+        self.asked.append(tuple(q.id for q in questions))
         if self._error is not None:
             raise self._error
         return ClassifierResult(
-            probabilities={c.id: self._probabilities.get(c.id, 0.0) for c in checks},
+            probabilities={q.id: self._probabilities.get(q.id, 0.0) for q in questions},
             model=self._model,
             request_id="fake-request",
             input_tokens=0,

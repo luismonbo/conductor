@@ -14,7 +14,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 from harness.core.guard import (
@@ -22,10 +22,14 @@ from harness.core.guard import (
     GuardClassifier,
     GuardClassifierError,
     GuardDecision,
+    GuardQuestion,
 )
+from harness.core.language import DEFAULT_LANGUAGE, Language
 from harness.security.battery import (
     BATTERY,
     BATTERY_VERSION,
+    LANGUAGE_QUESTIONS,
+    LANGUAGE_THRESHOLD,
     REFUSAL_DAILY_BUDGET,
     REFUSAL_MESSAGE_TOO_LONG,
     REFUSAL_THREAD_TOO_LONG,
@@ -35,6 +39,25 @@ logger = logging.getLogger(__name__)
 
 PREVIOUS_REPLY_CHARS = 1000
 NO_PREVIOUS_REPLY = "(none — this is the first message)"
+
+
+def pick_language(
+    probabilities: Mapping[str, float],
+    *,
+    threshold: float = LANGUAGE_THRESHOLD,
+    questions: Mapping[Language, GuardQuestion] = LANGUAGE_QUESTIONS,
+) -> Language:
+    """The language whose question scored highest at or above `threshold`, else English.
+
+    Ties go to the language listed first. A question with no score counts as 0.
+    """
+    best: Language = DEFAULT_LANGUAGE
+    best_score = -1.0
+    for code, question in questions.items():
+        score = probabilities.get(question.id, 0.0)
+        if score >= threshold and score > best_score:
+            best, best_score = code, score
+    return best
 
 
 @dataclass(frozen=True)
@@ -63,12 +86,16 @@ class InputGuard:
         timeout_seconds: float,
         checks: Sequence[GuardCheck] = BATTERY,
         battery_version: str = BATTERY_VERSION,
+        language_questions: Mapping[Language, GuardQuestion] = LANGUAGE_QUESTIONS,
+        language_threshold: float = LANGUAGE_THRESHOLD,
     ) -> None:
         self._classifier = classifier
         self._limits = limits
         self._timeout = timeout_seconds
         self._checks = tuple(checks)
         self._battery_version = battery_version
+        self._language_questions = dict(language_questions)
+        self._language_threshold = language_threshold
 
     @property
     def classifier_enabled(self) -> bool:
@@ -105,9 +132,11 @@ class InputGuard:
         self, ctx: GuardContext, classifier: GuardClassifier
     ) -> GuardDecision:
         started = time.perf_counter()
+        # One request carries the checks and the language questions.
+        questions = (*self._checks, *self._language_questions.values())
         try:
             result = await asyncio.wait_for(
-                classifier.classify(_state(ctx), self._checks), timeout=self._timeout
+                classifier.classify(_state(ctx), questions), timeout=self._timeout
             )
         except TimeoutError:
             logger.warning(
@@ -131,17 +160,27 @@ class InputGuard:
         fired = next(
             (c for c in self._checks if result.probabilities[c.id] >= c.threshold), None
         )
+        language_ids = {q.id for q in self._language_questions.values()}
+        language_probabilities = {
+            qid: p for qid, p in result.probabilities.items() if qid in language_ids
+        }
         return GuardDecision(
             allowed=fired is None,
             stage="classifier",
             reason=fired.id if fired else None,
             refusal=fired.refusal if fired else None,
-            probabilities=dict(result.probabilities),
+            probabilities={c.id: result.probabilities[c.id] for c in self._checks},
             battery_version=self._battery_version,
             model=result.model,
             request_id=result.request_id,
             latency_ms=_elapsed_ms(started),
             input_tokens=result.input_tokens,
+            language=pick_language(
+                language_probabilities,
+                threshold=self._language_threshold,
+                questions=self._language_questions,
+            ),
+            language_probabilities=language_probabilities,
         )
 
 

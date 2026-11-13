@@ -1,9 +1,9 @@
 """Microsoft-Decision-1 adapter for the input guard's GuardClassifier port.
 
 One request per message to the Foundry resource's decision endpoint
-(POST {endpoint}/providers/microsoft/v1/systemone): every GuardCheck becomes a
-`noul` question whose true/false criteria carry the check's definition and
-examples as text, the shape Microsoft documents. `deployment` is the Foundry
+(POST {endpoint}/providers/microsoft/v1/systemone): every question (the checks
+and the language questions) becomes a `noul` question whose true/false criteria
+carry its definition and examples as text, the shape Microsoft documents. `deployment` is the Foundry
 deployment name, not the model name. The response names only the model family
 (`microsoft-decision-1`), so the version is pinned on the deployment: thresholds
 are calibrated against one version, and a deployment that auto-upgrades can move
@@ -30,8 +30,8 @@ import httpx
 from harness.core.guard import (
     ClassifierResult,
     Criterion,
-    GuardCheck,
     GuardClassifierError,
+    GuardQuestion,
 )
 
 _PATH = "/providers/microsoft/v1/systemone"
@@ -58,12 +58,12 @@ class AzureDecisionClassifier:
         self._token_provider = token_provider
 
     async def classify(
-        self, state: Mapping[str, str], checks: Sequence[GuardCheck]
+        self, state: Mapping[str, str], questions: Sequence[GuardQuestion]
     ) -> ClassifierResult:
         body = {
             "model": self._deployment,
             "state": dict(state),
-            "questions": {check.id: _question(check) for check in checks},
+            "questions": {question.id: _question(question) for question in questions},
         }
         response = await self._post(body)
         if not response.is_success:
@@ -74,13 +74,13 @@ class AzureDecisionClassifier:
         if not isinstance(answers, dict):
             raise _invalid("the response has no answers object")
         probabilities: dict[str, float] = {}
-        for check in checks:
-            if check.id not in answers:
+        for question in questions:
+            if question.id not in answers:
                 raise GuardClassifierError(
-                    f"no answer for check {check.id!r}", cause="MissingAnswer",
+                    f"no answer for question {question.id!r}", cause="MissingAnswer",
                     misconfigured=True,
                 )
-            probabilities[check.id] = _probability(answers[check.id], check.id)
+            probabilities[question.id] = _probability(answers[question.id], question.id)
         return ClassifierResult(
             probabilities=probabilities,
             model=_text(payload.get("model")) or self._deployment,
@@ -127,11 +127,11 @@ class AzureDecisionClassifier:
         return {"Authorization": f"Bearer {token}"}
 
 
-def _question(check: GuardCheck) -> dict[str, Any]:
+def _question(question: GuardQuestion) -> dict[str, Any]:
     return {
         "type": "noul",
-        "instructions": check.question,
-        "criteria": {"true": _criterion(check.yes), "false": _criterion(check.no)},
+        "instructions": question.question,
+        "criteria": {"true": _criterion(question.yes), "false": _criterion(question.no)},
     }
 
 
@@ -191,10 +191,10 @@ def _json_object(response: httpx.Response) -> dict[str, Any]:
     return payload
 
 
-def _probability(answer: Any, check_id: str) -> float:
+def _probability(answer: Any, question_id: str) -> float:
     value = answer.get("noul") if isinstance(answer, dict) else None
     if isinstance(value, bool) or not isinstance(value, int | float) or not 0.0 <= value <= 1.0:
-        raise _invalid(f"the answer for check {check_id!r} has no probability")
+        raise _invalid(f"the answer for question {question_id!r} has no probability")
     return float(value)
 
 
