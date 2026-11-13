@@ -64,6 +64,13 @@ COPY config/targets/${TARGET_NAME}.yaml config/targets/${TARGET_NAME}.yaml
 ENV HARNESS_TARGET=${TARGET_NAME}
 ENV PATH="/app/.venv/bin:$PATH"
 
+# LangGraph rebuilds only its built-in safe types and the ones a graph's state
+# declares from a checkpoint, instead of whatever type a checkpoint names, so write
+# access to the checkpoint tables is not code execution on the next load
+# (CVE-2026-28277). It reads this when it is imported, so it has to be set here and
+# cannot come from .env, which the API loads after its imports.
+ENV LANGGRAPH_STRICT_MSGPACK=true
+
 # Nothing under /app is writable by this user: state lives in Postgres (the
 # deployment targets set checkpointer: postgres), so a SQLite default fails at
 # boot instead of writing into the image.

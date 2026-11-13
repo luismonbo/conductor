@@ -1,9 +1,18 @@
 """Suite-wide test defaults."""
 from __future__ import annotations
 
+import os
+
+# Run the suite as production runs: LangGraph loads only its built-in safe types and the
+# ones a graph's state declares (the Dockerfile sets the same variable). LangGraph reads
+# the variable when it is first imported, so this comes before every other import, and
+# pytest imports this file before the conftests below it (tests/integration/conftest.py
+# imports the API, which loads LangGraph). test_checkpoint_serde.py fails if it stops
+# taking effect.
+os.environ.setdefault("LANGGRAPH_STRICT_MSGPACK", "true")
+
 import functools
 import logging
-import os
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
