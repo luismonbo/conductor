@@ -160,16 +160,17 @@ def _language_question(code: Language, name: str) -> GuardQuestion:
         question=f"Is `visitor_message` written in {name}?",
         yes=Criterion(
             definition=(
-                f"Most of its words are {name}. A message too short to tell, such as a "
+                f"Its words are {name}, even when it is only a greeting, a thank-you or a "
+                f"couple of words. A message with no words of any one language, such as a "
                 f"name, an emoji or \"ok\", counts when `previous_assistant_reply` is in "
                 f"{name}."
             ),
         ),
         no=Criterion(
             definition=(
-                f"It is written in another language, even one close to {name}. A message "
-                f"too short to tell counts as no when `previous_assistant_reply` is not "
-                f"in {name}, or there is none."
+                f"Its words are in another language, even one close to {name}. A message "
+                f"with no words of any one language counts as no when "
+                f"`previous_assistant_reply` is not in {name}, or there is none."
             ),
         ),
     )
@@ -181,4 +182,6 @@ LANGUAGE_QUESTIONS: Mapping[Language, GuardQuestion] = {
     for code, name in (("es", "Spanish"), ("it", "Italian"), ("fr", "French"), ("de", "German"))
 }
 # A language wins at or above this; below it for all four, the visitor gets English.
-LANGUAGE_THRESHOLD = 0.5
+# Calibrated on Microsoft-Decision-1 (language_v1.json, 2026-11-13): right picks
+# scored 0.91 or more, English and wordless messages 0.44 or less.
+LANGUAGE_THRESHOLD = 0.7

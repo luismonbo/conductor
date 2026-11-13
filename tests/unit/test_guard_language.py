@@ -26,7 +26,7 @@ def test_a_tie_goes_to_the_first_language_in_order():
     assert pick_language({"language_it": 0.8, "language_es": 0.8}, threshold=0.5) == "es"
 
 
-def test_the_default_threshold_takes_an_even_score_and_nothing_below_it():
-    # The calibrated value (Task 2 of the plan moves this if the measurement does).
-    assert pick_language({"language_es": 0.5}) == "es"
-    assert pick_language({"language_es": 0.49}) == "en"
+def test_the_default_threshold_is_the_calibrated_one():
+    # Calibrated on Decision-1: right picks scored 0.91+, wrong languages 0.44 or less.
+    assert pick_language({"language_es": 0.7}) == "es"
+    assert pick_language({"language_es": 0.69}) == "en"
