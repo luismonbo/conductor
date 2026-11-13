@@ -290,7 +290,7 @@ async def test_resume_refuses_a_thread_with_no_pending_interrupt(guarded, monkey
     thread_id = await _cancel_mid_reply(guarded, llm)
 
     resumed = await guarded.client.post(
-        f"/resume/{thread_id}", json={"decision": {"approved": True}}
+        f"/resume/{thread_id}", json={"interrupt_id": "any", "decision": {"approved": True}}
     )
     assert resumed.status_code == 409
     assert llm.calls == 1
