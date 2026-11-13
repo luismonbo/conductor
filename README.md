@@ -149,6 +149,7 @@ uv run pytest -q   # 970 tests
 | `HARNESS_AGENT` | `default` | entry agent: a folder under `src/harness/agents/` (see [Agents](#agents)) |
 | `HARNESS_TOOL_PARSER` | `native` | `native` · `prompted` |
 | `HARNESS_MAX_ITERATIONS` | `8` | integer |
+| `HARNESS_CONTEXT_TURNS` | `10` | integer, visitor turns the model sees; `0` = the whole thread |
 | `HARNESS_MEMORY_TOOLS_ENABLED` | `false` | `true` · `false` — gates the shared `remember`/`recall` long-term memory tools; must stay off on a public deployment since that store is not partitioned per visitor |
 | `HARNESS_SHOW_TOOL_DETAILS` | `false` | `true` · `false` — whether tool arguments and results reach the browser (the chat stream and `GET /threads/{id}`); off, a browser gets each tool's name only. Keep it off on a public deployment |
 | `HARNESS_SESSION_COOKIE_SECURE` | `true` | `true` · `false` — marks the visitor `sid` cookie `Secure`, so browsers only send it over HTTPS; set `false` only for local development on a browser that does not treat `http://localhost` as a secure context |

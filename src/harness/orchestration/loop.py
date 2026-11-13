@@ -123,6 +123,19 @@ def _answer_abandoned_calls(messages: list[Message]) -> list[Message]:
     return transcript
 
 
+def _window(messages: list[Message], turns: int) -> list[Message]:
+    """The messages from the `turns`-th last visitor message on.
+
+    All of them when turns is 0 or the thread is shorter. A cut falls right
+    before a visitor message, so a tool call never loses its result. The
+    checkpoint keeps everything; this is only what the model is sent.
+    """
+    if turns <= 0:
+        return messages
+    starts = [i for i, m in enumerate(messages) if m.role == Role.USER]
+    return messages if len(starts) <= turns else messages[starts[-turns]:]
+
+
 _NODE_FOR_ACTION = {
     "approve": "execute_tools",
     "feedback": "refine",
@@ -193,16 +206,18 @@ def build_graph(
     registry: ToolRegistry,
     system_prompt: str,
     model_pin: str | None = None,
+    context_turns: int = 0,
 ) -> Any:
     """Compile the loop for one agent: its tools, its prompt, its optional model pin.
 
-    orchestration.build passes these from the agent's AgentDefinition; tests
-    pass them directly.
+    orchestration.build passes these from the agent's AgentDefinition, and
+    context_turns from the settings (0 sends the whole thread); tests pass
+    them directly.
     """
 
     async def _call_model(state: GraphState, config: RunnableConfig) -> dict:
         queue: asyncio.Queue = config["configurable"]["event_queue"]
-        msgs = _answer_abandoned_calls(state["messages"])
+        msgs = _answer_abandoned_calls(_window(state["messages"], context_turns))
         if not msgs or msgs[0].role != Role.SYSTEM:
             msgs = [Message(role=Role.SYSTEM, content=system_prompt)] + msgs
         if _ends_with_a_denial(msgs):

@@ -107,6 +107,9 @@ class Settings(BaseSettings):
     # the prompt; prompts never come from config.
     agent: str = "default"
     max_iterations: int = 8
+    # Visitor turns the model sees; 0 = the whole thread. The checkpoint keeps
+    # every message either way (orchestration/loop.py _window).
+    context_turns: int = Field(10, ge=0)
 
     # Long-term memory is a single shared store with no per-visitor partition,
     # so remember/recall must stay off on any public deployment. Default-safe;

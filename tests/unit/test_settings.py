@@ -198,3 +198,10 @@ def test_a_validation_error_never_shows_the_settings_input(monkeypatch):
     assert _POSTGRES_URL_ERROR in text  # the error under test
     assert "SECRETKEY" not in text
     assert "input_value" not in text
+
+
+def test_context_turns_defaults_to_ten_and_refuses_a_negative(monkeypatch):
+    monkeypatch.delenv("HARNESS_CONTEXT_TURNS", raising=False)
+    assert Settings(_env_file=None, api_key="test-key").context_turns == 10
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, api_key="test-key", context_turns=-1)

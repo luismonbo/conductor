@@ -315,6 +315,7 @@ def build_agent(
         registry=definition.tools(build_tool_deps(settings, long_term)),
         system_prompt=definition.prompt,
         model_pin=definition.model,
+        context_turns=settings.context_turns,
     )
 
 
