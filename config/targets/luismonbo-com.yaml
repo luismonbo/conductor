@@ -17,32 +17,27 @@
 llm_backend: azure
 azure_endpoint: https://aif-agent-harness-westeu-001.services.ai.azure.com
 azure_deployment: gpt-5.4-mini
-azure_api_version: "2024-10-21"  # quoted: unquoted, YAML parses this as a date
+azure_api_version: "2024-10-21"
 
 # --- Agent -------------------------------------------------------------------
 agent: website
 
 # --- Wiki --------------------------------------------------------------------
-# The website agent's knowledge: a private Blob container, read at startup with
-# the Container App's managed identity (Storage Blob Data Reader on the container).
 wiki_blob_account_url: https://prodstwikiwesteu001.blob.core.windows.net
 wiki_blob_container: wiki
 
 # --- State -------------------------------------------------------------------
-# Threads and the run store live in Postgres on Neon (AWS Frankfurt). The DSN in
-# HARNESS_CHECKPOINTER_URL decides the host: any Postgres works the same.
 checkpointer: postgres
-# Shared long-term memory stays off on a public site; in memory, it writes nothing.
 memory_backend: in_memory
 memory_tools_enabled: false
 
 # --- Public-site safety ------------------------------------------------------
 show_tool_details: false
 input_guard_enabled: true
-guard_deployment: Decision-1     # Data Zone Standard; pin its model version on the deployment
+guard_deployment: Decision-1 # Data Zone Standard; pin its model version on the deployment
 max_message_chars: 2000
 max_output_tokens: 1500
-daily_token_budget: 300000       # provider monthly token quota (9M) / 30
+daily_token_budget: 300000 # provider monthly token quota (9M) / 30
 # The privacy page says the chat's one cookie is a session cookie: the browser
 # drops it when it closes, instead of keeping it for a year.
 session_cookie_persistent: false
