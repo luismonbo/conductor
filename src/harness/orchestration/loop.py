@@ -2,16 +2,17 @@
 
 Topology:
   START → call_model
-            ├─ wants_tools + iteration_ok → approval_gate
-            │     ├─ memory tool    → interrupt() → approve → execute_tools → call_model (loop)
-            │     │                               → deny    → handle_rejection → call_model (loop)
-            │     │                               → feedback → refine → call_model (loop)
-            │     ├─ other approval → interrupt() → approve → execute_tools → call_model (loop)
-            │     │                               → deny    → handle_rejection → call_model (loop)
-            │     │                               → feedback → refine → call_model (loop)
-            │     └─ no approval    → execute_tools → call_model (loop)
-            ├─ no_tools             → final
-            └─ iteration_limit      → error
+            ├─ no tool calls            → final
+            ├─ tool calls at the limit  → error
+            └─ tool calls               → approval_gate
+                  ├─ nothing needs approval → execute_tools
+                  └─ interrupt() on the turn's next review: each memory proposal,
+                     then the other calls together when any of them needs approval
+                        ├─ approved, more reviews → approval_gate (next review)
+                        ├─ approved, none left    → execute_tools
+                        ├─ denied                 → handle_rejection
+                        └─ feedback               → refine
+  execute_tools, handle_rejection, refine → call_model (the loop)
   final → END
   error → END
 
@@ -40,7 +41,7 @@ from harness.core.llm.client import LLMClient
 from harness.core.llm.errors import ContentFiltered
 from harness.core.llm.model_resolution import resolve_model
 from harness.core.tools.registry import ToolRegistry
-from harness.core.types import AgentEvent, LLMResponse, Message, Role, ToolSpec
+from harness.core.types import AgentEvent, LLMResponse, Message, Role, ToolCall, ToolSpec
 from harness.observability.langfuse_tracing import langfuse_configured
 from harness.observability.token_accumulator import estimate_tokens
 
@@ -49,7 +50,14 @@ class GraphState(TypedDict):
     messages: Annotated[list[Message], operator.add]  # append-only reducer
     iteration: int
     max_iterations: int
-    decision: NotRequired[dict | None]  # populated on interrupt resume
+    decision: NotRequired[dict | None]  # the answer to this turn's latest review
+    # What a human must approve before this turn's tool calls run (interrupt
+    # payloads, in order), and how many of them were approved so far. Worked out
+    # once, when the model makes the calls, and stored with them: tools registered
+    # differently after a restart must not change what is asked, or which review
+    # an answer goes to.
+    reviews: NotRequired[list[dict]]
+    reviews_approved: NotRequired[int]
     model_override: NotRequired[str | None]  # UI picker; pins beat it
 
 
@@ -71,6 +79,76 @@ def _estimated_usage(
     )
 
 
+# "May not have run", not "was not run": a cancel inside execute_tools drops the
+# results of calls that had already finished.
+_NO_RESULT = (
+    "No result was recorded for this tool call: the conversation moved on before it "
+    "completed, so it may not have run."
+)
+
+
+def _answer_abandoned_calls(messages: list[Message]) -> list[Message]:
+    """`messages` with a result after every tool call that never got one.
+
+    A run can stop between the model's tool calls and their results: a visitor
+    writes past a pending approval or cancels, or the step limit ends the turn.
+    The checkpoint then holds calls without results, and a provider rejects a
+    transcript that has one, so the thread could never continue. The checkpoint
+    is append-only, so the result is added to the transcript the model is sent
+    and is never stored.
+    """
+    transcript: list[Message] = []
+    unanswered: dict[str, ToolCall] = {}  # the latest assistant turn's calls, by id
+
+    def answer_unanswered() -> None:
+        transcript.extend(
+            Message(
+                role=Role.TOOL, content=_NO_RESULT, tool_call_id=call.id, name=call.name
+            )
+            for call in unanswered.values()
+        )
+        unanswered.clear()
+
+    for message in messages:
+        if message.role == Role.TOOL:
+            unanswered.pop(message.tool_call_id or "", None)
+        else:
+            # Results directly follow their calls, so any other message ends them.
+            answer_unanswered()
+        transcript.append(message)
+        for call in message.tool_calls:
+            unanswered[call.id] = call
+    answer_unanswered()
+    return transcript
+
+
+_NODE_FOR_ACTION = {
+    "approve": "execute_tools",
+    "feedback": "refine",
+    "deny": "handle_rejection",
+}
+
+
+def _decided_action(decision: dict | None) -> str:
+    """What an approval answer decides: "approve", "feedback" or "deny".
+
+    None means nothing needed approval. The answer is whatever JSON the client
+    sent, so anything that is not clearly an approval or feedback is a denial.
+    """
+    if decision is None:
+        return "approve"
+    action = decision.get("action")
+    if isinstance(action, str) and action in ("deny", "feedback"):
+        return action
+    # An approval is `action: "approve"`, the legacy `approved: true`, or both.
+    # Each key that is present must say so: only a real true counts (the string
+    # "false" is truthy), and two keys that disagree are not an approval.
+    answered = "action" in decision or "approved" in decision
+    action_approves = "action" not in decision or action == "approve"
+    legacy_approves = "approved" not in decision or decision["approved"] is True
+    return "approve" if answered and action_approves and legacy_approves else "deny"
+
+
 def build_graph(
     llm: LLMClient,
     checkpointer: Any,
@@ -87,7 +165,7 @@ def build_graph(
 
     async def _call_model(state: GraphState, config: RunnableConfig) -> dict:
         queue: asyncio.Queue = config["configurable"]["event_queue"]
-        msgs = list(state["messages"])
+        msgs = _answer_abandoned_calls(state["messages"])
         if not msgs or msgs[0].role != Role.SYSTEM:
             msgs = [Message(role=Role.SYSTEM, content=system_prompt)] + msgs
 
@@ -144,53 +222,87 @@ def build_graph(
             content=response.text,
             tool_calls=response.tool_calls,
         )
-        return {"messages": [assistant_msg], "iteration": state["iteration"] + 1}
+        return {
+            "messages": [assistant_msg],
+            "iteration": state["iteration"] + 1,
+            # Stored with the calls they cover (see GraphState). Approvals start
+            # at none for every turn, even when the turn before it was abandoned
+            # halfway through its reviews.
+            "reviews": _reviews(response.tool_calls),
+            "reviews_approved": 0,
+        }
 
     def _route_after_model(state: GraphState) -> str:
+        # An answer ends the run whatever the step count: the limit stops a model
+        # that keeps asking for tools, and must not discard an answer it gave.
+        last = state["messages"][-1]
+        if not last.tool_calls:
+            return "final"
         if state["iteration"] >= state["max_iterations"]:
             return "error"
-        last = state["messages"][-1]
-        if last.tool_calls:
-            return "approval_gate"
-        return "final"
+        return "approval_gate"
+
+    def _reviews(calls: tuple[ToolCall, ...]) -> list[dict]:
+        """What a human must approve before `calls` run: interrupt payloads, in order.
+
+        Each memory proposal is its own review, so the UI can render approve/deny
+        buttons and a free-text feedback input for it. The other calls share one
+        review when any of them needs approval.
+        """
+        # Keyed on the call name, so a hallucinated `remember` would count even
+        # when the tool is not registered. Require registration too, otherwise a
+        # public deployment can be made to pause on a tool that cannot execute.
+        proposes_memory = registry.get("remember") is not None
+        proposals = [tc for tc in calls if proposes_memory and tc.name == "remember"]
+        others = [tc for tc in calls if not (proposes_memory and tc.name == "remember")]
+
+        reviews: list[dict] = [
+            {
+                "mode": "memory_proposal",
+                "proposed": tc.arguments.get("text", ""),
+                "call_id": tc.id,
+            }
+            for tc in proposals
+        ]
+        needs_approval = any(
+            getattr(registry.get(tc.name), "requires_approval", False) for tc in others
+        )
+        if needs_approval:
+            listed = [
+                {"name": tc.name, "args": tc.arguments, "call_id": tc.id} for tc in others
+            ]
+            reviews.append({"mode": "approval", "tool_calls": listed})
+        return reviews
+
+    def _pending_reviews(state: GraphState) -> list[dict]:
+        """This turn's reviews that no human has approved yet."""
+        reviews = state.get("reviews")
+        if reviews is None:
+            # A thread saved before reviews were stored, perhaps paused on one:
+            # work them out as that version did, from the tools registered now.
+            reviews = _reviews(state["messages"][-1].tool_calls)
+        return reviews[state.get("reviews_approved") or 0:]
 
     async def _approval_gate(state: GraphState, config: RunnableConfig) -> dict:
-        last = state["messages"][-1]
-
-        # Memory proposals get their own interrupt shape so the UI can render
-        # approve/deny buttons + a free-text feedback input.
         # NOTE: queue.put() is intentionally absent here — interrupt events are
         # emitted by _run_graph after ainvoke() returns so resume reruns of this
         # node don't fire a duplicate event into the new SSE stream.
-        # Keyed on the call name, so a hallucinated `remember` would reach this
-        # branch even when the tool is not registered. Require registration too,
-        # otherwise a public deployment can be made to pause on a tool that
-        # cannot execute.
-        memory_calls = [
-            tc for tc in last.tool_calls
-            if tc.name == "remember" and registry.get(tc.name) is not None
-        ]
-        if memory_calls:
-            tc = memory_calls[0]
-            proposed = tc.arguments.get("text", "")
-            payload = {"mode": "memory_proposal", "proposed": proposed, "call_id": tc.id}
-            decision = interrupt(payload)
+        pending = _pending_reviews(state)
+        if not pending:
+            # Written even so: an answer left in the checkpoint from an earlier turn
+            # would decide this one, and one "deny" would then reject every later
+            # tool call.
+            return {"decision": None}
+        # One interrupt() per invocation, as LangGraph's docs ask: a resume reruns
+        # this node from the top and matches answers to interrupt() calls by
+        # position. The review comes from the checkpoint, so the rerun asks about
+        # the one the human answered. The turn's next review gets an invocation of
+        # its own (_route_after_approval).
+        decision = interrupt(pending[0])
+        if _decided_action(decision) != "approve":
             return {"decision": decision}
-
-        # Regular tool approval (any other tool with requires_approval=True)
-        needs_approval = any(
-            getattr(registry.get(tc.name), "requires_approval", False)
-            for tc in last.tool_calls
-        )
-        if not needs_approval:
-            return {}
-
-        tc_list = [
-            {"name": tc.name, "args": tc.arguments, "call_id": tc.id}
-            for tc in last.tool_calls
-        ]
-        decision = interrupt({"mode": "approval", "tool_calls": tc_list})
-        return {"decision": decision}
+        approved = (state.get("reviews_approved") or 0) + 1
+        return {"decision": decision, "reviews_approved": approved}
 
     async def _handle_rejection(state: GraphState, config: RunnableConfig) -> dict:
         queue: asyncio.Queue = config["configurable"]["event_queue"]
@@ -214,18 +326,12 @@ def build_graph(
         return {"messages": rejection_msgs}
 
     def _route_after_approval(state: GraphState) -> str:
-        decision = state.get("decision")
-        if decision is None:
-            return "execute_tools"
-        action = decision.get("action")
-        if action == "approve":
-            return "execute_tools"
-        if action == "feedback":
-            return "refine"
-        if action == "deny":
-            return "handle_rejection"
-        # Legacy tool-approval shape: {"approved": true/false}
-        return "execute_tools" if decision.get("approved") else "handle_rejection"
+        # The first answer that is not an approval decides the whole turn, so no
+        # call in it runs unless every review was approved.
+        action = _decided_action(state.get("decision"))
+        if action == "approve" and _pending_reviews(state):
+            return "approval_gate"
+        return _NODE_FOR_ACTION[action]
 
     async def _refine(state: GraphState, config: RunnableConfig) -> dict:
         """Handle user feedback on any tool that requires approval.
@@ -333,6 +439,7 @@ def build_graph(
         "approval_gate",
         _route_after_approval,
         {
+            "approval_gate": "approval_gate",
             "execute_tools": "execute_tools",
             "handle_rejection": "handle_rejection",
             "refine": "refine",
