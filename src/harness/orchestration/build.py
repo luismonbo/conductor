@@ -388,7 +388,6 @@ def build_input_guard(settings: Settings) -> InputGuard:
         classifier=classifier,
         limits=GuardLimits(
             max_message_chars=settings.max_message_chars,
-            max_thread_turns=settings.max_thread_turns,
             daily_token_budget=settings.daily_token_budget,
         ),
         timeout_seconds=settings.guard_timeout_seconds,

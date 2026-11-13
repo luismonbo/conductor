@@ -70,13 +70,10 @@ def foundry(monkeypatch) -> _Foundry:
 
 def test_guard_off_builds_limits_only():
     guard = build_input_guard(_settings(
-        input_guard_enabled=False, max_message_chars=10, max_thread_turns=3,
-        daily_token_budget=500,
+        input_guard_enabled=False, max_message_chars=10, daily_token_budget=500,
     ))
     assert guard.classifier_enabled is False
-    assert guard.limits == GuardLimits(
-        max_message_chars=10, max_thread_turns=3, daily_token_budget=500
-    )
+    assert guard.limits == GuardLimits(max_message_chars=10, daily_token_budget=500)
 
 
 async def test_guard_on_with_a_resource_key_calls_the_decision_endpoint_tight(foundry):

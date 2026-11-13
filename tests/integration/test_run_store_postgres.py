@@ -120,7 +120,6 @@ async def test_the_per_message_queries_use_the_indexes(store, pool):
         cursor = AsyncClientCursor(conn)
         for query, params in [
             (postgres_module._TOKENS_SINCE, (datetime(2026, 10, 5, tzinfo=timezone.utc),)),
-            (postgres_module._COUNT_THREAD_RUNS, ("t-1",)),
             (postgres_module._OWNS_THREAD, ("t-1", "sid")),
         ]:
             await cursor.execute("EXPLAIN " + query, params)

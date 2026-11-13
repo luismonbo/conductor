@@ -152,7 +152,6 @@ async def test_the_per_message_queries_search_an_index_instead_of_scanning(store
     s, conn = store
     for sql, args in [
         (sqlite_module._TOKENS_SINCE, ("2026-10-05T00:00:00+00:00",)),
-        (sqlite_module._COUNT_THREAD_RUNS, ("t-1",)),
         (sqlite_module._OWNS_THREAD, ("t-1", "sid")),
     ]:
         async with conn.execute("EXPLAIN QUERY PLAN " + sql, args) as cur:

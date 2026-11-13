@@ -97,7 +97,6 @@ cat >> .env <<'EOF'
 HARNESS_INPUT_GUARD_ENABLED=false
 HARNESS_MAX_MESSAGE_CHARS=0
 HARNESS_MAX_OUTPUT_TOKENS=0
-HARNESS_MAX_THREAD_TURNS=0
 HARNESS_DAILY_TOKEN_BUDGET=0
 EOF
 
@@ -164,7 +163,6 @@ uv run pytest -q   # 970 tests
 | `HARNESS_GUARD_DEPLOYMENT` | `Decision-1` | name of the Foundry deployment of Microsoft-Decision-1; pin its model version there, since the guard's thresholds are calibrated against one version |
 | `HARNESS_MAX_MESSAGE_CHARS` | `2000` | integer; `0` = off |
 | `HARNESS_MAX_OUTPUT_TOKENS` | `1500` | integer, per LLM call; `0` = off |
-| `HARNESS_MAX_THREAD_TURNS` | `20` | integer, runs per thread; `0` = off |
 | `HARNESS_DAILY_TOKEN_BUDGET` | `33000` | integer, all visitors per UTC day; `0` = off |
 | `CORS_ORIGINS` | `http://localhost:5173` | comma-separated allowed browser origins; not `HARNESS_`-prefixed |
 | `HARNESS_EMBEDDING_BACKEND` | `fake` | `fake` · `openai_compatible` · `azure` (azure not yet wired) |

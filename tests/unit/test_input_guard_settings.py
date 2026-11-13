@@ -14,7 +14,6 @@ _GUARD_ENV = [
     "HARNESS_GUARD_TIMEOUT_SECONDS",
     "HARNESS_MAX_MESSAGE_CHARS",
     "HARNESS_MAX_OUTPUT_TOKENS",
-    "HARNESS_MAX_THREAD_TURNS",
     "HARNESS_DAILY_TOKEN_BUDGET",
 ]
 
@@ -64,12 +63,11 @@ def test_guard_and_limit_defaults(clean_env):
     assert s.guard_timeout_seconds == 3.0
     assert s.max_message_chars == 2000
     assert s.max_output_tokens == 1500
-    assert s.max_thread_turns == 20
     assert s.daily_token_budget == 33000
 
 
 @pytest.mark.parametrize(
-    "field", ["max_message_chars", "max_output_tokens", "max_thread_turns", "daily_token_budget"]
+    "field", ["max_message_chars", "max_output_tokens", "daily_token_budget"]
 )
 def test_a_limit_accepts_zero_to_switch_off_but_rejects_negatives(clean_env, field):
     base = dict(_env_file=None, api_key="test-key", input_guard_enabled=False)

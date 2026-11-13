@@ -155,7 +155,7 @@ class Settings(BaseSettings):
     # input_guard_enabled gates only the Microsoft-Decision-1 checks and fails
     # closed without an Azure endpoint (validator below). The checks run on the
     # Foundry resource azure_endpoint names, with the LLM's credentials
-    # (azure_api_key, else the managed identity). The four limits are independent
+    # (azure_api_key, else the managed identity). The three limits are independent
     # of it and each is off at 0. Defaults are the public website's values; a
     # single-operator deployment turns all of it off in its target file.
     input_guard_enabled: bool = True
@@ -165,7 +165,6 @@ class Settings(BaseSettings):
     guard_timeout_seconds: float = Field(3.0, gt=0)
     max_message_chars: int = Field(2000, ge=0)
     max_output_tokens: int = Field(1500, ge=0)  # per LLM call
-    max_thread_turns: int = Field(20, ge=0)  # runs per thread
     daily_token_budget: int = Field(33000, ge=0)  # all visitors per UTC day: monthly quota / 30
 
     @field_validator("log_level", mode="before")
@@ -242,6 +241,10 @@ _REMOVED_ENV_VARS = {
     "HARNESS_SYSTEM_PROMPT": (
         "HARNESS_SYSTEM_PROMPT was removed: the prompt lives in "
         "src/harness/agents/<name>/prompt.py and HARNESS_AGENT picks the agent."
+    ),
+    "HARNESS_MAX_THREAD_TURNS": (
+        "HARNESS_MAX_THREAD_TURNS was removed: threads are no longer capped, and "
+        "HARNESS_CONTEXT_TURNS sets how many visitor turns the model sees."
     ),
 }
 

@@ -113,14 +113,6 @@ async def test_list_threads_shows_only_the_sessions_own_threads(store):
     assert [t["thread_id"] for t in await store.list_threads(SID_B)] == ["theirs"]
 
 
-async def test_count_thread_runs(store):
-    await store.start_run("r1", "t-1", "default", "fake", SID_A)
-    await store.start_run("r2", "t-1", "default", "fake", SID_A)
-    await store.start_run("r3", "t-2", "default", "fake", SID_A)
-    assert await store.count_thread_runs("t-1") == 2
-    assert await store.count_thread_runs("t-unknown") == 0
-
-
 async def test_tokens_since_counts_from_the_cutoff_on(store):
     await store.start_run("r1", "t1", "default", "fake", SID_A)
     await store.finish_run("r1", _tokens(100, 50), "final_answer")
@@ -168,7 +160,6 @@ async def test_a_message_with_a_nul_character_still_gets_its_decision_row(store)
 
 async def test_a_failing_store_fails_closed_on_ownership_and_open_on_limits(broken_store):
     assert await broken_store.owns_thread(SID_A, "mine") is False
-    assert await broken_store.count_thread_runs("mine") == 0
     day_ago = datetime.now(timezone.utc) - timedelta(days=1)
     assert await broken_store.tokens_since(day_ago) == 0
     assert await broken_store.list_threads(SID_A) == []

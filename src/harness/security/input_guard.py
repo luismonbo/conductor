@@ -32,7 +32,6 @@ from harness.security.battery import (
     LANGUAGE_THRESHOLD,
     REFUSAL_DAILY_BUDGET,
     REFUSAL_MESSAGE_TOO_LONG,
-    REFUSAL_THREAD_TOO_LONG,
 )
 
 logger = logging.getLogger(__name__)
@@ -65,7 +64,6 @@ class GuardContext:
     message: str
     system_prompt: str
     previous_reply: str | None = None  # full text; trimmed to the tail here
-    thread_turns: int = 0  # runs already recorded on this thread
     tokens_today: int = 0  # input + output tokens recorded since UTC midnight
 
 
@@ -74,7 +72,6 @@ class GuardLimits:
     """Each limit is off at 0."""
 
     max_message_chars: int = 0
-    max_thread_turns: int = 0
     daily_token_budget: int = 0
 
 
@@ -124,8 +121,6 @@ class InputGuard:
         if limits.max_message_chars and len(ctx.message) > limits.max_message_chars:
             refusal = REFUSAL_MESSAGE_TOO_LONG.format(max_chars=limits.max_message_chars)
             return _precap("message_too_long", refusal)
-        if limits.max_thread_turns and ctx.thread_turns >= limits.max_thread_turns:
-            return _precap("thread_too_long", REFUSAL_THREAD_TOO_LONG)
         return None
 
     async def _classify(

@@ -329,11 +329,6 @@ async def _guard_context(
         if req.thread_id and guard.classifier_enabled
         else None
     )
-    thread_turns = (
-        await run_store.count_thread_runs(req.thread_id)
-        if req.thread_id and limits.max_thread_turns
-        else 0
-    )
     tokens_today = (
         await run_store.tokens_since(_utc_midnight())
         if limits.daily_token_budget
@@ -343,7 +338,6 @@ async def _guard_context(
         message=req.message,
         system_prompt=runtime.definition.prompt,
         previous_reply=previous_reply,
-        thread_turns=thread_turns,
         tokens_today=tokens_today,
     )
 

@@ -8,7 +8,7 @@ import pytest
 
 from harness.adapters.guard.fake import FakeClassifier
 from harness.core.guard import ClassifierResult, Criterion, GuardCheck, GuardClassifierError
-from harness.security.battery import REFUSAL_DAILY_BUDGET, REFUSAL_THREAD_TOO_LONG
+from harness.security.battery import REFUSAL_DAILY_BUDGET
 from harness.security.input_guard import (
     NO_PREVIOUS_REPLY,
     PREVIOUS_REPLY_CHARS,
@@ -51,15 +51,6 @@ async def test_message_length_counts_characters_not_bytes():
     assert not (await guard.screen(_ctx("é" * 2001))).allowed
 
 
-async def test_thread_turn_limit_blocks_once_reached():
-    guard = _guard(limits=GuardLimits(max_thread_turns=20))
-    assert (await guard.screen(_ctx(thread_turns=19))).allowed
-    decision = await guard.screen(_ctx(thread_turns=20))
-    assert (decision.allowed, decision.reason, decision.refusal) == (
-        False, "thread_too_long", REFUSAL_THREAD_TOO_LONG,
-    )
-
-
 async def test_daily_budget_blocks_once_reached():
     guard = _guard(limits=GuardLimits(daily_token_budget=100))
     assert (await guard.screen(_ctx(tokens_today=99))).allowed
@@ -69,19 +60,15 @@ async def test_daily_budget_blocks_once_reached():
     )
 
 
-async def test_limits_are_checked_budget_then_length_then_turns():
-    guard = _guard(
-        limits=GuardLimits(max_message_chars=1, max_thread_turns=1, daily_token_budget=1)
-    )
-    assert (await guard.screen(_ctx("xx", thread_turns=5, tokens_today=5))).reason == (
-        "daily_budget"
-    )
-    assert (await guard.screen(_ctx("xx", thread_turns=5))).reason == "message_too_long"
+async def test_limits_are_checked_budget_then_length():
+    guard = _guard(limits=GuardLimits(max_message_chars=1, daily_token_budget=1))
+    assert (await guard.screen(_ctx("xx", tokens_today=5))).reason == "daily_budget"
+    assert (await guard.screen(_ctx("xx"))).reason == "message_too_long"
 
 
 async def test_zero_disables_every_limit():
     decision = await _guard(limits=GuardLimits()).screen(
-        _ctx("x" * 100_000, thread_turns=10_000, tokens_today=10**9)
+        _ctx("x" * 100_000, tokens_today=10**9)
     )
     assert decision.allowed
 

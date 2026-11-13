@@ -89,8 +89,6 @@ _OWNS_THREAD = (
     "SELECT 1 AS owned FROM runs WHERE thread_id = %s AND session_id = %s LIMIT 1"
 )
 
-_COUNT_THREAD_RUNS = "SELECT COUNT(*) AS runs FROM runs WHERE thread_id = %s"
-
 # Runs still in flight have NULL token counts and count as 0 until they finish.
 _TOKENS_SINCE = """
 SELECT COALESCE(SUM(COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0)), 0) AS tokens
@@ -233,17 +231,6 @@ class PostgresRunStore:
         except Exception:
             logger.exception("RunStore.record_guard_decision failed")
             return None
-
-    async def count_thread_runs(self, thread_id: str) -> int:
-        """Runs recorded on this thread. 0 on error, so the turn limit fails open."""
-        try:
-            async with self._pool.connection() as conn:
-                cur = await conn.execute(_COUNT_THREAD_RUNS, (thread_id,))
-                row = await cur.fetchone()
-            return int(row["runs"]) if row else 0
-        except Exception:
-            logger.exception("RunStore.count_thread_runs failed for thread_id=%s", thread_id)
-            return 0
 
     async def tokens_since(self, since: datetime) -> int:
         """Input + output tokens of runs started at or after `since`.

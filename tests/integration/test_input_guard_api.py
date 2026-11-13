@@ -19,7 +19,6 @@ from harness.security.battery import (
     REFUSAL_DAILY_BUDGET,
     REFUSAL_GENERIC,
     REFUSAL_OFF_TOPIC,
-    REFUSAL_THREAD_TOO_LONG,
 )
 from harness.security.input_guard import GuardLimits, InputGuard
 from tests.integration.conftest import _TEST_API_KEY, sse_frames, thread_id_from
@@ -142,15 +141,6 @@ async def test_with_the_classifier_off_limits_still_block_and_passes_leave_no_ro
     too_long = await guarded.client.post("/chat/stream", json={"message": "x" * 11})
     assert sse_frames(too_long)[0]["stopped_reason"] == "blocked"
     assert [row[:3] for row in await _decision_rows()] == [(0, "precap", "message_too_long")]
-
-
-async def test_the_thread_turn_limit_counts_runs_on_the_thread(guarded):
-    guarded.install(limits=GuardLimits(max_thread_turns=1))
-    first = await guarded.client.post("/chat/stream", json={"message": "hello"})
-    second = await guarded.client.post(
-        "/chat/stream", json={"message": "again", "thread_id": thread_id_from(first)}
-    )
-    assert sse_frames(second)[0]["text"] == REFUSAL_THREAD_TOO_LONG
 
 
 async def test_the_daily_budget_counts_tokens_recorded_today(guarded):

@@ -99,8 +99,6 @@ INSERT INTO guard_decisions (
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 """
 
-_COUNT_THREAD_RUNS = "SELECT COUNT(*) FROM runs WHERE thread_id = ?"
-
 # Runs still in flight have NULL token counts and count as 0 until they finish.
 _TOKENS_SINCE = """
 SELECT COALESCE(SUM(COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0)), 0)
@@ -241,16 +239,6 @@ class SqliteRunStore:
         except Exception:
             logger.exception("RunStore.record_guard_decision failed")
             return None
-
-    async def count_thread_runs(self, thread_id: str) -> int:
-        """Runs recorded on this thread. 0 on error, so the turn limit fails open."""
-        try:
-            cur = await self._conn.execute(_COUNT_THREAD_RUNS, (thread_id,))
-            row = await cur.fetchone()
-            return int(row[0]) if row else 0
-        except Exception:
-            logger.exception("RunStore.count_thread_runs failed for thread_id=%s", thread_id)
-            return 0
 
     async def tokens_since(self, since: datetime) -> int:
         """Input + output tokens of runs started at or after `since`.

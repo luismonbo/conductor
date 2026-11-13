@@ -35,9 +35,6 @@ REFUSAL_DAILY_BUDGET = "I've reached my limit for today. Please come back tomorr
 REFUSAL_MESSAGE_TOO_LONG = (
     "That message is a bit long for me. Could you keep it under {max_chars} characters?"
 )
-REFUSAL_THREAD_TOO_LONG = (
-    "This conversation has gotten long. Please start a new one to keep going."
-)
 
 EXTRACTION = GuardCheck(
     id="extraction",
