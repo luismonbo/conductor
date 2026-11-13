@@ -43,11 +43,16 @@ def _calls(*tool_calls: ToolCall) -> LLMResponse:
 def _build(responses: list[LLMResponse], *tools, checkpointer: MemorySaver | None = None):
     """A graph over `tools`. Two graphs on one checkpointer model a restart of the
     process: the thread is the same, the tools registered may not be."""
+    return _build_on(FakeLLMClient(responses), *tools, checkpointer=checkpointer)
+
+
+def _build_on(llm: FakeLLMClient, *tools, checkpointer: MemorySaver | None = None):
+    """A graph over `tools` on `llm`, whose `calls` show what the model was sent."""
     registry = ToolRegistry()
     for tool in tools:
         registry.register(tool)
     return build_graph(
-        llm=FakeLLMClient(responses), checkpointer=checkpointer or MemorySaver(),
+        llm=llm, checkpointer=checkpointer or MemorySaver(),
         registry=registry, system_prompt="You are a test agent.",
     )
 
@@ -414,6 +419,48 @@ async def test_an_answer_that_is_not_a_clear_approval_is_a_denial(answer):
 
     assert _tool_results(result)["c1"] == "Rejected by user."
     assert await _remembered(memory) == set()
+
+
+# --- What a denial tells the model ----------------------------------------------------
+
+
+async def test_the_reply_to_a_denial_is_told_the_user_declined_and_nothing_was_done():
+    """Told only "Rejected by user.", in a tool result, the model answered a declined
+    memory with "I'll remember that", as if it had been saved. A system message
+    after the results, telling it to say so, made it reply "I won't store that"."""
+    llm = FakeLLMClient(
+        [_calls(_remember("c1", "likes tea")), LLMResponse(text="Not saved."),
+         LLMResponse(text="Hello.")]
+    )
+    graph = _build_on(llm, RememberTool(InMemoryLongTerm()))
+    config = _config()
+    await graph.ainvoke(_turn("remember I like tea"), config)
+    await graph.ainvoke(_DENY, config)
+
+    reply_to_the_denial = llm.calls[-1]
+
+    notice = reply_to_the_denial[-1]
+    assert notice.role == Role.SYSTEM
+    assert "declined" in notice.content
+    assert "Tell them it was not done" in notice.content
+
+
+async def test_the_notice_of_a_denial_is_sent_once_and_never_stored():
+    llm = FakeLLMClient(
+        [_calls(_remember("c1", "likes tea")), LLMResponse(text="Not saved."),
+         LLMResponse(text="Hello.")]
+    )
+    graph = _build_on(llm, RememberTool(InMemoryLongTerm()))
+    config = _config()
+    await graph.ainvoke(_turn("remember I like tea"), config)
+    denied = await graph.ainvoke(_DENY, config)
+    notice = llm.calls[-1][-1]
+
+    await graph.ainvoke(_turn("hi"), config)
+
+    assert notice.role == Role.SYSTEM
+    assert notice not in denied["messages"]
+    assert notice not in llm.calls[-1]
 
 
 # --- What an answer streams to the browser -------------------------------------------

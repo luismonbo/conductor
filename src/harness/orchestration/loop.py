@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from itertools import takewhile
 from typing import Annotated, Any, NotRequired
 import operator
 
@@ -128,6 +129,27 @@ _NODE_FOR_ACTION = {
     "deny": "handle_rejection",
 }
 
+# The result each call of a declined turn is given.
+_REJECTED = "Rejected by user."
+
+# Sent after those results to the model call that answers the denial, as a system
+# message, and never stored. Results alone did not do it: told "Rejected by user."
+# (or LangChain's wording), gpt-5.4-mini answered a declined memory with "I'll
+# remember that", as if it had been saved; models weigh tool output below system
+# messages. Without "Tell them it was not done" it still did. Some local chat
+# templates (Qwen3's) refuse a system message that is not the first.
+_DECLINED_NOTICE = (
+    "The user was asked to approve what you tried to do above and declined, so it "
+    "did not run and nothing was done. Tell them it was not done, and don't say or "
+    "suggest that it was or will be."
+)
+
+
+def _ends_with_a_denial(messages: list[Message]) -> bool:
+    """Whether `messages` end with the results the calls of a declined turn get."""
+    results = list(takewhile(lambda message: message.role == Role.TOOL, reversed(messages)))
+    return bool(results) and all(message.content == _REJECTED for message in results)
+
 
 def _decided_action(decision: dict | None) -> str:
     """What an approval answer decides: "approve", "feedback" or "deny".
@@ -183,6 +205,8 @@ def build_graph(
         msgs = _answer_abandoned_calls(state["messages"])
         if not msgs or msgs[0].role != Role.SYSTEM:
             msgs = [Message(role=Role.SYSTEM, content=system_prompt)] + msgs
+        if _ends_with_a_denial(msgs):
+            msgs = [*msgs, Message(role=Role.SYSTEM, content=_DECLINED_NOTICE)]
 
         model = resolve_model(
             agent_pin=model_pin,
@@ -326,11 +350,12 @@ def build_graph(
 
         # Inject a fake tool-result message for each rejected call so the
         # transcript stays valid (OpenAI format requires tool results for every
-        # tool_calls entry in the preceding assistant turn).
+        # tool_calls entry in the preceding assistant turn). _call_model follows
+        # them with _DECLINED_NOTICE for the reply.
         rejection_msgs = [
             Message(
                 role=Role.TOOL,
-                content="Rejected by user.",
+                content=_REJECTED,
                 tool_call_id=tc.id,
                 name=tc.name,
             )
