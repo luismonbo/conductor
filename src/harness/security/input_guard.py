@@ -8,6 +8,11 @@ into a GuardContext.
 Fails open: any classifier failure lets the message through, because the
 chatbot's availability must never depend on the classifier. The fixed limits
 still apply. Cancellation is never swallowed.
+
+The same request asks the visitor's language, and every refusal comes in it. A
+limit that refuses first still asks the language questions alone, with the
+message's first LANGUAGE_ONLY_MESSAGE_CHARS characters; when that request
+fails, the refusal is English.
 """
 from __future__ import annotations
 
@@ -19,6 +24,7 @@ from dataclasses import dataclass
 from typing import cast
 
 from harness.core.guard import (
+    ClassifierResult,
     GuardCheck,
     GuardClassifier,
     GuardClassifierError,
@@ -38,6 +44,8 @@ logger = logging.getLogger(__name__)
 
 PREVIOUS_REPLY_CHARS = 1000
 NO_PREVIOUS_REPLY = "(none — this is the first message)"
+# A limit's refusal asks for the language with only this much of the message.
+LANGUAGE_ONLY_MESSAGE_CHARS = 500
 
 
 def pick_language(
@@ -109,9 +117,9 @@ class InputGuard:
         return self._limits
 
     async def screen(self, ctx: GuardContext) -> GuardDecision:
-        blocked = self._check_limits(ctx)
-        if blocked is not None:
-            return blocked
+        limit = _limit_hit(ctx, self._limits)
+        if limit is not None:
+            return await self._refuse_at_limit(ctx, limit)
         if self._classifier is None:
             return GuardDecision(allowed=True, stage="none")
         return await self._classify(ctx, self._classifier)
@@ -126,56 +134,105 @@ class InputGuard:
             cast(TextKey, key), language, max_chars=self._limits.max_message_chars
         )
 
-    def _check_limits(self, ctx: GuardContext) -> GuardDecision | None:
-        limits = self._limits
-        if limits.daily_token_budget and ctx.tokens_today >= limits.daily_token_budget:
-            return _precap("daily_budget", self._refusal("daily_budget", DEFAULT_LANGUAGE))
-        if limits.max_message_chars and len(ctx.message) > limits.max_message_chars:
-            refusal = self._refusal("message_too_long", DEFAULT_LANGUAGE)
-            return _precap("message_too_long", refusal)
-        return None
+    def _language(
+        self, probabilities: Mapping[str, float]
+    ) -> tuple[dict[str, float], Language]:
+        """The language questions' scores out of a result, and the language they pick."""
+        ids = {q.id for q in self._language_questions.values()}
+        scores = {qid: p for qid, p in probabilities.items() if qid in ids}
+        language = pick_language(
+            scores, threshold=self._language_threshold, questions=self._language_questions
+        )
+        return scores, language
+
+    async def _ask(
+        self,
+        classifier: GuardClassifier,
+        state: Mapping[str, str],
+        questions: Sequence[GuardQuestion],
+        *,
+        on_failure: str,
+    ) -> tuple[ClassifierResult | None, str | None, int]:
+        """One classifier call: (result, None, ms), or (None, cause, ms) when it failed.
+
+        `on_failure` ends the log line: what the guard does instead.
+        """
+        started = time.perf_counter()
+        try:
+            result = await asyncio.wait_for(
+                classifier.classify(state, questions), timeout=self._timeout
+            )
+        except TimeoutError:
+            logger.warning(
+                "input guard: classifier timed out after %.1fs; %s", self._timeout, on_failure
+            )
+            return None, "TimeoutError", _elapsed_ms(started)
+        except GuardClassifierError as exc:
+            log = logger.error if exc.misconfigured else logger.warning
+            log("input guard: classifier failed (%s); %s", exc.cause, on_failure)
+            return None, exc.cause, _elapsed_ms(started)
+        except Exception as exc:
+            logger.exception("input guard: unexpected classifier error; %s", on_failure)
+            return None, type(exc).__name__, _elapsed_ms(started)
+        return result, None, _elapsed_ms(started)
+
+    async def _refuse_at_limit(self, ctx: GuardContext, reason: TextKey) -> GuardDecision:
+        """A limit's refusal, in the language a language-only request finds.
+
+        The request carries only the language questions, the start of the message
+        and the end of the previous reply. Without a classifier, or when the
+        request fails, the refusal is English.
+        """
+        if self._classifier is None:
+            return GuardDecision(
+                allowed=False, stage="precap", reason=reason,
+                refusal=self._refusal(reason, DEFAULT_LANGUAGE),
+            )
+        state = {
+            "previous_assistant_reply": _previous_reply_tail(ctx),
+            "visitor_message": ctx.message[:LANGUAGE_ONLY_MESSAGE_CHARS],
+        }
+        result, error, latency_ms = await self._ask(
+            self._classifier, state, tuple(self._language_questions.values()),
+            on_failure="refusing in English",
+        )
+        scores, language = (
+            self._language(result.probabilities) if result else (None, DEFAULT_LANGUAGE)
+        )
+        return GuardDecision(
+            allowed=False,
+            stage="precap",
+            reason=reason,
+            refusal=self._refusal(reason, language),
+            model=result.model if result else None,
+            request_id=result.request_id if result else None,
+            latency_ms=latency_ms,
+            input_tokens=result.input_tokens if result else None,
+            error=error,
+            language=language,
+            language_probabilities=scores,
+        )
 
     async def _classify(
         self, ctx: GuardContext, classifier: GuardClassifier
     ) -> GuardDecision:
-        started = time.perf_counter()
         # One request carries the checks and the language questions.
         questions = (*self._checks, *self._language_questions.values())
-        try:
-            result = await asyncio.wait_for(
-                classifier.classify(_state(ctx), questions), timeout=self._timeout
-            )
-        except TimeoutError:
-            logger.warning(
-                "input guard: classifier timed out after %.1fs; failing open",
-                self._timeout,
-            )
-            return _fallback("TimeoutError", started)
-        except GuardClassifierError as exc:
-            log = logger.error if exc.misconfigured else logger.warning
-            log("input guard: classifier failed (%s); failing open", exc.cause)
-            return _fallback(exc.cause, started)
-        except Exception as exc:
-            logger.exception("input guard: unexpected classifier error; failing open")
-            return _fallback(type(exc).__name__, started)
+        result, error, latency_ms = await self._ask(
+            classifier, _state(ctx), questions, on_failure="failing open"
+        )
+        if result is None:
+            return _fallback(error or "unknown", latency_ms)
 
         missing = [c.id for c in self._checks if c.id not in result.probabilities]
         if missing:
             logger.error("input guard: classifier omitted %s; failing open", missing)
-            return _fallback("MissingProbability", started)
+            return _fallback("MissingProbability", latency_ms)
 
         fired = next(
             (c for c in self._checks if result.probabilities[c.id] >= c.threshold), None
         )
-        language_ids = {q.id for q in self._language_questions.values()}
-        language_probabilities = {
-            qid: p for qid, p in result.probabilities.items() if qid in language_ids
-        }
-        language = pick_language(
-            language_probabilities,
-            threshold=self._language_threshold,
-            questions=self._language_questions,
-        )
+        scores, language = self._language(result.probabilities)
         return GuardDecision(
             allowed=fired is None,
             stage="classifier",
@@ -185,36 +242,42 @@ class InputGuard:
             battery_version=self._battery_version,
             model=result.model,
             request_id=result.request_id,
-            latency_ms=_elapsed_ms(started),
+            latency_ms=latency_ms,
             input_tokens=result.input_tokens,
             language=language,
-            language_probabilities=language_probabilities,
+            language_probabilities=scores,
         )
 
 
+def _limit_hit(ctx: GuardContext, limits: GuardLimits) -> TextKey | None:
+    """The limit this message hits, named as its refusal, or None."""
+    if limits.daily_token_budget and ctx.tokens_today >= limits.daily_token_budget:
+        return "daily_budget"
+    if limits.max_message_chars and len(ctx.message) > limits.max_message_chars:
+        return "message_too_long"
+    return None
+
+
+def _previous_reply_tail(ctx: GuardContext) -> str:
+    if ctx.previous_reply:
+        return ctx.previous_reply[-PREVIOUS_REPLY_CHARS:]
+    return NO_PREVIOUS_REPLY
+
+
 def _state(ctx: GuardContext) -> dict[str, str]:
-    previous = (
-        ctx.previous_reply[-PREVIOUS_REPLY_CHARS:]
-        if ctx.previous_reply
-        else NO_PREVIOUS_REPLY
-    )
     return {
         "assistant_system_prompt": ctx.system_prompt,
-        "previous_assistant_reply": previous,
+        "previous_assistant_reply": _previous_reply_tail(ctx),
         "visitor_message": ctx.message,
     }
 
 
-def _precap(reason: str, refusal: str) -> GuardDecision:
-    return GuardDecision(allowed=False, stage="precap", reason=reason, refusal=refusal)
-
-
-def _fallback(error: str, started: float) -> GuardDecision:
+def _fallback(error: str, latency_ms: int) -> GuardDecision:
     return GuardDecision(
         allowed=True,
         stage="fallback",
         reason="guard_unavailable",
-        latency_ms=_elapsed_ms(started),
+        latency_ms=latency_ms,
         error=error,
     )
 

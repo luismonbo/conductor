@@ -155,6 +155,26 @@ async def test_the_daily_budget_counts_tokens_recorded_today(guarded):
     assert sse_frames(second)[0]["text"] == visitor_text("daily_budget")
 
 
+async def test_a_too_long_german_message_gets_the_german_refusal(guarded):
+    guarded.install({"language_de": 0.99}, limits=GuardLimits(max_message_chars=10))
+    frames = sse_frames(await guarded.client.post("/chat/stream", json={"message": "x" * 11}))
+    assert frames[0]["text"] == visitor_text("message_too_long", "de", max_chars=10)
+    assert [row[:3] for row in await _decision_rows()] == [(0, "precap", "message_too_long")]
+    store = await _main._get_run_store()
+    async with store._conn.execute("SELECT model, input_tokens FROM guard_decisions") as cur:
+        assert [tuple(row) for row in await cur.fetchall()] == [("fake-decision", 0)]
+
+
+async def test_the_daily_limit_asks_with_the_previous_reply(guarded):
+    first = await guarded.client.post("/chat/stream", json={"message": "hello"})
+    classifier = guarded.install(limits=GuardLimits(daily_token_budget=1))
+    blocked = await guarded.client.post(
+        "/chat/stream", json={"message": "again", "thread_id": thread_id_from(first)}
+    )
+    assert sse_frames(blocked)[0]["stopped_reason"] == "blocked"
+    assert classifier.calls[-1]["previous_assistant_reply"] == "Hello from fake!"
+
+
 async def test_the_guard_receives_the_previous_reply_when_continuing(guarded):
     first = await guarded.client.post("/chat/stream", json={"message": "hello"})
     classifier = guarded.install()

@@ -164,10 +164,12 @@ def _language_question(code: Language, name: str) -> GuardQuestion:
     )
 
 
+_LANGUAGE_NAMES: tuple[tuple[Language, str], ...] = (
+    ("es", "Spanish"), ("it", "Italian"), ("fr", "French"), ("de", "German"),
+)
 # English needs no question: it is what a visitor gets when none of these wins.
 LANGUAGE_QUESTIONS: Mapping[Language, GuardQuestion] = {
-    code: _language_question(code, name)
-    for code, name in (("es", "Spanish"), ("it", "Italian"), ("fr", "French"), ("de", "German"))
+    code: _language_question(code, name) for code, name in _LANGUAGE_NAMES
 }
 # A language wins at or above this; below it for all four, the visitor gets English.
 # Calibrated on Microsoft-Decision-1 (language_v1.json, 2026-11-13): right picks

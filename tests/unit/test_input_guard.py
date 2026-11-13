@@ -71,10 +71,75 @@ async def test_zero_disables_every_limit():
     assert decision.allowed
 
 
-async def test_a_limit_hit_never_calls_the_classifier():
+async def test_a_limit_hit_asks_only_the_language_questions():
     fake = FakeClassifier()
     await _guard(fake, limits=GuardLimits(max_message_chars=1)).screen(_ctx("too long"))
-    assert fake.calls == []
+    assert fake.asked == [("language_es", "language_it", "language_fr", "language_de")]
+    assert fake.calls == [
+        {"previous_assistant_reply": NO_PREVIOUS_REPLY, "visitor_message": "too long"}
+    ]
+
+
+async def test_a_limit_hit_asks_with_the_previous_replys_tail():
+    fake = FakeClassifier()
+    reply = "a" * 10 + "b" * PREVIOUS_REPLY_CHARS
+    guard = _guard(fake, limits=GuardLimits(daily_token_budget=1))
+    await guard.screen(_ctx("hola", previous_reply=reply, tokens_today=5))
+    assert fake.calls[0]["previous_assistant_reply"] == "b" * PREVIOUS_REPLY_CHARS
+
+
+async def test_a_huge_message_sends_only_its_first_500_characters():
+    fake = FakeClassifier()
+    await _guard(fake, limits=GuardLimits(max_message_chars=2000)).screen(_ctx("é" * 100_000))
+    assert fake.calls[0]["visitor_message"] == "é" * 500
+
+
+async def test_a_limit_refusal_comes_in_the_language_found():
+    guard = _guard(FakeClassifier({"language_de": 0.9}), limits=GuardLimits(max_message_chars=5))
+    decision = await guard.screen(_ctx("x" * 6))
+    assert (decision.allowed, decision.stage, decision.reason) == (
+        False, "precap", "message_too_long",
+    )
+    assert decision.refusal == visitor_text("message_too_long", "de", max_chars=5)
+    assert decision.language == "de"
+    assert (decision.model, decision.request_id, decision.input_tokens) == (
+        "fake-decision", "fake-request", 0,
+    )
+    assert decision.latency_ms is not None
+    assert (decision.probabilities, decision.battery_version, decision.error) == (None, None, None)
+
+
+async def test_a_failed_language_request_refuses_in_english_and_records_why():
+    error = GuardClassifierError("down", cause="HTTP503")
+    guard = _guard(FakeClassifier(error=error), limits=GuardLimits(max_message_chars=1))
+    decision = await guard.screen(_ctx("xx"))
+    assert (decision.allowed, decision.stage, decision.reason, decision.error) == (
+        False, "precap", "message_too_long", "HTTP503",
+    )
+    assert (decision.refusal, decision.language) == (
+        visitor_text("message_too_long", max_chars=1), "en",
+    )
+
+
+async def test_a_slow_language_request_refuses_in_english_within_the_timeout():
+    guard = _guard(_SlowClassifier(), limits=GuardLimits(daily_token_budget=1), timeout=0.01)
+    decision = await asyncio.wait_for(guard.screen(_ctx(tokens_today=1)), timeout=0.5)
+    assert (decision.refusal, decision.error) == (visitor_text("daily_budget"), "TimeoutError")
+
+
+async def test_without_a_classifier_a_limit_refusal_is_english_and_asks_nothing():
+    decision = await _guard(None, limits=GuardLimits(max_message_chars=1)).screen(_ctx("xx"))
+    assert (decision.refusal, decision.model, decision.latency_ms) == (
+        visitor_text("message_too_long", max_chars=1), None, None,
+    )
+
+
+async def test_cancellation_during_the_language_request_is_never_swallowed():
+    guard = _guard(
+        FakeClassifier(error=asyncio.CancelledError()), limits=GuardLimits(max_message_chars=1)
+    )
+    with pytest.raises(asyncio.CancelledError):
+        await guard.screen(_ctx("xx"))
 
 
 # --- classifier and thresholds ------------------------------------------------
