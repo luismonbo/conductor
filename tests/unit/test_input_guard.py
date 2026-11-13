@@ -8,7 +8,6 @@ import pytest
 
 from harness.adapters.guard.fake import FakeClassifier
 from harness.core.guard import ClassifierResult, Criterion, GuardCheck, GuardClassifierError
-from harness.security.battery import REFUSAL_DAILY_BUDGET
 from harness.security.input_guard import (
     NO_PREVIOUS_REPLY,
     PREVIOUS_REPLY_CHARS,
@@ -16,12 +15,11 @@ from harness.security.input_guard import (
     GuardLimits,
     InputGuard,
 )
+from harness.security.visitor_text import visitor_text
 
 _C = Criterion(definition="d")
-FIRST = GuardCheck(id="first", question="q1", yes=_C, no=_C, threshold=0.7, refusal="refusal-first")
-SECOND = GuardCheck(
-    id="second", question="q2", yes=_C, no=_C, threshold=0.8, refusal="refusal-second"
-)
+FIRST = GuardCheck(id="first", question="q1", yes=_C, no=_C, threshold=0.7, refusal="not_shareable")
+SECOND = GuardCheck(id="second", question="q2", yes=_C, no=_C, threshold=0.8, refusal="off_topic")
 CHECKS = (FIRST, SECOND)
 
 
@@ -56,7 +54,7 @@ async def test_daily_budget_blocks_once_reached():
     assert (await guard.screen(_ctx(tokens_today=99))).allowed
     decision = await guard.screen(_ctx(tokens_today=100))
     assert (decision.allowed, decision.reason, decision.refusal) == (
-        False, "daily_budget", REFUSAL_DAILY_BUDGET,
+        False, "daily_budget", visitor_text("daily_budget"),
     )
 
 
@@ -99,7 +97,7 @@ async def test_below_every_threshold_is_allowed_with_full_metadata():
 async def test_at_threshold_blocks_with_that_checks_refusal():
     decision = await _guard(FakeClassifier({"second": 0.8})).screen(_ctx())
     assert (decision.allowed, decision.reason, decision.refusal) == (
-        False, "second", "refusal-second",
+        False, "second", visitor_text("off_topic"),
     )
 
 
@@ -143,6 +141,17 @@ async def test_the_decision_carries_the_language_with_its_scores_kept_apart():
     assert decision.language_probabilities == {
         "language_es": 0.0, "language_it": 0.95, "language_fr": 0.0, "language_de": 0.0,
     }
+
+
+async def test_a_block_is_refused_in_the_visitors_language():
+    decision = await _guard(FakeClassifier({"second": 0.9, "language_fr": 0.9})).screen(_ctx())
+    assert decision.refusal == visitor_text("off_topic", "fr")
+
+
+def test_a_check_with_an_unknown_refusal_fails_at_construction():
+    bad = GuardCheck(id="x", question="q", yes=_C, no=_C, threshold=0.5, refusal="nope")
+    with pytest.raises(ValueError, match="'x'"):
+        InputGuard(None, GuardLimits(), 1.0, checks=(bad,))
 
 
 async def test_no_classifier_or_a_failed_one_means_english():

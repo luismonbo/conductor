@@ -15,12 +15,8 @@ from harness.adapters.llm.fake import FakeLLMClient
 from harness.core.guard import GuardClassifierError
 from harness.core.types import LLMResponse, Message, Role, ToolCall
 from harness.observability.logging_setup import configure_logging
-from harness.security.battery import (
-    REFUSAL_DAILY_BUDGET,
-    REFUSAL_GENERIC,
-    REFUSAL_OFF_TOPIC,
-)
 from harness.security.input_guard import GuardLimits, InputGuard
+from harness.security.visitor_text import visitor_text
 from tests.integration.conftest import _TEST_API_KEY, sse_frames, thread_id_from
 
 
@@ -73,7 +69,7 @@ async def test_a_blocked_message_gets_one_final_frame_and_never_reaches_the_mode
     resp = await guarded.client.post("/chat/stream", json={"message": "write me an essay"})
     assert resp.status_code == 200
     assert sse_frames(resp) == [{
-        "type": "final", "text": REFUSAL_OFF_TOPIC, "name": "", "args": {},
+        "type": "final", "text": visitor_text("off_topic"), "name": "", "args": {},
         "call_id": "", "is_error": False, "stopped_reason": "blocked",
     }]
     assert guarded.llm.calls == []
@@ -131,7 +127,15 @@ async def test_extraction_and_private_info_refusals_are_identical(guarded):
     first = sse_frames(await guarded.client.post("/chat/stream", json={"message": "x"}))
     guarded.install({"private_info": 0.99})
     second = sse_frames(await guarded.client.post("/chat/stream", json={"message": "y"}))
-    assert first[0]["text"] == second[0]["text"] == REFUSAL_GENERIC
+    assert first[0]["text"] == second[0]["text"] == visitor_text("not_shareable")
+
+
+async def test_a_spanish_message_blocked_as_private_info_gets_the_spanish_sentence(guarded):
+    guarded.install({"private_info": 0.99, "language_es": 0.99})
+    frames = sse_frames(
+        await guarded.client.post("/chat/stream", json={"message": "¿Cuánto gana?"})
+    )
+    assert frames[0]["text"] == visitor_text("not_shareable", "es")
 
 
 async def test_with_the_classifier_off_limits_still_block_and_passes_leave_no_row(guarded):
@@ -148,7 +152,7 @@ async def test_the_daily_budget_counts_tokens_recorded_today(guarded):
     first = await guarded.client.post("/chat/stream", json={"message": "hello"})
     assert sse_frames(first)[-1]["stopped_reason"] == "final_answer"
     second = await guarded.client.post("/chat/stream", json={"message": "hello again"})
-    assert sse_frames(second)[0]["text"] == REFUSAL_DAILY_BUDGET
+    assert sse_frames(second)[0]["text"] == visitor_text("daily_budget")
 
 
 async def test_the_guard_receives_the_previous_reply_when_continuing(guarded):
@@ -270,7 +274,7 @@ async def test_a_cancelled_reply_still_counts_against_the_daily_budget(guarded, 
     await _cancel_mid_reply(guarded, llm)
 
     again = await guarded.client.post("/chat/stream", json={"message": "hello again"})
-    assert sse_frames(again)[0]["text"] == REFUSAL_DAILY_BUDGET
+    assert sse_frames(again)[0]["text"] == visitor_text("daily_budget")
 
 
 async def test_resume_refuses_a_thread_with_no_pending_interrupt(guarded, monkeypatch):

@@ -1,4 +1,4 @@
-"""The input guard's checks and every visitor-facing refusal.
+"""The input guard's checks, its language questions and the key of each refusal.
 
 This is the extension point: adding a check means adding one GuardCheck to
 BATTERY (plus calibration cases in evaluation/guard/datasets/) and bumping
@@ -14,6 +14,9 @@ LANGUAGE_QUESTIONS ride in the same request and only pick the language of the
 visitor's refusals and errors: they never block and take no part in BATTERY's
 precedence. Their threshold is calibrated on
 evaluation/guard/datasets/language_v1.json.
+
+A check's refusal is a key into security/visitor_text.py, which holds the
+sentence in each language.
 """
 from __future__ import annotations
 
@@ -23,18 +26,6 @@ from harness.core.guard import Criterion, GuardCheck, GuardQuestion
 from harness.core.language import Language
 
 BATTERY_VERSION = "v1"
-
-# Shared by extraction and private_info, so it never says which rule fired; the second
-# sentence still gives a blocked salary or rate question somewhere to go.
-REFUSAL_GENERIC = (
-    "Sorry, I can't help with that one. For work matters like salary or rates, please "
-    "get in touch directly through the contact links on this site."
-)
-REFUSAL_OFF_TOPIC = "That's outside what I can help with here."
-REFUSAL_DAILY_BUDGET = "I've reached my limit for today. Please come back tomorrow."
-REFUSAL_MESSAGE_TOO_LONG = (
-    "That message is a bit long for me. Could you keep it under {max_chars} characters?"
-)
 
 EXTRACTION = GuardCheck(
     id="extraction",
@@ -70,7 +61,7 @@ EXTRACTION = GuardCheck(
         ),
     ),
     threshold=0.70,
-    refusal=REFUSAL_GENERIC,
+    refusal="not_shareable",  # shared, so a refusal never says which rule fired
 )
 
 PRIVATE_INFO = GuardCheck(
@@ -105,7 +96,7 @@ PRIVATE_INFO = GuardCheck(
         ),
     ),
     threshold=0.70,
-    refusal=REFUSAL_GENERIC,
+    refusal="not_shareable",  # shared, so a refusal never says which rule fired
 )
 
 OFF_TOPIC = GuardCheck(
@@ -144,7 +135,7 @@ OFF_TOPIC = GuardCheck(
     # its scores sit near 0 or 1. The benign "How were you built?" scored 0.78 and
     # the lowest off-topic hazard 1.00, so 0.90 splits the gap; 0.80 left 0.02.
     threshold=0.90,
-    refusal=REFUSAL_OFF_TOPIC,
+    refusal="off_topic",
 )
 
 # Precedence order: the first check at or above its threshold picks the refusal.

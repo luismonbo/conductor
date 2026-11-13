@@ -16,6 +16,7 @@ import logging
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from typing import cast
 
 from harness.core.guard import (
     GuardCheck,
@@ -30,9 +31,8 @@ from harness.security.battery import (
     BATTERY_VERSION,
     LANGUAGE_QUESTIONS,
     LANGUAGE_THRESHOLD,
-    REFUSAL_DAILY_BUDGET,
-    REFUSAL_MESSAGE_TOO_LONG,
 )
+from harness.security.visitor_text import TEXT_KEYS, TextKey, visitor_text
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +86,12 @@ class InputGuard:
         language_questions: Mapping[Language, GuardQuestion] = LANGUAGE_QUESTIONS,
         language_threshold: float = LANGUAGE_THRESHOLD,
     ) -> None:
+        for check in checks:
+            if check.refusal not in TEXT_KEYS:
+                raise ValueError(
+                    f"check {check.id!r} names refusal {check.refusal!r}, which "
+                    f"security/visitor_text.py does not have"
+                )
         self._classifier = classifier
         self._limits = limits
         self._timeout = timeout_seconds
@@ -114,12 +120,18 @@ class InputGuard:
         if self._classifier is not None:
             await self._classifier.aclose()
 
+    def _refusal(self, key: str, language: Language) -> str:
+        """The visitor's text for a refusal key (checked at construction)."""
+        return visitor_text(
+            cast(TextKey, key), language, max_chars=self._limits.max_message_chars
+        )
+
     def _check_limits(self, ctx: GuardContext) -> GuardDecision | None:
         limits = self._limits
         if limits.daily_token_budget and ctx.tokens_today >= limits.daily_token_budget:
-            return _precap("daily_budget", REFUSAL_DAILY_BUDGET)
+            return _precap("daily_budget", self._refusal("daily_budget", DEFAULT_LANGUAGE))
         if limits.max_message_chars and len(ctx.message) > limits.max_message_chars:
-            refusal = REFUSAL_MESSAGE_TOO_LONG.format(max_chars=limits.max_message_chars)
+            refusal = self._refusal("message_too_long", DEFAULT_LANGUAGE)
             return _precap("message_too_long", refusal)
         return None
 
@@ -159,22 +171,23 @@ class InputGuard:
         language_probabilities = {
             qid: p for qid, p in result.probabilities.items() if qid in language_ids
         }
+        language = pick_language(
+            language_probabilities,
+            threshold=self._language_threshold,
+            questions=self._language_questions,
+        )
         return GuardDecision(
             allowed=fired is None,
             stage="classifier",
             reason=fired.id if fired else None,
-            refusal=fired.refusal if fired else None,
+            refusal=self._refusal(fired.refusal, language) if fired else None,
             probabilities={c.id: result.probabilities[c.id] for c in self._checks},
             battery_version=self._battery_version,
             model=result.model,
             request_id=result.request_id,
             latency_ms=_elapsed_ms(started),
             input_tokens=result.input_tokens,
-            language=pick_language(
-                language_probabilities,
-                threshold=self._language_threshold,
-                questions=self._language_questions,
-            ),
+            language=language,
             language_probabilities=language_probabilities,
         )
 

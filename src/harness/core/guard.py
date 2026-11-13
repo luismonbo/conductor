@@ -37,7 +37,7 @@ class GuardCheck(GuardQuestion):
     """A question that blocks. Yes always means hazard."""
 
     threshold: float  # block when P(yes) is at or above this
-    refusal: str  # what the visitor sees when this check blocks
+    refusal: str  # the key of what the visitor sees (security/visitor_text.py)
 
 
 @dataclass(frozen=True)
@@ -64,7 +64,7 @@ class GuardDecision:
     allowed: bool
     stage: str
     reason: str | None = None
-    refusal: str | None = None
+    refusal: str | None = None  # the visitor's text, in `language`
     probabilities: Mapping[str, float] | None = None
     battery_version: str | None = None
     model: str | None = None
