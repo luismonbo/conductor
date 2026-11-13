@@ -8,12 +8,11 @@ import pytest
 from harness.core.llm.errors import ContentFiltered
 from harness.core.types import AgentEvent, Message, Role, ToolCall
 from harness.security.egress import (
-    CONTENT_FILTERED_TEXT,
-    UNAVAILABLE_TEXT,
     error_event,
     to_browser,
     transcript_for_browser,
 )
+from harness.security.visitor_text import visitor_text
 
 _CALL = AgentEvent(
     type="tool_call", name="search_documents",
@@ -25,18 +24,11 @@ _RESULT = AgentEvent(
 )
 
 
-def test_the_two_sentences_are_the_specs():
-    assert CONTENT_FILTERED_TEXT == (
-        "I can't respond to that message. Your next message will start a new conversation."
-    )
-    assert UNAVAILABLE_TEXT == "The assistant is unavailable right now. Please try again later."
-
-
 def test_a_content_filter_hit_gets_its_own_sentence():
     event = error_event(ContentFiltered("prompt", ("jailbreak",)))
 
     assert event == AgentEvent(
-        type="error", text=CONTENT_FILTERED_TEXT, stopped_reason="content_filter"
+        type="error", text=visitor_text("content_filter"), stopped_reason="content_filter"
     )
 
 
@@ -47,7 +39,16 @@ def test_a_content_filter_hit_gets_its_own_sentence():
 ], ids=repr)
 def test_every_other_failure_gets_the_generic_sentence_never_its_text(exc):
     assert error_event(exc) == AgentEvent(
-        type="error", text=UNAVAILABLE_TEXT, stopped_reason="error"
+        type="error", text=visitor_text("unavailable"), stopped_reason="error"
+    )
+
+
+def test_the_error_sentences_come_in_the_visitors_language():
+    assert error_event(ContentFiltered("prompt"), "it") == AgentEvent(
+        type="error", text=visitor_text("content_filter", "it"), stopped_reason="content_filter"
+    )
+    assert error_event(ValueError("boom"), "de") == AgentEvent(
+        type="error", text=visitor_text("unavailable", "de"), stopped_reason="error"
     )
 
 

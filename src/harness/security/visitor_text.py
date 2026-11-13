@@ -13,7 +13,8 @@ owner chose that over a setting (docs/superpowers/specs/2026-11-13-refusal-messa
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Literal, get_args
+from dataclasses import dataclass
+from typing import Any, Literal, get_args
 
 from harness.core.language import DEFAULT_LANGUAGE, Language
 
@@ -121,3 +122,22 @@ def visitor_text(
     Raises KeyError for an unknown key, or when a placeholder has no field.
     """
     return _TEXTS[key][language].format(**fields)
+
+
+@dataclass(frozen=True)
+class VisitorLanguage:
+    """A run's language, carried as config["configurable"]["visitor_language"].
+
+    Wrapped on purpose: LangGraph copies every str, int, float or bool in
+    configurable into each checkpoint's metadata (get_checkpoint_metadata in
+    langgraph.checkpoint.base) and skips objects such as the event queue. A bare
+    "es" there would be stored with the thread.
+    """
+
+    code: Language = DEFAULT_LANGUAGE
+
+
+def configured_language(configurable: Mapping[str, Any]) -> Language:
+    """The run's language from its configurable; English when it carries none."""
+    carried = configurable.get("visitor_language")
+    return carried.code if isinstance(carried, VisitorLanguage) else DEFAULT_LANGUAGE

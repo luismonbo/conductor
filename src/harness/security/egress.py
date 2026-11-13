@@ -13,26 +13,28 @@ from __future__ import annotations
 import dataclasses
 from typing import Any
 
+from harness.core.language import DEFAULT_LANGUAGE, Language
 from harness.core.llm.errors import ContentFiltered
 from harness.core.types import AgentEvent, Message, Role
-
-CONTENT_FILTERED_TEXT = (
-    "I can't respond to that message. Your next message will start a new conversation."
-)
-UNAVAILABLE_TEXT = "The assistant is unavailable right now. Please try again later."
+from harness.security.visitor_text import visitor_text
 
 # Event types a browser receives unchanged. Tool events are handled below;
 # any other type is dropped.
 _PASS_THROUGH = frozenset({"token", "final", "error", "thinking", "interrupt"})
 
 
-def error_event(exc: BaseException) -> AgentEvent:
-    """A failed run as a browser sees it: a fixed sentence, never the exception."""
+def error_event(exc: BaseException, language: Language = DEFAULT_LANGUAGE) -> AgentEvent:
+    """A failed run as a browser sees it: a fixed sentence in the visitor's
+    language, never the exception."""
     if isinstance(exc, ContentFiltered):
         return AgentEvent(
-            type="error", text=CONTENT_FILTERED_TEXT, stopped_reason="content_filter"
+            type="error",
+            text=visitor_text("content_filter", language),
+            stopped_reason="content_filter",
         )
-    return AgentEvent(type="error", text=UNAVAILABLE_TEXT, stopped_reason="error")
+    return AgentEvent(
+        type="error", text=visitor_text("unavailable", language), stopped_reason="error"
+    )
 
 
 def to_browser(event: AgentEvent, *, show_tool_details: bool) -> AgentEvent | None:

@@ -41,6 +41,7 @@ from harness.observability.token_accumulator import TokenAccumulator
 from harness.orchestration.build import AgentRuntime, build_input_guard, build_runtime
 from harness.security import egress
 from harness.security.input_guard import GuardContext, InputGuard
+from harness.security.visitor_text import VisitorLanguage, configured_language
 
 # Settings() reads HARNESS_-prefixed vars straight from .env itself, but this
 # module's own os.environ.get() calls (Langfuse keys in _build_callbacks)
@@ -465,6 +466,8 @@ async def _run_graph(
     stopped_reason_holder: list[str],
     run_store: RunStore,
 ) -> None:
+    # The visitor's language, for an error sentence (VisitorLanguage says why it's wrapped).
+    language = configured_language(config.get("configurable") or {})
     try:
         result = await graph.ainvoke(invoke_arg, config)
         # Surface any interrupt payloads AFTER ainvoke returns so that resume
@@ -489,13 +492,13 @@ async def _run_graph(
             thread_id, run_id, exc.stage, ",".join(exc.categories) or "-",
         )
         stopped_reason_holder[0] = "content_filter"
-        await event_queue.put(egress.error_event(exc))
+        await event_queue.put(egress.error_event(exc, language))
     except Exception as exc:
         logging.getLogger(__name__).exception(
             "agent run failed for thread_id=%s run_id=%s", thread_id, run_id
         )
         stopped_reason_holder[0] = "error"
-        await event_queue.put(egress.error_event(exc))
+        await event_queue.put(egress.error_event(exc, language))
     finally:
         _running.pop(thread_id, None)  # the run's claim on the thread (_claim_thread)
         # Shield finish_run so it completes even if the task is being cancelled
@@ -631,6 +634,8 @@ async def _start_chat(
             "event_queue": event_queue,
             "token_accumulator": accumulator,
             "stopped_reason_holder": stopped_reason_holder,
+            # Found by the guard; English when it did not answer. Never stored.
+            "visitor_language": VisitorLanguage(decision.language),
         },
         "callbacks": callbacks,
         "metadata": lf_metadata,

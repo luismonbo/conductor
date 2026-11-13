@@ -45,6 +45,7 @@ from harness.core.tools.registry import ToolRegistry
 from harness.core.types import AgentEvent, LLMResponse, Message, Role, ToolCall, ToolSpec
 from harness.observability.langfuse_tracing import langfuse_configured
 from harness.observability.token_accumulator import estimate_tokens
+from harness.security.visitor_text import configured_language, visitor_text
 
 
 class GraphState(TypedDict):
@@ -469,7 +470,7 @@ def build_graph(
         queue: asyncio.Queue = config["configurable"]["event_queue"]
         await queue.put(AgentEvent(
             type="error",
-            text="I couldn't complete this within the allowed reasoning steps.",
+            text=visitor_text("step_limit", configured_language(config["configurable"])),
         ))
         if holder := config["configurable"].get("stopped_reason_holder"):
             holder[0] = "max_iterations"

@@ -4,7 +4,12 @@ from __future__ import annotations
 import pytest
 
 from harness.core.language import LANGUAGES
-from harness.security.visitor_text import TEXT_KEYS, visitor_text
+from harness.security.visitor_text import (
+    TEXT_KEYS,
+    VisitorLanguage,
+    configured_language,
+    visitor_text,
+)
 
 
 def test_every_text_exists_in_the_five_languages():
@@ -63,3 +68,10 @@ def test_french_puts_a_no_break_space_before_every_question_mark():
 def test_an_unknown_key_is_a_key_error():
     with pytest.raises(KeyError):
         visitor_text("thread_too_long")  # type: ignore[arg-type]
+
+
+def test_the_runs_language_comes_from_its_wrapper_and_defaults_to_english():
+    assert configured_language({}) == "en"
+    assert configured_language({"visitor_language": VisitorLanguage("fr")}) == "fr"
+    # A bare string would have been copied into the checkpoint, so it is not read.
+    assert configured_language({"visitor_language": "fr"}) == "en"

@@ -10,10 +10,11 @@ from harness.adapters.tools.calculator import CalculatorTool
 from harness.core.tools.registry import ToolRegistry
 from harness.core.types import AgentEvent, LLMResponse, Message, Role, ToolCall
 from harness.orchestration.loop import build_graph
+from harness.security.visitor_text import VisitorLanguage, visitor_text
 
 
 async def _run(
-    responses: list[LLMResponse], max_iterations: int
+    responses: list[LLMResponse], max_iterations: int, language: VisitorLanguage | None = None
 ) -> tuple[list[AgentEvent], str]:
     """Run one turn; return the events it emitted and the reason it stopped."""
     registry = ToolRegistry()
@@ -27,6 +28,8 @@ async def _run(
     config = {"configurable": {
         "thread_id": "t", "event_queue": queue, "stopped_reason_holder": stopped_reason,
     }}
+    if language is not None:
+        config["configurable"]["visitor_language"] = language
     await graph.ainvoke(
         {
             "messages": [Message(role=Role.USER, content="what is 6*7?")],
@@ -57,3 +60,28 @@ async def test_an_answer_on_the_last_allowed_model_call_is_final():
     assert [e.type for e in events if e.type in ("final", "error")] == ["final"]
     assert events[-1].text == "The result is 42."
     assert stopped_reason == "final_answer"
+
+
+def _looping(calls: int) -> list[LLMResponse]:
+    """A model that asks for a tool every time and never answers."""
+    return [
+        LLMResponse(
+            text="",
+            tool_calls=(ToolCall(id=f"c{i}", name="calculator", arguments={"expression": "1+1"}),),
+        )
+        for i in range(calls)
+    ]
+
+
+async def test_the_step_limit_sentence_comes_in_the_runs_language():
+    events, stopped_reason = await _run(
+        _looping(3), max_iterations=2, language=VisitorLanguage("es")
+    )
+    [error] = [e for e in events if e.type == "error"]
+    assert (error.text, stopped_reason) == (visitor_text("step_limit", "es"), "max_iterations")
+
+
+async def test_without_a_language_the_step_limit_sentence_is_english():
+    events, _ = await _run(_looping(3), max_iterations=2)
+    [error] = [e for e in events if e.type == "error"]
+    assert error.text == visitor_text("step_limit")
