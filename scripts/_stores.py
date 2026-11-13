@@ -17,13 +17,9 @@ from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.checkpoint.sqlite import SqliteSaver
 
+from harness.core.types import CHECKPOINT_TYPES
+
 from _common import ScriptError, connect_postgres
-
-
-# The harness's own types inside checkpoints. Allowing them explicitly stops
-# LangGraph's "unregistered type" warning on every read, and keeps reads working
-# once LangGraph refuses unregistered types.
-_HARNESS_TYPES = [("harness.core.types", name) for name in ("Message", "Role", "ToolCall")]
 
 
 @dataclass(frozen=True)
@@ -89,7 +85,9 @@ class SqliteStore:
         # Without its tables the saver's setup would try to create them.
         if {"checkpoints", "writes"} <= self._tables:
             self._saver_conn = _connect_ro(path)
-            serde = JsonPlusSerializer(allowed_msgpack_modules=_HARNESS_TYPES)
+            # Reads happen outside a graph, so strict mode (LANGGRAPH_STRICT_MSGPACK)
+            # would return the harness's own types as plain dicts unless allowed here.
+            serde = JsonPlusSerializer(allowed_msgpack_modules=CHECKPOINT_TYPES)
             self._saver = SqliteSaver(self._saver_conn, serde=serde)
 
     def close(self) -> None:
@@ -237,7 +235,7 @@ class PostgresStore:
             self._tables = {row["table_name"] for row in rows}
             self._saver: PostgresSaver | None = None
             if _POSTGRES_SAVER_TABLES <= self._tables:
-                serde = JsonPlusSerializer(allowed_msgpack_modules=_HARNESS_TYPES)
+                serde = JsonPlusSerializer(allowed_msgpack_modules=CHECKPOINT_TYPES)
                 self._saver = PostgresSaver(self._conn, serde=serde)
         except BaseException:
             # main() closes only a store it got back, and this one never gets out.
