@@ -414,3 +414,44 @@ async def test_an_answer_that_is_not_a_clear_approval_is_a_denial(answer):
 
     assert _tool_results(result)["c1"] == "Rejected by user."
     assert await _remembered(memory) == set()
+
+
+# --- What an answer streams to the browser -------------------------------------------
+
+
+def _drain(config: dict) -> list:
+    """Every event the run streamed since the last drain."""
+    queue: asyncio.Queue = config["configurable"]["event_queue"]
+    events = []
+    while not queue.empty():
+        events.append(queue.get_nowait())
+    return events
+
+
+def _reply_text(events: list) -> str:
+    """What the browser shows as the reply: the text of every text event, joined."""
+    return "".join(event.text for event in events if event.type in ("token", "thinking"))
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        pytest.param({"action": "deny"}, id="deny"),
+        pytest.param({"action": "feedback", "feedback": "only the tea"}, id="feedback"),
+    ],
+)
+async def test_an_answer_streams_what_the_model_was_told_and_then_only_its_reply(answer):
+    """Each call's outcome arrives as that call's result, and the reply is the model's
+    text alone. A notice streamed as text ran into the reply, and the browser showed
+    the reply twice: once behind the notice, once on its own."""
+    graph = _two_proposals(InMemoryLongTerm())
+    config = _config()
+    await graph.ainvoke(_turn("remember two things"), config)
+    _drain(config)
+
+    result = await graph.ainvoke(Command(resume=answer), config)
+
+    events = _drain(config)
+    streamed_results = {e.call_id: e.text for e in events if e.type == "tool_result"}
+    assert streamed_results == _tool_results(result)
+    assert _reply_text(events) == "Noted."

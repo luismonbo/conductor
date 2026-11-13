@@ -19,6 +19,8 @@ def _propose_two_memories(client_with_fake, monkeypatch) -> httpx2.AsyncClient:
     client, _ = client_with_fake
     # In memory, so an approved proposal never reaches the developer's own store.
     monkeypatch.setenv("HARNESS_MEMORY_BACKEND", "in_memory")
+    # Tool results with their text, so a test can tell a saved proposal from a rejected one.
+    monkeypatch.setenv("HARNESS_SHOW_TOOL_DETAILS", "true")
     two_proposals = LLMResponse(
         text="",
         tool_calls=(
@@ -34,6 +36,10 @@ def _propose_two_memories(client_with_fake, monkeypatch) -> httpx2.AsyncClient:
 def _frame_types(response: httpx2.Response) -> list[str]:
     """The type of every frame after the first, which carries the thread id."""
     return [frame["type"] for frame in sse_frames(response)[1:]]
+
+
+def _tool_results(response: httpx2.Response) -> list[str]:
+    return [frame["text"] for frame in sse_frames(response) if frame.get("type") == "tool_result"]
 
 
 def _interrupts(response: httpx2.Response) -> list[dict]:
@@ -86,7 +92,8 @@ async def test_an_answer_to_a_card_already_answered_is_refused(client_with_fake,
 
     assert again.status_code == 409
     assert second_card_denied.status_code == 200
-    assert "tool_result" not in _frame_types(second_card_denied)
+    # Both calls of the turn are rejected, the approved one included: nothing is saved.
+    assert _tool_results(second_card_denied) == ["Rejected by user.", "Rejected by user."]
 
 
 async def test_an_answer_that_names_no_interrupt_is_refused(client_with_fake, monkeypatch):

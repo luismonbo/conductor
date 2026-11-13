@@ -149,6 +149,21 @@ def _decided_action(decision: dict | None) -> str:
     return "approve" if answered and action_approves and legacy_approves else "deny"
 
 
+async def _stream_results(queue: asyncio.Queue, messages: list[Message]) -> None:
+    """Stream tool messages written in place of a run, as _execute_tools streams one.
+
+    The browser then shows each call's outcome as that call's result. A notice
+    streamed as text ran into the model's reply, which the UI showed twice.
+    """
+    for message in messages:
+        await queue.put(AgentEvent(
+            type="tool_result",
+            name=message.name or "",
+            text=message.content,
+            call_id=message.tool_call_id or "",
+        ))
+
+
 def build_graph(
     llm: LLMClient,
     checkpointer: Any,
@@ -322,7 +337,7 @@ def build_graph(
             for tc in last.tool_calls
         ]
 
-        await queue.put(AgentEvent(type="thinking", text="[Tool call rejected. Continuing…]"))
+        await _stream_results(queue, rejection_msgs)
         return {"messages": rejection_msgs}
 
     def _route_after_approval(state: GraphState) -> str:
@@ -356,7 +371,7 @@ def build_graph(
                 name=tc.name,
             ))
 
-        await queue.put(AgentEvent(type="thinking", text=f"[User feedback: {feedback}]"))
+        await _stream_results(queue, refine_msgs)
         return {"messages": refine_msgs, "decision": None}
 
     async def _execute_tools(state: GraphState, config: RunnableConfig) -> dict:

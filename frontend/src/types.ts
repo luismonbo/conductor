@@ -1,7 +1,7 @@
 // Raw event from the backend stream
 export type AgentEventType =
   | 'token'       // one text token streamed from the LLM
-  | 'thinking'    // used by handle_rejection feedback messages
+  | 'thinking'    // streamed text, shown like a token
   | 'tool_call'
   | 'tool_result'
   | 'interrupt'
