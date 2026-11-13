@@ -80,7 +80,7 @@ describe('LOAD_THREAD / NEW_THREAD', () => {
 
 describe('approval reviews', () => {
   const proposal = (proposed: string, call_id: string): InterruptPayload => ({
-    mode: 'memory_proposal', proposed, call_id,
+    mode: 'memory_proposal', proposed, call_id, interrupt_id: `interrupt-${call_id}`,
   });
 
   it('the next review of a turn replaces the card of the one just answered', () => {

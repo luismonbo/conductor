@@ -14,7 +14,10 @@ class ChatRequest(BaseModel):
 
 
 class ResumeRequest(BaseModel):
-    decision: dict[str, Any]       # {"approved": True} | {"approved": False}
+    # The interrupt this answers: its frame's args.interrupt_id. Required, since an
+    # answer that names none could only be applied to whichever card is pending.
+    interrupt_id: str
+    decision: dict[str, Any]       # {"action": "approve" | "deny" | "feedback", ...} | {"approved": bool}
 
 
 class AgentEventDTO(BaseModel):

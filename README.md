@@ -251,16 +251,16 @@ class MyMutatingSomethingTool:
         return True
 ```
 
-The graph pauses, emits an `interrupt` SSE event, and closes the stream. State is persisted to the checkpointer. Resume via:
+The graph pauses, emits an `interrupt` SSE event (its `args` hold what to review and the `interrupt_id`), and closes the stream. State is persisted to the checkpointer. Answer it via:
 
 ```bash
 curl -X POST localhost:8000/resume/<thread_id> \
   -H "Authorization: Bearer $HARNESS_API_KEY" \
   -H 'content-type: application/json' \
-  -d '{"decision": {"approved": true}}'
+  -d '{"interrupt_id": "<args.interrupt_id>", "decision": {"action": "approve"}}'
 ```
 
-Rejection (`approved: false`) routes to the `error` node.
+An answer counts only for the interrupt it names: once that one is answered (another tab, a retry), the same request gets 409, as does any request while another run of the thread is still going. `{"action": "deny"}` tells the agent the call was rejected and lets it carry on; `{"action": "feedback", "feedback": "..."}` sends your note back to the model.
 
 ---
 

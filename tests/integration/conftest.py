@@ -28,7 +28,7 @@ async def clean_app_state(monkeypatch):
     _main._input_guard = None
     yield
     for _sid, task in list(_main._running.values()):
-        if not task.done():
+        if task is not None and not task.done():
             task.cancel()
     _main._running.clear()
     # Every checkpointer mode opens storage (memory mode's run store is an
