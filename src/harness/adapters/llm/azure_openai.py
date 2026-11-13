@@ -35,11 +35,6 @@ class AzureOpenAIClient(_OpenAIBaseClient):
         client: Any | None = None,
     ) -> None:
         if client is None:
-            # Imported lazily so core/tests don't require the SDK installed.
-            # When Langfuse is configured, langfuse.openai patches
-            # AsyncAzureOpenAI in place so this call becomes a generation
-            # observation instead of an invisible raw HTTP call — see
-            # langfuse_configured().
             if langfuse_configured():
                 from langfuse.openai import AsyncAzureOpenAI
             else:
