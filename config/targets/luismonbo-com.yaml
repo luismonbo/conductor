@@ -16,7 +16,10 @@
 # --- Model -------------------------------------------------------------------
 llm_backend: azure
 azure_endpoint: https://aif-agent-harness-westeu-001.services.ai.azure.com
-azure_deployment: gpt-5.4-mini
+azure_deployment: gpt-6-luna
+# gpt-6-luna takes tools over Chat Completions only with reasoning off: without
+# this line it answers every chat request with a 400.
+azure_reasoning_effort: "none"
 azure_api_version: "2024-10-21"
 
 # --- Agent -------------------------------------------------------------------

@@ -163,6 +163,7 @@ uv run pytest -q   # 970 tests
 | `HARNESS_GUARD_DEPLOYMENT` | `Decision-1` | name of the Foundry deployment of Microsoft-Decision-1; pin its model version there, since the guard's thresholds are calibrated against one version |
 | `HARNESS_MAX_MESSAGE_CHARS` | `2000` | integer; `0` = off |
 | `HARNESS_MAX_OUTPUT_TOKENS` | `1500` | integer, per LLM call; `0` = off |
+| `HARNESS_AZURE_REASONING_EFFORT` | — | `none` — sent as `reasoning_effort` on every Azure chat call; blank = not sent (the deployment's default). gpt-6-luna needs `none`: over Chat Completions it takes tools only with reasoning off |
 | `HARNESS_DAILY_TOKEN_BUDGET` | `33000` | integer, all visitors per UTC day; `0` = off |
 | `HARNESS_EMBEDDING_BACKEND` | `fake` | `fake` · `openai_compatible` · `azure` (azure not yet wired) |
 | `HARNESS_EMBEDDING_MODEL` | `nomic-embed-text-v1.5` | any model your embedding endpoint serves |

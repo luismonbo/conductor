@@ -54,6 +54,7 @@ def build_llm(settings: Settings, parser: ToolCallParser) -> LLMClient:
             parser=parser,
             api_key=settings.azure_api_key or None,
             max_output_tokens=settings.max_output_tokens,
+            reasoning_effort=settings.azure_reasoning_effort or None,
         )
     if settings.llm_backend == "openai_compatible":
         from harness.adapters.llm.openai_compatible import OpenAICompatibleClient

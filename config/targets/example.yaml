@@ -23,6 +23,7 @@ checkpointer: postgres          # memory | sqlite | postgres
 azure_endpoint: https://your-resource.openai.azure.com
 azure_deployment: gpt-5.4-mini
 azure_api_version: "2024-10-21"  # quoted: unquoted, YAML parses this as a date, not a string
+# azure_reasoning_effort: "none"  # reasoning off; gpt-6-luna takes tools only with it
 azure_embedding_deployment: text-embedding-3-large
 
 # --- RAG / knowledge base ------------------------------------------------

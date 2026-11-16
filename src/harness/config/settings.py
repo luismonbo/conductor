@@ -55,6 +55,11 @@ class Settings(BaseSettings):
     azure_deployment: str = "gpt-5.4-mini"
     azure_api_version: str = "2024-10-21"
     azure_api_key: str = ""            # empty -> managed identity
+    # Sent as reasoning_effort on every chat call; empty sends nothing (the
+    # deployment's default). "none" is the only value: the adapter always sends
+    # tools and temperature 0 over Chat Completions, and gpt-6-luna takes tools
+    # there only with reasoning off (a 400 on every request otherwise).
+    azure_reasoning_effort: Literal["", "none"] = ""
 
     # pgvector long-term memory (Postgres DSN; may equal the checkpointer DSN).
     # Empty until the pgvector backend is wired in Phase 5.

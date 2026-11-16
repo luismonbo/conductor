@@ -32,6 +32,7 @@ class AzureOpenAIClient(_OpenAIBaseClient):
         api_key: str | None = None,
         temperature: float = 0.0,
         max_output_tokens: int = 0,
+        reasoning_effort: str | None = None,
         client: Any | None = None,
     ) -> None:
         if client is None:
@@ -62,4 +63,6 @@ class AzureOpenAIClient(_OpenAIBaseClient):
                     azure_endpoint=endpoint,
                     azure_ad_token_provider=token_provider,
                 )
-        super().__init__(client, deployment, parser, temperature, max_output_tokens)
+        super().__init__(
+            client, deployment, parser, temperature, max_output_tokens, reasoning_effort
+        )
