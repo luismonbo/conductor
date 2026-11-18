@@ -73,7 +73,7 @@ async def purge(
 
     deleted, failed, runs, decisions = 0, 0, 0, 0
     for thread_id in stale:
-        rows = await _delete_thread(checkpointer, run_store, thread_id)
+        rows = await _delete_thread(checkpointer, run_store, thread_id, cutoff)
         if rows is None:
             failed += 1
             continue
@@ -88,10 +88,13 @@ async def purge(
 
 
 async def _delete_thread(
-    checkpointer: BaseCheckpointSaver, run_store: RunStore, thread_id: str
+    checkpointer: BaseCheckpointSaver, run_store: RunStore, thread_id: str, cutoff: datetime
 ) -> RowCounts | None:
     """Delete one thread, checkpoints first; None if either step failed.
 
+    Rows from `cutoff` on survive: a visitor who writes into the thread while the pass
+    runs keeps it, and a later pass finds it, and the checkpoints that turn writes,
+    through those rows. Deleting them too would leave those checkpoints unreachable.
     The error is logged by type only: its message could carry the thread id.
     """
     try:
@@ -100,7 +103,7 @@ async def _delete_thread(
         logger.error("purge: deleting a thread's checkpoints failed (%s)", type(exc).__name__)
         return None
     try:
-        return await run_store.delete_thread_rows(thread_id)
+        return await run_store.delete_thread_rows(thread_id, cutoff)
     except Exception as exc:
         logger.error("purge: deleting a thread's rows failed (%s)", type(exc).__name__)
         return None

@@ -237,10 +237,29 @@ async def test_delete_thread_rows_removes_only_that_thread(store, run_store_cloc
     await store.start_run("r3", "kept", "default", "fake", SID_A)
     await _guard_row(store, "kept")
 
-    assert await store.delete_thread_rows("gone") == RowCounts(runs=2, guard_decisions=1)
+    deleted = await store.delete_thread_rows("gone", t0 + 30 * DAY)
+
+    assert deleted == RowCounts(runs=2, guard_decisions=1)
     assert await store.owns_thread(SID_A, "gone") is False
     assert await store.owns_thread(SID_A, "kept") is True
     assert await store.stale_threads(t0 + 30 * DAY) == ["kept"]
+
+
+async def test_delete_thread_rows_keeps_rows_written_after_the_cutoff(store, run_store_clock):
+    # A message that lands mid-pass must outlive the pass: without its rows, the
+    # checkpoints its turn writes would have nothing that leads a later pass to them.
+    t0 = run_store_clock.now
+    await store.start_run("r1", "t", "default", "fake", SID_A)
+    await _guard_row(store, "t")
+    run_store_clock.now = t0 + 40 * DAY
+    await store.start_run("r2", "t", "default", "fake", SID_A)
+
+    deleted = await store.delete_thread_rows("t", t0 + 30 * DAY)
+
+    assert deleted == RowCounts(runs=1, guard_decisions=1)
+    assert await store.owns_thread(SID_A, "t") is True
+    assert await store.stale_threads(t0 + 30 * DAY) == []
+    assert await store.stale_threads(t0 + 80 * DAY) == ["t"]
 
 
 async def test_rows_with_no_thread_go_by_their_own_time(store, run_store_clock):
@@ -267,7 +286,7 @@ async def test_the_purge_methods_raise_on_a_broken_store(broken_store, run_store
     with pytest.raises(Exception):
         await broken_store.stale_threads(t0)
     with pytest.raises(Exception):
-        await broken_store.delete_thread_rows("mine")
+        await broken_store.delete_thread_rows("mine", t0)
     with pytest.raises(Exception):
         await broken_store.count_unthreaded_before(t0)
     with pytest.raises(Exception):

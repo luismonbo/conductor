@@ -121,8 +121,10 @@ HAVING MAX(at) < ?
 ORDER BY MAX(at), thread_id
 """
 
-_DELETE_THREAD_RUNS = "DELETE FROM runs WHERE thread_id = ?"
-_DELETE_THREAD_GUARD_DECISIONS = "DELETE FROM guard_decisions WHERE thread_id = ?"
+_DELETE_THREAD_RUNS = "DELETE FROM runs WHERE thread_id = ? AND started_at < ?"
+_DELETE_THREAD_GUARD_DECISIONS = (
+    "DELETE FROM guard_decisions WHERE thread_id = ? AND created_at < ?"
+)
 
 _COUNT_UNTHREADED_RUNS = "SELECT COUNT(*) FROM runs WHERE thread_id IS NULL AND started_at < ?"
 _COUNT_UNTHREADED_GUARD_DECISIONS = (
@@ -292,9 +294,10 @@ class SqliteRunStore:
         cur = await self._conn.execute(_STALE_THREADS, (_iso_utc(cutoff),))
         return [row[0] for row in await cur.fetchall()]
 
-    async def delete_thread_rows(self, thread_id: str) -> RowCounts:
+    async def delete_thread_rows(self, thread_id: str, cutoff: datetime) -> RowCounts:
         return await self._delete_both(
-            (_DELETE_THREAD_RUNS, _DELETE_THREAD_GUARD_DECISIONS), (thread_id,)
+            (_DELETE_THREAD_RUNS, _DELETE_THREAD_GUARD_DECISIONS),
+            (thread_id, _iso_utc(cutoff)),
         )
 
     async def count_unthreaded_before(self, cutoff: datetime) -> RowCounts:

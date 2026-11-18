@@ -88,8 +88,13 @@ class RunStore(Protocol):
         """Ids of the threads whose latest activity is before `cutoff`, oldest first."""
         ...
 
-    async def delete_thread_rows(self, thread_id: str) -> RowCounts:
-        """Delete the thread's runs and guard_decisions rows in one transaction."""
+    async def delete_thread_rows(self, thread_id: str, cutoff: datetime) -> RowCounts:
+        """Delete the thread's runs and guard_decisions rows from before `cutoff`, in
+        one transaction.
+
+        Only those: a message that lands while a pass runs keeps its rows, so a later
+        pass still finds the thread and the checkpoints that message's turn writes.
+        """
         ...
 
     async def count_unthreaded_before(self, cutoff: datetime) -> RowCounts:

@@ -52,11 +52,25 @@ async def store() -> AsyncIterator[SqliteRunStore]:
     await conn.close()
 
 
+class VisitorWritesMidPass(MemorySaver):
+    """While the pass deletes a thread's checkpoints, the visitor's next message lands:
+    the API writes its rows, and the graph, which loaded the old state before the
+    delete, writes its checkpoint after it."""
+
+    def __init__(self, store: SqliteRunStore) -> None:
+        super().__init__()
+        self.store = store
+
+    async def adelete_thread(self, thread_id: str) -> None:
+        await super().adelete_thread(thread_id)
+        await _thread(self, self.store, thread_id)
+
+
 async def _thread(saver: MemorySaver, store: SqliteRunStore, thread_id: str) -> None:
     """A thread as the API leaves it: a checkpoint, a run and a guard row."""
     config = {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}}
     await saver.aput(config, empty_checkpoint(), {}, {})
-    run_id = f"run-{thread_id}"
+    run_id = f"run-{uuid.uuid4().hex}"
     await store.start_run(run_id, thread_id, "default", "fake", SID)
     await store.record_guard_decision(
         GuardDecision(allowed=True, stage="classifier"),
@@ -141,6 +155,21 @@ async def test_a_failed_checkpoint_delete_keeps_the_threads_rows(saver, store, r
     assert (second.threads, second.failed_threads) == (1, 0)
     assert not await _has_checkpoint(saver, "bad")
     assert await store.stale_threads(now - 30 * DAY) == []
+
+
+async def test_a_message_during_the_pass_keeps_the_thread_findable(store, run_store_clock):
+    t0 = run_store_clock.now
+    saver = VisitorWritesMidPass(store)
+    await _thread(saver, store, "t")
+    run_store_clock.now = t0 + 40 * DAY  # the pass, and the visitor's new message
+
+    await purge(saver, store, now=t0 + 40 * DAY, retention_days=30)
+
+    # The new message's rows survive, so the visitor keeps the conversation and a later
+    # pass still reaches its checkpoints: nothing is left that no pass could find.
+    assert await store.owns_thread(SID, "t") is True
+    assert await _has_checkpoint(saver, "t")
+    assert await store.stale_threads(t0 + 100 * DAY) == ["t"]
 
 
 async def test_a_second_pass_deletes_nothing(saver, store, run_store_clock):

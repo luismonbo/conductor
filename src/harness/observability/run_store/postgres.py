@@ -118,8 +118,10 @@ HAVING MAX(at) < %s
 ORDER BY MAX(at), thread_id
 """
 
-_DELETE_THREAD_RUNS = "DELETE FROM runs WHERE thread_id = %s"
-_DELETE_THREAD_GUARD_DECISIONS = "DELETE FROM guard_decisions WHERE thread_id = %s"
+_DELETE_THREAD_RUNS = "DELETE FROM runs WHERE thread_id = %s AND started_at < %s"
+_DELETE_THREAD_GUARD_DECISIONS = (
+    "DELETE FROM guard_decisions WHERE thread_id = %s AND created_at < %s"
+)
 
 _COUNT_UNTHREADED = """
 SELECT
@@ -281,9 +283,9 @@ class PostgresRunStore:
             cur = await conn.execute(_STALE_THREADS, (cutoff,))
             return [row["thread_id"] for row in await cur.fetchall()]
 
-    async def delete_thread_rows(self, thread_id: str) -> RowCounts:
+    async def delete_thread_rows(self, thread_id: str, cutoff: datetime) -> RowCounts:
         return await self._delete_both(
-            (_DELETE_THREAD_RUNS, _DELETE_THREAD_GUARD_DECISIONS), (thread_id,)
+            (_DELETE_THREAD_RUNS, _DELETE_THREAD_GUARD_DECISIONS), (thread_id, cutoff)
         )
 
     async def count_unthreaded_before(self, cutoff: datetime) -> RowCounts:
