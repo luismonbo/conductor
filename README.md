@@ -334,6 +334,36 @@ exists. The eval runs clean against an empty index and reports a baseline.
 
 ---
 
+## Retention purge
+
+`HARNESS_RETENTION_DAYS` (`0`, keep everything, by default; the public site's target
+sets `30`) is how long a conversation is kept after its last message. A conversation's
+last message is the newest of its `runs` and `guard_decisions` rows, so a blocked
+follow-up counts too. One pass deletes, for every conversation past that:
+
+1. its checkpoints, first: the rows are how a pass finds a thread, so a failed delete
+   leaves them for the next pass to retry;
+2. its `runs` and `guard_decisions` rows;
+
+and then the old rows that belong to no conversation (blocked first messages).
+
+```bash
+make purge ARGS=--dry-run   # count what a pass would delete; delete nothing
+make purge                  # run one pass
+```
+
+The log line carries counts and the cutoff, never a thread id, session id or message
+text. The exit code is 1 when a conversation couldn't be deleted or the pass couldn't
+run. In production, a Container Apps Job runs the pass daily at 03:00 UTC
+(`docs/superpowers/specs/2026-10-14-retention-purge-design.md`, §8).
+
+To run it by hand against production, set `HARNESS_CHECKPOINTER=postgres`,
+`HARNESS_CHECKPOINTER_URL`, `HARNESS_RETENTION_DAYS=30` and `HARNESS_AUTH_ENABLED=false`
+in the environment of that one command: `.env` values beat the target file, so
+`HARNESS_TARGET` alone isn't enough on a machine with a `.env`.
+
+---
+
 ## Roadmap
 
 - [x] ReAct agent, tools, short-term memory, tracing, FastAPI

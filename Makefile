@@ -1,4 +1,4 @@
-.PHONY: up down infra proxy api web dev test init-dbs logs ingest
+.PHONY: up down infra proxy api web dev test init-dbs logs ingest purge
 
 # Bring up infra (postgres, litellm) and print next steps.
 # Langfuse runs against Langfuse Cloud, not local infra — see .env.example.
@@ -43,3 +43,9 @@ logs:
 # macOS host). COLLECTION selects data/raw/<name>/ — e.g. papers or docs.
 ingest:
 	docker compose --profile ingest run --rm ingest --collection $(COLLECTION)
+
+# One retention pass against HARNESS_CHECKPOINTER: deletes the conversations older
+# than HARNESS_RETENTION_DAYS (does nothing at 0). `make purge ARGS=--dry-run` only
+# counts. Logs counts, never thread ids. See the README's "Retention purge".
+purge:
+	uv run python -m harness.cli.purge $(ARGS)
