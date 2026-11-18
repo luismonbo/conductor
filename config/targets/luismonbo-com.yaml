@@ -17,8 +17,6 @@
 llm_backend: azure
 azure_endpoint: https://aif-agent-harness-westeu-001.services.ai.azure.com
 azure_deployment: gpt-6-luna
-# gpt-6-luna takes tools over Chat Completions only with reasoning off: without
-# this line it answers every chat request with a 400.
 azure_reasoning_effort: "none"
 azure_api_version: "2024-10-21"
 
@@ -44,3 +42,6 @@ daily_token_budget: 300000 # provider monthly token quota (9M) / 30
 # The privacy page says the chat's one cookie is a session cookie: the browser
 # drops it when it closes, instead of keeping it for a year.
 session_cookie_persistent: false
+# The privacy page says conversations are deleted 30 days after the last message,
+# by a daily job (harness.cli.purge).
+retention_days: 30

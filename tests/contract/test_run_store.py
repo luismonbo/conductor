@@ -14,7 +14,7 @@ import pytest
 
 from harness.adapters.postgres.pool import open_pool
 from harness.core.guard import GuardDecision
-from harness.observability.run_store import RunStore
+from harness.observability.run_store import RowCounts, RunStore
 from harness.observability.run_store.postgres import PostgresRunStore
 from harness.observability.run_store.sqlite import SqliteRunStore
 from harness.observability.token_accumulator import TokenAccumulator
@@ -171,3 +171,123 @@ async def test_a_failing_store_never_raises_on_writes(broken_store):
     assert await broken_store.record_guard_decision(
         _decision(), session_id=SID_A, thread_id=None, run_id=None, message="hi"
     ) is None
+
+
+# --- Retention: finding and deleting old rows -------------------------------------
+# run_store_clock (tests/conftest.py) dates every row a store writes, so a test can
+# write rows that are already weeks old.
+
+DAY = timedelta(days=1)
+
+
+async def _guard_row(store: RunStore, thread_id: str | None, **fields) -> None:
+    await store.record_guard_decision(
+        _decision(**fields), session_id=SID_A, thread_id=thread_id, run_id=None, message="hi"
+    )
+
+
+async def test_a_thread_with_only_old_runs_is_stale(store, run_store_clock):
+    t0 = run_store_clock.now
+    await store.start_run("r1", "old", "default", "fake", SID_A)
+    run_store_clock.now = t0 + 40 * DAY
+    await store.start_run("r2", "new", "default", "fake", SID_A)
+
+    assert await store.stale_threads(t0 + 30 * DAY) == ["old"]
+
+
+async def test_a_recent_blocked_follow_up_keeps_an_old_thread(store, run_store_clock):
+    t0 = run_store_clock.now
+    await store.start_run("r1", "old", "default", "fake", SID_A)
+    run_store_clock.now = t0 + 40 * DAY
+    await _guard_row(store, "old")
+
+    assert await store.stale_threads(t0 + 30 * DAY) == []
+
+
+async def test_a_thread_known_only_from_guard_rows_is_found(store, run_store_clock):
+    # An allowed message whose run row was never written (start_run logs and goes on).
+    t0 = run_store_clock.now
+    await _guard_row(store, "guard-only", allowed=True, reason=None)
+
+    assert await store.stale_threads(t0 + 30 * DAY) == ["guard-only"]
+
+
+async def test_activity_at_the_cutoff_is_kept(store, run_store_clock):
+    t0 = run_store_clock.now
+    await store.start_run("r1", "edge", "default", "fake", SID_A)
+
+    assert await store.stale_threads(t0) == []
+    assert await store.stale_threads(t0 + timedelta(microseconds=1)) == ["edge"]
+
+
+async def test_stale_threads_come_oldest_first(store, run_store_clock):
+    t0 = run_store_clock.now
+    await store.start_run("r1", "b", "default", "fake", SID_A)
+    run_store_clock.now = t0 + DAY
+    await store.start_run("r2", "a", "default", "fake", SID_A)
+
+    assert await store.stale_threads(t0 + 30 * DAY) == ["b", "a"]
+
+
+async def test_delete_thread_rows_removes_only_that_thread(store, run_store_clock):
+    t0 = run_store_clock.now
+    await store.start_run("r1", "gone", "default", "fake", SID_A)
+    await store.start_run("r2", "gone", "default", "fake", SID_A)
+    await _guard_row(store, "gone")
+    await store.start_run("r3", "kept", "default", "fake", SID_A)
+    await _guard_row(store, "kept")
+
+    deleted = await store.delete_thread_rows("gone", t0 + 30 * DAY)
+
+    assert deleted == RowCounts(runs=2, guard_decisions=1)
+    assert await store.owns_thread(SID_A, "gone") is False
+    assert await store.owns_thread(SID_A, "kept") is True
+    assert await store.stale_threads(t0 + 30 * DAY) == ["kept"]
+
+
+async def test_delete_thread_rows_keeps_rows_written_after_the_cutoff(store, run_store_clock):
+    # A message that lands mid-pass must outlive the pass: without its rows, the
+    # checkpoints its turn writes would have nothing that leads a later pass to them.
+    t0 = run_store_clock.now
+    await store.start_run("r1", "t", "default", "fake", SID_A)
+    await _guard_row(store, "t")
+    run_store_clock.now = t0 + 40 * DAY
+    await store.start_run("r2", "t", "default", "fake", SID_A)
+
+    deleted = await store.delete_thread_rows("t", t0 + 30 * DAY)
+
+    assert deleted == RowCounts(runs=1, guard_decisions=1)
+    assert await store.owns_thread(SID_A, "t") is True
+    assert await store.stale_threads(t0 + 30 * DAY) == []
+    assert await store.stale_threads(t0 + 80 * DAY) == ["t"]
+
+
+async def test_rows_with_no_thread_go_by_their_own_time(store, run_store_clock):
+    t0 = run_store_clock.now
+    await _guard_row(store, None)  # a blocked first message
+    # A legacy run with no thread: production stopped writing these.
+    await store.start_run("r1", None, "default", "fake", SID_A)  # type: ignore[arg-type]
+    await store.start_run("r2", "t", "default", "fake", SID_A)
+    run_store_clock.now = t0 + 40 * DAY
+    await _guard_row(store, None)
+
+    cutoff = t0 + 30 * DAY
+    assert await store.count_unthreaded_before(cutoff) == RowCounts(runs=1, guard_decisions=1)
+    assert await store.delete_unthreaded_before(cutoff) == RowCounts(runs=1, guard_decisions=1)
+    assert await store.count_unthreaded_before(cutoff) == RowCounts(runs=0, guard_decisions=0)
+    later = t0 + 50 * DAY
+    assert await store.count_unthreaded_before(later) == RowCounts(runs=0, guard_decisions=1)
+    assert await store.stale_threads(cutoff) == ["t"]
+
+
+async def test_the_purge_methods_raise_on_a_broken_store(broken_store, run_store_clock):
+    # Unlike the request-path methods: a purge must not report success it didn't have.
+    t0 = run_store_clock.now
+    with pytest.raises(Exception):
+        await broken_store.stale_threads(t0)
+    with pytest.raises(Exception):
+        await broken_store.delete_thread_rows("mine", t0)
+    with pytest.raises(Exception):
+        await broken_store.count_unthreaded_before(t0)
+    with pytest.raises(Exception):
+        await broken_store.delete_unthreaded_before(t0)

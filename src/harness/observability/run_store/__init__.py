@@ -8,9 +8,13 @@ to the same behavior, failures included:
 - tokens_since returns 0, so the daily budget fails open.
 - list_threads returns []; start_run, finish_run and record_guard_decision log
   and never raise (record_guard_decision returns None).
+- The retention methods (stale_threads, delete_thread_rows, count_unthreaded_before,
+  delete_unthreaded_before) raise: the purge (orchestration/retention.py) must not
+  report a pass that deleted nothing as a success.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
@@ -28,6 +32,14 @@ def storable_text(message: str) -> str:
     still leave its row. Both stores store the same text.
     """
     return message[:GUARD_MESSAGE_TEXT_CHARS].replace("\x00", "�")
+
+
+@dataclass(frozen=True)
+class RowCounts:
+    """How many rows of each table a retention query counted or deleted."""
+
+    runs: int
+    guard_decisions: int
 
 
 class RunStore(Protocol):
@@ -65,4 +77,30 @@ class RunStore(Protocol):
 
     async def tokens_since(self, since: datetime) -> int:
         """Input + output tokens of runs started at or after `since` (timezone-aware)."""
+        ...
+
+    # Retention (docs/superpowers/specs/2026-10-14-retention-purge-design.md). A
+    # thread's latest activity is the newest of its runs.started_at and
+    # guard_decisions.created_at: a blocked follow-up still means the visitor was
+    # there. `cutoff` is timezone-aware. All four raise on failure.
+
+    async def stale_threads(self, cutoff: datetime) -> list[str]:
+        """Ids of the threads whose latest activity is before `cutoff`, oldest first."""
+        ...
+
+    async def delete_thread_rows(self, thread_id: str, cutoff: datetime) -> RowCounts:
+        """Delete the thread's runs and guard_decisions rows from before `cutoff`, in
+        one transaction.
+
+        Only those: a message that lands while a pass runs keeps its rows, so a later
+        pass still finds the thread and the checkpoints that message's turn writes.
+        """
+        ...
+
+    async def count_unthreaded_before(self, cutoff: datetime) -> RowCounts:
+        """Count the rows with no thread (blocked first messages, legacy runs) before `cutoff`."""
+        ...
+
+    async def delete_unthreaded_before(self, cutoff: datetime) -> RowCounts:
+        """Delete the rows count_unthreaded_before counts; return how many went."""
         ...

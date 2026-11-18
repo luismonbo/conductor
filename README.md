@@ -153,6 +153,7 @@ uv run pytest -q   # 970 tests
 | `HARNESS_SHOW_TOOL_DETAILS` | `false` | `true` · `false` — whether tool arguments and results reach the browser (the chat stream and `GET /threads/{id}`); off, a browser gets each tool's name only. Keep it off on a public deployment |
 | `HARNESS_SESSION_COOKIE_SECURE` | `true` | `true` · `false` — marks the visitor `sid` cookie `Secure`, so browsers only send it over HTTPS; set `false` only for local development on a browser that does not treat `http://localhost` as a secure context |
 | `HARNESS_SESSION_COOKIE_PERSISTENT` | `true` | `true` · `false` — how long the visitor `sid` cookie lasts: `true` keeps it for a year, `false` sends it without a `Max-Age`, so the browser drops it when it closes (the public site's target sets `false`, as its privacy page says) |
+| `HARNESS_RETENTION_DAYS` | `0` | integer ≥ 0 — days a conversation is kept after its last message; `0` keeps everything. The daily purge (`make purge`, or the production job; see [Retention purge](#retention-purge)) deletes the checkpoints, `runs` and `guard_decisions` of older conversations (the public site's target sets `30`, as its privacy page says) |
 | `HARNESS_LOG_LEVEL` | `INFO` | `DEBUG` · `INFO` · `WARNING` · `ERROR` — level of the harness's own log lines (stderr); every other library stays at `WARNING`. Never set an SDK's own debug switch in production (`OPENAI_LOG=debug`, `LANGFUSE_DEBUG=true`), nor run uvicorn with `--log-level trace`: they log visitor messages, the `sid` cookie or the API key |
 | `HARNESS_RATE_LIMIT_ENABLED` | `true` | `true` · `false` |
 | `HARNESS_RATE_LIMIT_STRICT` | `15/minute` | slowapi rate string; applies to LLM-invoking endpoints |
@@ -330,6 +331,51 @@ documents are windowed to stay inside the context budget.
 `evaluation/rag/datasets/papers_v1.json` ships empty on purpose: cases need
 known-correct passages from real documents, so it gets populated once a corpus
 exists. The eval runs clean against an empty index and reports a baseline.
+
+---
+
+## Retention purge
+
+`HARNESS_RETENTION_DAYS` (`0`, keep everything, by default; the public site's target
+sets `30`) is how long a conversation is kept after its last message. A conversation's
+last message is the newest of its `runs` and `guard_decisions` rows, so a blocked
+follow-up counts too. One pass deletes, for every conversation past that:
+
+1. its checkpoints, first: the rows are how a pass finds a thread, so a failed delete
+   leaves them for the next pass to retry;
+2. its `runs` and `guard_decisions` rows;
+
+and then the old rows that belong to no conversation (blocked first messages).
+
+```bash
+make purge ARGS=--dry-run   # count what a pass would delete; delete nothing
+make purge                  # run one pass
+```
+
+The log line carries counts and the cutoff, never a thread id, session id or message
+text. The exit code is 1 when a conversation couldn't be deleted or the pass couldn't
+run. In production, a Container Apps Job runs the pass daily at 03:00 UTC
+(`docs/superpowers/specs/2026-10-14-retention-purge-design.md`, §8).
+
+The job runs its own image, under a quarter the size of the app's (275 MB against 1.2 GB
+locally): the same Python base, and only pyproject's `purge` dependency group (settings,
+psycopg, LangGraph's Postgres checkpointer) at the versions `uv.lock` pins for the app,
+minus the packages those require that a pass never loads (the Dockerfile's
+`purge-builder` stage lists them). Build both from the same commit:
+
+```bash
+docker build --build-arg TARGET_NAME=luismonbo-com -t harness:<sha> .                       # the app
+docker build --build-arg TARGET_NAME=luismonbo-com --target purge -t harness-purge:<sha> .  # the job
+```
+
+Its entrypoint is `python -m harness.cli.purge`, so `--dry-run` is the only argument a
+run needs. `tests/unit/test_purge_image_dependencies.py` fails when a pass imports a
+package the group doesn't install.
+
+To run it by hand against production, set `HARNESS_CHECKPOINTER=postgres`,
+`HARNESS_CHECKPOINTER_URL`, `HARNESS_RETENTION_DAYS=30` and `HARNESS_AUTH_ENABLED=false`
+in the environment of that one command: `.env` values beat the target file, so
+`HARNESS_TARGET` alone isn't enough on a machine with a `.env`.
 
 ---
 

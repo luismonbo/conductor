@@ -1,6 +1,7 @@
 """SqliteRunStore: the run store in harness.sqlite (local runs) or in memory (tests)."""
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import uuid
@@ -9,7 +10,7 @@ from datetime import datetime, timezone
 import aiosqlite
 
 from harness.core.guard import GuardDecision
-from harness.observability.run_store import storable_text
+from harness.observability.run_store import RowCounts, storable_text
 from harness.observability.token_accumulator import TokenAccumulator
 
 logger = logging.getLogger(__name__)
@@ -105,6 +106,40 @@ SELECT COALESCE(SUM(COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0)), 0)
 FROM runs WHERE started_at >= ?
 """
 
+# Retention (RunStore's protocol says what each returns). A thread's latest activity
+# is the newest of its runs and guard_decisions rows. Times compare as text, as
+# _TOKENS_SINCE does: every one is written by _now().isoformat().
+_STALE_THREADS = """
+SELECT thread_id
+FROM (
+    SELECT thread_id, started_at AS at FROM runs WHERE thread_id IS NOT NULL
+    UNION ALL
+    SELECT thread_id, created_at AS at FROM guard_decisions WHERE thread_id IS NOT NULL
+) AS activity
+GROUP BY thread_id
+HAVING MAX(at) < ?
+ORDER BY MAX(at), thread_id
+"""
+
+_DELETE_THREAD_RUNS = "DELETE FROM runs WHERE thread_id = ? AND started_at < ?"
+_DELETE_THREAD_GUARD_DECISIONS = (
+    "DELETE FROM guard_decisions WHERE thread_id = ? AND created_at < ?"
+)
+
+_COUNT_UNTHREADED_RUNS = "SELECT COUNT(*) FROM runs WHERE thread_id IS NULL AND started_at < ?"
+_COUNT_UNTHREADED_GUARD_DECISIONS = (
+    "SELECT COUNT(*) FROM guard_decisions WHERE thread_id IS NULL AND created_at < ?"
+)
+_DELETE_UNTHREADED_RUNS = "DELETE FROM runs WHERE thread_id IS NULL AND started_at < ?"
+_DELETE_UNTHREADED_GUARD_DECISIONS = (
+    "DELETE FROM guard_decisions WHERE thread_id IS NULL AND created_at < ?"
+)
+
+
+def _now() -> datetime:
+    """The time every row is stamped with (tests replace it: run_store_clock)."""
+    return datetime.now(timezone.utc)
+
 
 def _iso_utc(moment: datetime) -> str:
     """`moment` in the format started_at is stored in, so the two compare as text."""
@@ -136,7 +171,7 @@ class SqliteRunStore:
         session_id: str,
     ) -> None:
         try:
-            started_at = datetime.now(timezone.utc).isoformat()
+            started_at = _now().isoformat()
             await self._conn.execute(
                 _INSERT, (run_id, thread_id, agent, backend, started_at, session_id)
             )
@@ -174,7 +209,7 @@ class SqliteRunStore:
         stopped_reason: str,
     ) -> None:
         try:
-            finished_at = datetime.now(timezone.utc).isoformat()
+            finished_at = _now().isoformat()
             cur = await self._conn.execute(
                 _UPDATE,
                 (
@@ -216,7 +251,7 @@ class SqliteRunStore:
                 _INSERT_GUARD_DECISION,
                 (
                     decision_id,
-                    datetime.now(timezone.utc).isoformat(),
+                    _now().isoformat(),
                     session_id,
                     thread_id,
                     run_id,
@@ -254,3 +289,44 @@ class SqliteRunStore:
         except Exception:
             logger.exception("RunStore.tokens_since failed")
             return 0
+
+    async def stale_threads(self, cutoff: datetime) -> list[str]:
+        cur = await self._conn.execute(_STALE_THREADS, (_iso_utc(cutoff),))
+        return [row[0] for row in await cur.fetchall()]
+
+    async def delete_thread_rows(self, thread_id: str, cutoff: datetime) -> RowCounts:
+        return await self._delete_both(
+            (_DELETE_THREAD_RUNS, _DELETE_THREAD_GUARD_DECISIONS),
+            (thread_id, _iso_utc(cutoff)),
+        )
+
+    async def count_unthreaded_before(self, cutoff: datetime) -> RowCounts:
+        at = (_iso_utc(cutoff),)
+        runs = await (await self._conn.execute(_COUNT_UNTHREADED_RUNS, at)).fetchone()
+        decisions = await (
+            await self._conn.execute(_COUNT_UNTHREADED_GUARD_DECISIONS, at)
+        ).fetchone()
+        return RowCounts(runs=int(runs[0]), guard_decisions=int(decisions[0]))
+
+    async def delete_unthreaded_before(self, cutoff: datetime) -> RowCounts:
+        return await self._delete_both(
+            (_DELETE_UNTHREADED_RUNS, _DELETE_UNTHREADED_GUARD_DECISIONS), (_iso_utc(cutoff),)
+        )
+
+    async def _delete_both(self, statements: tuple[str, str], params: tuple) -> RowCounts:
+        """Run a runs DELETE and a guard_decisions DELETE as one transaction.
+
+        sqlite3 opens the transaction on the first DELETE; commit ends it, and a
+        failure rolls both back before the error propagates.
+        """
+        runs_sql, decisions_sql = statements
+        try:
+            runs = await self._conn.execute(runs_sql, params)
+            decisions = await self._conn.execute(decisions_sql, params)
+            await self._conn.commit()
+        except Exception:
+            # A closed connection can't roll back either; the original error matters.
+            with contextlib.suppress(Exception):
+                await self._conn.rollback()
+            raise
+        return RowCounts(runs=runs.rowcount, guard_decisions=decisions.rowcount)

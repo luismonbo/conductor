@@ -150,3 +150,19 @@ async def test_a_session_time_zone_other_than_utc_changes_nothing():
             assert await store.tokens_since(started + timedelta(microseconds=1)) == 0
         finally:
             await new_york.close()
+
+
+async def test_stale_threads_ignore_the_session_time_zone(run_store_clock):
+    # The purge's cutoff is a UTC instant: a session in New York must not move it.
+    t0 = run_store_clock.now
+    with postgres_schema("-c TimeZone=America/New_York") as dsn:
+        new_york = await open_pool(dsn)
+        try:
+            store = PostgresRunStore(new_york)
+            await store.create_table()
+            await store.start_run("r1", "t", "default", "fake", "sid")
+
+            assert await store.stale_threads(t0) == []
+            assert await store.stale_threads(t0 + timedelta(microseconds=1)) == ["t"]
+        finally:
+            await new_york.close()

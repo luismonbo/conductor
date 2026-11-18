@@ -156,6 +156,12 @@ class Settings(BaseSettings):
     # says so.
     session_cookie_persistent: bool = True
 
+    # Days a conversation is kept after its last message. 0 keeps everything (the
+    # guard limits' "off at 0" convention); otherwise harness.cli.purge deletes
+    # older ones (docs/superpowers/specs/2026-10-14-retention-purge-design.md). The
+    # public site's target sets 30, as its privacy page says.
+    retention_days: int = Field(0, ge=0)
+
     # Input guard (SL-2) — see docs/superpowers/specs/2026-09-27-input-guard-design.md.
     # input_guard_enabled gates only the Microsoft-Decision-1 checks and fails
     # closed without an Azure endpoint (validator below). The checks run on the
