@@ -42,3 +42,6 @@ daily_token_budget: 300000 # provider monthly token quota (9M) / 30
 # The privacy page says the chat's one cookie is a session cookie: the browser
 # drops it when it closes, instead of keeping it for a year.
 session_cookie_persistent: false
+# The privacy page says conversations are deleted 30 days after the last message,
+# by a daily job (harness.cli.purge).
+retention_days: 30
