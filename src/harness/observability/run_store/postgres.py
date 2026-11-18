@@ -13,7 +13,7 @@ from psycopg.types.json import Jsonb
 
 from harness.adapters.postgres.pool import PostgresPool
 from harness.core.guard import GuardDecision
-from harness.observability.run_store import storable_text
+from harness.observability.run_store import RowCounts, storable_text
 from harness.observability.token_accumulator import TokenAccumulator
 
 logger = logging.getLogger(__name__)
@@ -102,6 +102,35 @@ INSERT INTO guard_decisions (
     error, message_chars, message_text
 ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
 """
+
+# Retention (RunStore's protocol says what each returns). A thread's latest activity
+# is the newest of its runs and guard_decisions rows; TIMESTAMPTZ compares instants,
+# so the session's TimeZone doesn't matter.
+_STALE_THREADS = """
+SELECT thread_id
+FROM (
+    SELECT thread_id, started_at AS at FROM runs WHERE thread_id IS NOT NULL
+    UNION ALL
+    SELECT thread_id, created_at AS at FROM guard_decisions WHERE thread_id IS NOT NULL
+) AS activity
+GROUP BY thread_id
+HAVING MAX(at) < %s
+ORDER BY MAX(at), thread_id
+"""
+
+_DELETE_THREAD_RUNS = "DELETE FROM runs WHERE thread_id = %s"
+_DELETE_THREAD_GUARD_DECISIONS = "DELETE FROM guard_decisions WHERE thread_id = %s"
+
+_COUNT_UNTHREADED = """
+SELECT
+    (SELECT COUNT(*) FROM runs WHERE thread_id IS NULL AND started_at < %(cutoff)s) AS runs,
+    (SELECT COUNT(*) FROM guard_decisions
+     WHERE thread_id IS NULL AND created_at < %(cutoff)s) AS guard_decisions
+"""
+_DELETE_UNTHREADED_RUNS = "DELETE FROM runs WHERE thread_id IS NULL AND started_at < %s"
+_DELETE_UNTHREADED_GUARD_DECISIONS = (
+    "DELETE FROM guard_decisions WHERE thread_id IS NULL AND created_at < %s"
+)
 
 
 def _now() -> datetime:
@@ -246,3 +275,36 @@ class PostgresRunStore:
         except Exception:
             logger.exception("RunStore.tokens_since failed")
             return 0
+
+    async def stale_threads(self, cutoff: datetime) -> list[str]:
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(_STALE_THREADS, (cutoff,))
+            return [row["thread_id"] for row in await cur.fetchall()]
+
+    async def delete_thread_rows(self, thread_id: str) -> RowCounts:
+        return await self._delete_both(
+            (_DELETE_THREAD_RUNS, _DELETE_THREAD_GUARD_DECISIONS), (thread_id,)
+        )
+
+    async def count_unthreaded_before(self, cutoff: datetime) -> RowCounts:
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(_COUNT_UNTHREADED, {"cutoff": cutoff})
+            row = await cur.fetchone()
+        return RowCounts(runs=int(row["runs"]), guard_decisions=int(row["guard_decisions"]))
+
+    async def delete_unthreaded_before(self, cutoff: datetime) -> RowCounts:
+        return await self._delete_both(
+            (_DELETE_UNTHREADED_RUNS, _DELETE_UNTHREADED_GUARD_DECISIONS), (cutoff,)
+        )
+
+    async def _delete_both(self, statements: tuple[str, str], params: tuple) -> RowCounts:
+        """Run a runs DELETE and a guard_decisions DELETE as one transaction.
+
+        The pool's connections are autocommit (adapters/postgres/pool.py), so the
+        transaction is explicit: both go, or neither does.
+        """
+        runs_sql, decisions_sql = statements
+        async with self._pool.connection() as conn, conn.transaction():
+            runs = await conn.execute(runs_sql, params)
+            decisions = await conn.execute(decisions_sql, params)
+        return RowCounts(runs=runs.rowcount, guard_decisions=decisions.rowcount)
