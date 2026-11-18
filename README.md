@@ -357,6 +357,20 @@ text. The exit code is 1 when a conversation couldn't be deleted or the pass cou
 run. In production, a Container Apps Job runs the pass daily at 03:00 UTC
 (`docs/superpowers/specs/2026-10-14-retention-purge-design.md`, §8).
 
+The job runs its own image, about a quarter the size of the app's (322 MB against 1.2 GB
+locally): the same Python base, and only pyproject's `purge` dependency group (settings,
+psycopg, LangGraph's Postgres checkpointer) at the versions `uv.lock` pins for the app.
+Build both from the same commit:
+
+```bash
+docker build --build-arg TARGET_NAME=luismonbo-com -t harness:<sha> .                       # the app
+docker build --build-arg TARGET_NAME=luismonbo-com --target purge -t harness-purge:<sha> .  # the job
+```
+
+Its entrypoint is `python -m harness.cli.purge`, so `--dry-run` is the only argument a
+run needs. `tests/unit/test_purge_image_dependencies.py` fails when a pass imports a
+package the group doesn't install.
+
 To run it by hand against production, set `HARNESS_CHECKPOINTER=postgres`,
 `HARNESS_CHECKPOINTER_URL`, `HARNESS_RETENTION_DAYS=30` and `HARNESS_AUTH_ENABLED=false`
 in the environment of that one command: `.env` values beat the target file, so

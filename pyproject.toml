@@ -104,6 +104,20 @@ dev = [
     "pytest-asyncio>=1.4.0",
     "ruff>=0.15.15",
 ]
+# The retention job's image installs only this group (the Dockerfile's `purge` stage;
+# docs/superpowers/specs/2026-10-14-retention-purge-design.md §8.3), so it stays a
+# fraction of the app's. uv.lock resolves it with everything else: the same versions
+# as the app. tests/unit/test_purge_image_dependencies.py fails if a pass imports a
+# package outside it.
+purge = [
+    "pydantic-settings",
+    "python-dotenv>=1.2.2",
+    "pyyaml>=6.0.3",
+    "psycopg[binary]>=3.2",
+    "psycopg-pool>=3.3.3",
+    "langgraph-checkpoint-postgres>=3.2.0",
+    "certifi>=2026.10.19",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/harness"]

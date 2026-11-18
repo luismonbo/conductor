@@ -24,6 +24,55 @@ COPY src/ src/
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev
 
+# ---- Purge builder: only what the retention pass imports --------------------
+# The purge job's image (stage `purge` below) needs settings, psycopg and LangGraph's
+# Postgres checkpointer: about 33 MB of packages, against the app's ~700 MB. That is
+# pyproject's `purge` dependency group, at the versions uv.lock pins for the app.
+# --only-group installs the group alone: neither the project nor its dependencies.
+# tests/unit/test_purge_image_dependencies.py keeps the group complete. Design:
+# docs/superpowers/specs/2026-10-14-retention-purge-design.md §8.3.
+FROM python:3.13-slim-trixie AS purge-builder
+
+COPY --from=ghcr.io/astral-sh/uv:0.13.1 /uv /uvx /bin/
+
+ENV UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    UV_PROJECT_ENVIRONMENT=/app/.venv
+
+WORKDIR /app
+COPY pyproject.toml uv.lock ./
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --locked --only-group purge
+
+# ---- Purge: the retention job's image ---------------------------------------
+# Built with `--target purge`; a plain build still ends at `runtime`, the app's image.
+# The job runs the entrypoint daily, and `--dry-run` is an argument to it.
+FROM python:3.13-slim-trixie AS purge
+
+# Debian security patches, as in `runtime`; the purge needs no extra packages.
+RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*
+
+RUN groupadd --system harness && useradd --system --gid harness --no-create-home harness
+
+WORKDIR /app
+COPY --from=purge-builder /app/.venv /app/.venv
+# The project isn't installed in this venv (--only-group), so its source goes on
+# PYTHONPATH.
+COPY src/ src/
+ARG TARGET_NAME
+COPY config/targets/${TARGET_NAME}.yaml config/targets/${TARGET_NAME}.yaml
+# Bytecode now, as root: the harness user can't write __pycache__ at run time.
+RUN python -m compileall -q src
+
+ENV HARNESS_TARGET=${TARGET_NAME} \
+    PATH="/app/.venv/bin:$PATH" \
+    PYTHONPATH=/app/src \
+    LANGGRAPH_STRICT_MSGPACK=true
+
+USER harness
+
+ENTRYPOINT ["python", "-m", "harness.cli.purge"]
+
 # ---- Runtime: no compiler, no uv, no build cache ---------------------------
 FROM python:3.13-slim-trixie AS runtime
 
