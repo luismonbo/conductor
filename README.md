@@ -357,10 +357,11 @@ text. The exit code is 1 when a conversation couldn't be deleted or the pass cou
 run. In production, a Container Apps Job runs the pass daily at 03:00 UTC
 (`docs/superpowers/specs/2026-10-14-retention-purge-design.md`, §8).
 
-The job runs its own image, about a quarter the size of the app's (322 MB against 1.2 GB
+The job runs its own image, under a quarter the size of the app's (275 MB against 1.2 GB
 locally): the same Python base, and only pyproject's `purge` dependency group (settings,
-psycopg, LangGraph's Postgres checkpointer) at the versions `uv.lock` pins for the app.
-Build both from the same commit:
+psycopg, LangGraph's Postgres checkpointer) at the versions `uv.lock` pins for the app,
+minus the packages those require that a pass never loads (the Dockerfile's
+`purge-builder` stage lists them). Build both from the same commit:
 
 ```bash
 docker build --build-arg TARGET_NAME=luismonbo-com -t harness:<sha> .                       # the app

@@ -26,10 +26,14 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 # ---- Purge builder: only what the retention pass imports --------------------
 # The purge job's image (stage `purge` below) needs settings, psycopg and LangGraph's
-# Postgres checkpointer: about 33 MB of packages, against the app's ~700 MB. That is
-# pyproject's `purge` dependency group, at the versions uv.lock pins for the app.
-# --only-group installs the group alone: neither the project nor its dependencies.
-# tests/unit/test_purge_image_dependencies.py keeps the group complete. Design:
+# Postgres checkpointer: pyproject's `purge` dependency group, at the versions uv.lock
+# pins for the app. --only-group installs the group alone: neither the project nor its
+# dependencies. Those packages require others that a pass never loads: langsmith
+# (LangChain's tracing client, which langchain-core requires) and what only it needs,
+# zstandard alone 22 MB, plus five small ones. --no-install-package leaves those 16
+# out, so the venv holds the 22 packages a pass loads: about 50 MB, against 84 MB with
+# the 16 and the app's ~700 MB. tests/unit/test_purge_image_dependencies.py checks the
+# image gets every package a pass imports and nothing else. Design:
 # docs/superpowers/specs/2026-10-14-retention-purge-design.md §8.3.
 FROM python:3.13-slim-trixie AS purge-builder
 
@@ -42,7 +46,15 @@ ENV UV_COMPILE_BYTECODE=1 \
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --locked --only-group purge
+    uv sync --locked --only-group purge \
+        --no-install-package anyio --no-install-package distro \
+        --no-install-package h11 --no-install-package httpcore \
+        --no-install-package httpx --no-install-package jsonpatch \
+        --no-install-package jsonpointer --no-install-package langchain-protocol \
+        --no-install-package langsmith --no-install-package orjson \
+        --no-install-package requests-toolbelt --no-install-package sniffio \
+        --no-install-package tenacity --no-install-package websockets \
+        --no-install-package xxhash --no-install-package zstandard
 
 # ---- Purge: the retention job's image ---------------------------------------
 # Built with `--target purge`; a plain build still ends at `runtime`, the app's image.
