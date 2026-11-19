@@ -9,9 +9,10 @@ to the same behavior, failures included:
 - list_threads returns []; start_run, finish_run and record_guard_decision log
   and never raise (record_guard_decision returns None).
 - The retention methods (stale_threads, delete_thread_rows, count_unthreaded_before,
-  delete_unthreaded_before) raise: the purge (orchestration/retention.py) must not
-  report a pass that deleted nothing as a success. They refuse a cutoff with no time
-  zone (ValueError, see require_aware).
+  delete_unthreaded_before, unrecorded_threads) raise: the purge
+  (orchestration/retention.py) must not report a pass that deleted nothing as a
+  success. Those that take a cutoff refuse one with no time zone (ValueError, see
+  require_aware).
 """
 from __future__ import annotations
 
@@ -115,4 +116,16 @@ class RunStore(Protocol):
 
     async def delete_unthreaded_before(self, cutoff: datetime) -> RowCounts:
         """Delete the rows count_unthreaded_before counts; return how many went."""
+        ...
+
+    async def unrecorded_threads(self) -> list[str]:
+        """Ids of the threads that have checkpoints but no runs or guard_decisions row.
+
+        The two writes that name a thread (start_run, record_guard_decision) are
+        best-effort, so a conversation whose two writes both failed has checkpoints
+        that stale_threads can't find. Reads LangGraph's `checkpoints` table, which
+        shares this store's database in sqlite and postgres modes
+        (orchestration/storage.py); [] where there is no such table (memory mode,
+        whose checkpoints MemorySaver keeps).
+        """
         ...

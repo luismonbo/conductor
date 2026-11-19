@@ -345,8 +345,9 @@ follow-up counts too. One pass deletes, for every conversation past that:
    leaves them for the next pass to retry;
 2. its `runs` and `guard_decisions` rows;
 
-and then the old rows that belong to no conversation: blocked first messages, and older
-runs saved without one.
+then every conversation no row names (both of the API's best-effort writes for it
+failed), once its newest checkpoint is that old; and then the old rows that belong to
+no conversation: blocked first messages, and older runs saved without one.
 
 ```bash
 make purge ARGS=--dry-run   # count what a pass would delete; delete nothing

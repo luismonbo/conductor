@@ -134,6 +134,16 @@ _DELETE_UNTHREADED_GUARD_DECISIONS = (
     "DELETE FROM guard_decisions WHERE thread_id IS NULL AND created_at < %s"
 )
 
+# `checkpoints` is LangGraph's table (AsyncPostgresSaver), in this same database.
+# to_regclass looks it up on the search_path, as an unqualified query would.
+_HAS_CHECKPOINTS = "SELECT to_regclass('checkpoints') IS NOT NULL AS present"
+_UNRECORDED_THREADS = """
+SELECT DISTINCT c.thread_id
+FROM checkpoints c
+WHERE NOT EXISTS (SELECT 1 FROM runs r WHERE r.thread_id = c.thread_id)
+  AND NOT EXISTS (SELECT 1 FROM guard_decisions g WHERE g.thread_id = c.thread_id)
+"""
+
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
@@ -304,6 +314,14 @@ class PostgresRunStore:
         return await self._delete_both(
             (_DELETE_UNTHREADED_RUNS, _DELETE_UNTHREADED_GUARD_DECISIONS), (cutoff,)
         )
+
+    async def unrecorded_threads(self) -> list[str]:
+        async with self._pool.connection() as conn:
+            found = await (await conn.execute(_HAS_CHECKPOINTS)).fetchone()
+            if found is None or not found["present"]:
+                return []
+            cur = await conn.execute(_UNRECORDED_THREADS)
+            return [row["thread_id"] for row in await cur.fetchall()]
 
     async def _delete_both(self, statements: tuple[str, str], params: tuple) -> RowCounts:
         """Run a runs DELETE and a guard_decisions DELETE as one transaction.

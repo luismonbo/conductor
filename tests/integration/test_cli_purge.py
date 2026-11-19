@@ -13,6 +13,7 @@ from datetime import timedelta
 from pathlib import Path
 
 import pytest
+from langgraph.checkpoint.base import empty_checkpoint
 
 import harness.cli.purge as purge_cli
 from harness.adapters.llm.fake import FakeLLMClient
@@ -103,6 +104,25 @@ async def test_a_pass_deletes_the_old_conversation_only(purge_settings, run_stor
     assert await _state(purge_settings, new) == (True, True)
 
 
+async def test_a_pass_deletes_an_old_conversation_no_row_names(purge_settings, run_store_clock):
+    # Its two run-store writes failed (both are best-effort): it has checkpoints only.
+    thread_id = str(uuid.uuid4())
+    checkpoint = empty_checkpoint()
+    checkpoint["ts"] = run_store_clock.now.isoformat()
+    storage = await open_storage(purge_settings)
+    try:
+        await storage.checkpointer.aput(
+            {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}}, checkpoint, {}, {}
+        )
+    finally:
+        await storage.aclose()
+
+    result = await purge_cli.run_purge(purge_settings, now=run_store_clock.now + 40 * DAY)
+
+    assert (result.unrecorded_threads, result.failed_threads) == (1, 0)
+    assert await _state(purge_settings, thread_id) == (False, False)
+
+
 def _counts(caplog, prefix: str) -> str:
     """The fields after the cutoff, on the one INFO line that starts `<prefix>cutoff=`."""
     [record] = [r for r in caplog.records if r.getMessage().startswith(prefix + "cutoff=")]
@@ -175,14 +195,14 @@ def test_main_reports_counts_and_no_thread_id(purge_settings, run_store_clock, m
     with caplog.at_level(logging.INFO, logger="harness"):
         assert purge_cli.main(["--dry-run"]) == 0
         assert _counts(caplog, "purge (dry run): ") == (
-            "threads=1 unthreaded_runs=0 unthreaded_guard_decisions=0"
+            "threads=1 unrecorded_threads=0 unthreaded_runs=0 unthreaded_guard_decisions=0"
         )
         assert asyncio.run(_state(purge_settings, old)) == (True, True)
 
         assert purge_cli.main([]) == 0
     # The old conversation's run and guard row went with it. The alert counts this line.
     assert _counts(caplog, "purge: ") == (
-        "threads=1 thread_runs=1 thread_guard_decisions=1 "
+        "threads=1 thread_runs=1 thread_guard_decisions=1 unrecorded_threads=0 "
         "unthreaded_runs=0 unthreaded_guard_decisions=0 failed_threads=0"
     )
     assert asyncio.run(_state(purge_settings, old)) == (False, False)
