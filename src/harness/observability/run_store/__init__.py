@@ -10,7 +10,8 @@ to the same behavior, failures included:
   and never raise (record_guard_decision returns None).
 - The retention methods (stale_threads, delete_thread_rows, count_unthreaded_before,
   delete_unthreaded_before) raise: the purge (orchestration/retention.py) must not
-  report a pass that deleted nothing as a success.
+  report a pass that deleted nothing as a success. They refuse a cutoff with no time
+  zone (ValueError, see require_aware).
 """
 from __future__ import annotations
 
@@ -32,6 +33,17 @@ def storable_text(message: str) -> str:
     still leave its row. Both stores store the same text.
     """
     return message[:GUARD_MESSAGE_TEXT_CHARS].replace("\x00", "�")
+
+
+def require_aware(cutoff: datetime) -> None:
+    """Raise ValueError unless `cutoff` carries a time zone.
+
+    The stores compare it with UTC times: SQLite would read a naive one as the
+    machine's local time and Postgres in the session's TimeZone, shifting the
+    cutoff by that offset.
+    """
+    if cutoff.tzinfo is None or cutoff.utcoffset() is None:
+        raise ValueError("cutoff must be timezone-aware")
 
 
 @dataclass(frozen=True)
@@ -82,7 +94,7 @@ class RunStore(Protocol):
     # Retention (docs/superpowers/specs/2026-10-14-retention-purge-design.md). A
     # thread's latest activity is the newest of its runs.started_at and
     # guard_decisions.created_at: a blocked follow-up still means the visitor was
-    # there. `cutoff` is timezone-aware. All four raise on failure.
+    # there. All four raise on failure, and ValueError on a `cutoff` with no time zone.
 
     async def stale_threads(self, cutoff: datetime) -> list[str]:
         """Ids of the threads whose latest activity is before `cutoff`, oldest first."""

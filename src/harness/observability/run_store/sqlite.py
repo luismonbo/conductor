@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 import aiosqlite
 
 from harness.core.guard import GuardDecision
-from harness.observability.run_store import RowCounts, storable_text
+from harness.observability.run_store import RowCounts, require_aware, storable_text
 from harness.observability.token_accumulator import TokenAccumulator
 
 logger = logging.getLogger(__name__)
@@ -291,24 +291,34 @@ class SqliteRunStore:
             return 0
 
     async def stale_threads(self, cutoff: datetime) -> list[str]:
+        require_aware(cutoff)
         cur = await self._conn.execute(_STALE_THREADS, (_iso_utc(cutoff),))
         return [row[0] for row in await cur.fetchall()]
 
     async def delete_thread_rows(self, thread_id: str, cutoff: datetime) -> RowCounts:
+        require_aware(cutoff)
         return await self._delete_both(
             (_DELETE_THREAD_RUNS, _DELETE_THREAD_GUARD_DECISIONS),
             (thread_id, _iso_utc(cutoff)),
         )
 
     async def count_unthreaded_before(self, cutoff: datetime) -> RowCounts:
+        require_aware(cutoff)
         at = (_iso_utc(cutoff),)
-        runs = await (await self._conn.execute(_COUNT_UNTHREADED_RUNS, at)).fetchone()
-        decisions = await (
-            await self._conn.execute(_COUNT_UNTHREADED_GUARD_DECISIONS, at)
-        ).fetchone()
-        return RowCounts(runs=int(runs[0]), guard_decisions=int(decisions[0]))
+        return RowCounts(
+            runs=await self._count(_COUNT_UNTHREADED_RUNS, at),
+            guard_decisions=await self._count(_COUNT_UNTHREADED_GUARD_DECISIONS, at),
+        )
+
+    async def _count(self, sql: str, params: tuple) -> int:
+        """The one number a COUNT query returns."""
+        row = await (await self._conn.execute(sql, params)).fetchone()
+        if row is None:  # COUNT always gives one row; None would be a broken driver
+            raise RuntimeError("a COUNT query returned no row")
+        return int(row[0])
 
     async def delete_unthreaded_before(self, cutoff: datetime) -> RowCounts:
+        require_aware(cutoff)
         return await self._delete_both(
             (_DELETE_UNTHREADED_RUNS, _DELETE_UNTHREADED_GUARD_DECISIONS), (_iso_utc(cutoff),)
         )

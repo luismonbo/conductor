@@ -291,3 +291,24 @@ async def test_the_purge_methods_raise_on_a_broken_store(broken_store, run_store
         await broken_store.count_unthreaded_before(t0)
     with pytest.raises(Exception):
         await broken_store.delete_unthreaded_before(t0)
+
+
+# Each retention method with the arguments that come before its cutoff.
+_PURGE_CALLS = {
+    "stale_threads": (),
+    "delete_thread_rows": ("t",),
+    "count_unthreaded_before": (),
+    "delete_unthreaded_before": (),
+}
+
+
+@pytest.mark.parametrize("method", list(_PURGE_CALLS))
+async def test_the_purge_methods_refuse_a_cutoff_with_no_time_zone(store, method):
+    # Compared with stored UTC times, a naive cutoff would shift by the machine's
+    # offset. Far in the future, so a store that ignored the zone would delete the row.
+    await store.start_run("r1", "t", "default", "fake", SID_A)
+
+    with pytest.raises(ValueError):
+        await getattr(store, method)(*_PURGE_CALLS[method], datetime(2100, 1, 1))
+
+    assert await store.owns_thread(SID_A, "t") is True
