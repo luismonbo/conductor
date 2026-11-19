@@ -24,9 +24,9 @@ from harness.config.targets import resolve_target_overrides
 
 
 class Settings(BaseSettings):
-    # extra="ignore": .env is shared with docker-compose (litellm/langfuse
-    # container config) and main.py's direct os.environ reads for Langfuse —
-    # those keys aren't HARNESS_-prefixed and must not fail validation here.
+    # extra="ignore": .env is shared with docker-compose (the LiteLLM proxy's
+    # master and provider keys) — those keys aren't HARNESS_-prefixed and must
+    # not fail validation here.
     # hide_input_in_errors: a validation error otherwise ends with input_value=, the
     # first and last characters of every setting, and the API keys are among them.
     model_config = SettingsConfigDict(
