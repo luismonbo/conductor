@@ -1,7 +1,6 @@
 .PHONY: up down infra proxy api web dev test init-dbs logs ingest purge
 
 # Bring up infra (postgres, litellm) and print next steps.
-# Langfuse runs against Langfuse Cloud, not local infra — see .env.example.
 up:
 	uv run python scripts/infra/validate_litellm_config.py litellm_config.yaml
 	docker compose up -d postgres litellm
