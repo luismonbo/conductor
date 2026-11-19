@@ -5,9 +5,11 @@ old: its checkpoints, runs and guard_decisions rows, and the old rows that belon
 no thread (orchestration/retention.py). Does nothing at retention_days 0.
 `--dry-run` counts what a pass would delete and deletes nothing.
 
-Logs one line of counts, never a thread id, a session id or message text. Exit code:
-0 when the pass ran or had nothing to do; 1 when a thread's deletion failed or the
-pass could not run, so a scheduler shows the run as failed and the next one retries.
+Logs one line of counts, never a thread id, a session id or message text: `purge:
+cutoff=...` at INFO when everything it found went (the production alert watches for
+that line), `purge incomplete: cutoff=...` at ERROR when part of it failed. Exit
+code: 0 when the pass ran or had nothing to do; 1 when part of the pass failed or it
+could not run, so a scheduler shows the run as failed and the next one retries.
 """
 from __future__ import annotations
 
@@ -65,14 +67,22 @@ def _log_result(result: PurgeResult) -> None:
             result.unthreaded_rows.runs, result.unthreaded_rows.guard_decisions,
         )
         return
-    logger.info(
-        "purge: cutoff=%s threads=%d thread_runs=%d thread_guard_decisions=%d "
-        "unthreaded_runs=%d unthreaded_guard_decisions=%d failed_threads=%d",
+    counts = (
+        "cutoff=%s threads=%d thread_runs=%d thread_guard_decisions=%d "
+        "unthreaded_runs=%d unthreaded_guard_decisions=%d failed_threads=%d"
+    )
+    values = (
         cutoff, result.threads,
         result.thread_rows.runs, result.thread_rows.guard_decisions,
         result.unthreaded_rows.runs, result.unthreaded_rows.guard_decisions,
         result.failed_threads,
     )
+    # Different words for each outcome: the production alert counts "purge: cutoff="
+    # lines, so an incomplete pass must never log one.
+    if result.complete:
+        logger.info("purge: " + counts, *values)
+    else:
+        logger.error("purge incomplete: " + counts, *values)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -80,8 +90,10 @@ def main(argv: list[str] | None = None) -> int:
     settings = get_settings()
     configure_logging(settings.log_level)
     if settings.retention_days == 0:
-        # 0 keeps everything, so there is nothing to open, let alone delete.
-        logger.info("purge: retention_days is 0, nothing to delete")
+        # 0 keeps everything, so there is nothing to open, let alone delete. A warning:
+        # in the production job it means the setting was lost, and the alert, which
+        # sees no "purge: cutoff=" line, fires.
+        logger.warning("purge: retention_days is 0, nothing to delete")
         return 0
     try:
         result = asyncio.run(run_purge(settings, now=_now(), dry_run=args.dry_run))
@@ -89,7 +101,7 @@ def main(argv: list[str] | None = None) -> int:
         logger.exception("purge failed")
         return 1
     _log_result(result)
-    return 1 if result.failed_threads else 0
+    return 0 if result.complete else 1
 
 
 if __name__ == "__main__":

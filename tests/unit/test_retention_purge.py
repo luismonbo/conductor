@@ -38,15 +38,36 @@ class FailingSaver(MemorySaver):
         await super().adelete_thread(thread_id)
 
 
+class FailingRunStore(SqliteRunStore):
+    """A SqliteRunStore whose delete_thread_rows fails for the thread ids in
+    `failing_rows`, and whose delete_unthreaded_before fails while `unthreaded_fails`."""
+
+    def __init__(self, conn: aiosqlite.Connection) -> None:
+        super().__init__(conn)
+        self.failing_rows: set[str] = set()
+        self.unthreaded_fails = False
+
+    async def delete_thread_rows(self, thread_id: str, cutoff: datetime) -> RowCounts:
+        if thread_id in self.failing_rows:
+            raise RuntimeError("the rows delete failed")
+        return await super().delete_thread_rows(thread_id, cutoff)
+
+    async def delete_unthreaded_before(self, cutoff: datetime) -> RowCounts:
+        if self.unthreaded_fails:
+            raise RuntimeError("the unthreaded delete failed")
+        return await super().delete_unthreaded_before(cutoff)
+
+
 @pytest.fixture
 def saver() -> FailingSaver:
     return FailingSaver()
 
 
 @pytest.fixture
-async def store() -> AsyncIterator[SqliteRunStore]:
+async def store() -> AsyncIterator[FailingRunStore]:
+    """Healthy until a test sets failing_rows or unthreaded_fails."""
     conn = await aiosqlite.connect(":memory:")
-    opened = SqliteRunStore(conn)
+    opened = FailingRunStore(conn)
     await opened.create_table()
     yield opened
     await conn.close()
@@ -155,6 +176,54 @@ async def test_a_failed_checkpoint_delete_keeps_the_threads_rows(saver, store, r
     assert (second.threads, second.failed_threads) == (1, 0)
     assert not await _has_checkpoint(saver, "bad")
     assert await store.stale_threads(now - 30 * DAY) == []
+
+
+async def test_a_failed_rows_delete_is_counted_and_retried(saver, store, run_store_clock, caplog):
+    bad, ok = str(uuid.uuid4()), str(uuid.uuid4())
+    t0 = run_store_clock.now
+    await _thread(saver, store, bad)
+    await _thread(saver, store, ok)
+    store.failing_rows = {bad}
+    now = t0 + 40 * DAY
+
+    with caplog.at_level(logging.DEBUG, logger="harness"):
+        first = await purge(saver, store, now=now, retention_days=30)
+
+    assert (first.threads, first.failed_threads) == (1, 1)
+    assert first.thread_rows == RowCounts(runs=1, guard_decisions=1)  # the other thread's
+    # Its checkpoints went first; its rows stay, so the next pass finds it again.
+    assert not await _has_checkpoint(saver, bad)
+    assert await store.stale_threads(now - 30 * DAY) == [bad]
+    assert "deleting a thread's rows failed (RuntimeError)" in caplog.text
+    assert bad not in caplog.text
+
+    store.failing_rows.clear()
+    second = await purge(saver, store, now=now, retention_days=30)
+
+    assert (second.threads, second.failed_threads) == (1, 0)
+    assert await store.stale_threads(now - 30 * DAY) == []
+
+
+async def test_a_failed_unthreaded_delete_still_reports_the_threads(
+    saver, store, run_store_clock, caplog
+):
+    t0 = run_store_clock.now
+    await _thread(saver, store, "old")
+    await _blocked_first_message(store)
+    store.unthreaded_fails = True
+    now = t0 + 40 * DAY
+
+    with caplog.at_level(logging.DEBUG, logger="harness"):
+        result = await purge(saver, store, now=now, retention_days=30)
+
+    # The threads it did delete are still counted, and the pass reports itself incomplete.
+    assert (result.threads, result.failed_threads) == (1, 0)
+    assert result.thread_rows == RowCounts(runs=1, guard_decisions=1)
+    assert result.unthreaded_rows == RowCounts(0, 0)
+    assert (result.unthreaded_failed, result.complete) == (True, False)
+    assert not await _has_checkpoint(saver, "old")
+    assert await store.count_unthreaded_before(now) == RowCounts(0, 1)  # left for the next pass
+    assert "deleting the rows with no thread failed (RuntimeError)" in caplog.text
 
 
 async def test_a_message_during_the_pass_keeps_the_thread_findable(store, run_store_clock):

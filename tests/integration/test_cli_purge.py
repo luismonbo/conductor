@@ -103,7 +103,14 @@ async def test_a_pass_deletes_the_old_conversation_only(purge_settings, run_stor
     assert await _state(purge_settings, new) == (True, True)
 
 
-def test_main_does_nothing_at_retention_days_0(monkeypatch):
+def _counts(caplog, prefix: str) -> str:
+    """The fields after the cutoff, on the one INFO line that starts `<prefix>cutoff=`."""
+    [record] = [r for r in caplog.records if r.getMessage().startswith(prefix + "cutoff=")]
+    assert record.levelno == logging.INFO
+    return record.getMessage().split(" cutoff=", 1)[1].split(" ", 1)[1]
+
+
+def test_main_does_nothing_at_retention_days_0(monkeypatch, caplog):
     monkeypatch.setattr(
         purge_cli, "get_settings", lambda: _settings("sqlite", ":memory:", retention_days=0)
     )
@@ -113,21 +120,38 @@ def test_main_does_nothing_at_retention_days_0(monkeypatch):
 
     monkeypatch.setattr(purge_cli, "open_storage", must_not_open)
 
-    assert purge_cli.main([]) == 0
+    with caplog.at_level(logging.INFO, logger="harness"):
+        assert purge_cli.main([]) == 0
+    # A warning: in the production job, 0 means the setting was lost.
+    [record] = [r for r in caplog.records if "retention_days is 0" in r.getMessage()]
+    assert record.levelno == logging.WARNING
 
 
-def test_main_exits_1_when_a_thread_fails(monkeypatch):
+@pytest.mark.parametrize(
+    ("failed_threads", "unthreaded_failed"), [(1, False), (0, True)],
+    ids=["a thread failed", "the rows with no thread failed"],
+)
+def test_an_incomplete_pass_logs_an_error_line_and_exits_1(
+    monkeypatch, caplog, failed_threads, unthreaded_failed
+):
     monkeypatch.setattr(purge_cli, "get_settings", lambda: _settings("sqlite", ":memory:"))
 
-    async def one_thread_failed(settings, *, now, dry_run=False):
+    async def part_failed(settings, *, now, dry_run=False):
         return PurgeResult(
-            cutoff=now - 30 * DAY, dry_run=dry_run, threads=2, failed_threads=1,
+            cutoff=now - 30 * DAY, dry_run=dry_run, threads=2, failed_threads=failed_threads,
             thread_rows=RowCounts(2, 2), unthreaded_rows=RowCounts(0, 0),
+            unthreaded_failed=unthreaded_failed,
         )
 
-    monkeypatch.setattr(purge_cli, "run_purge", one_thread_failed)
+    monkeypatch.setattr(purge_cli, "run_purge", part_failed)
 
-    assert purge_cli.main([]) == 1
+    with caplog.at_level(logging.INFO, logger="harness"):
+        assert purge_cli.main([]) == 1
+    # The production alert counts "purge: cutoff=" lines: this pass must not log one.
+    assert "purge: cutoff=" not in caplog.text
+    [record] = [r for r in caplog.records if r.getMessage().startswith("purge incomplete: ")]
+    assert record.levelno == logging.ERROR
+    assert "threads=2 thread_runs=2 thread_guard_decisions=2 " in record.getMessage()
 
 
 def test_main_exits_1_when_the_pass_raises(monkeypatch, caplog):
@@ -150,13 +174,17 @@ def test_main_reports_counts_and_no_thread_id(purge_settings, run_store_clock, m
 
     with caplog.at_level(logging.INFO, logger="harness"):
         assert purge_cli.main(["--dry-run"]) == 0
-        assert "purge (dry run): cutoff=" in caplog.text
-        assert "threads=1 " in caplog.text
+        assert _counts(caplog, "purge (dry run): ") == (
+            "threads=1 unthreaded_runs=0 unthreaded_guard_decisions=0"
+        )
         assert asyncio.run(_state(purge_settings, old)) == (True, True)
 
         assert purge_cli.main([]) == 0
-    assert "purge: cutoff=" in caplog.text
-    assert "failed_threads=0" in caplog.text
+    # The old conversation's run and guard row went with it. The alert counts this line.
+    assert _counts(caplog, "purge: ") == (
+        "threads=1 thread_runs=1 thread_guard_decisions=1 "
+        "unthreaded_runs=0 unthreaded_guard_decisions=0 failed_threads=0"
+    )
     assert asyncio.run(_state(purge_settings, old)) == (False, False)
     assert asyncio.run(_state(purge_settings, new)) == (True, True)
     assert old not in caplog.text
