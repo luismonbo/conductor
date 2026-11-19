@@ -13,7 +13,7 @@ from psycopg.types.json import Jsonb
 
 from harness.adapters.postgres.pool import PostgresPool
 from harness.core.guard import GuardDecision
-from harness.observability.run_store import RowCounts, storable_text
+from harness.observability.run_store import RowCounts, require_aware, storable_text
 from harness.observability.token_accumulator import TokenAccumulator
 
 logger = logging.getLogger(__name__)
@@ -279,22 +279,28 @@ class PostgresRunStore:
             return 0
 
     async def stale_threads(self, cutoff: datetime) -> list[str]:
+        require_aware(cutoff)
         async with self._pool.connection() as conn:
             cur = await conn.execute(_STALE_THREADS, (cutoff,))
             return [row["thread_id"] for row in await cur.fetchall()]
 
     async def delete_thread_rows(self, thread_id: str, cutoff: datetime) -> RowCounts:
+        require_aware(cutoff)
         return await self._delete_both(
             (_DELETE_THREAD_RUNS, _DELETE_THREAD_GUARD_DECISIONS), (thread_id, cutoff)
         )
 
     async def count_unthreaded_before(self, cutoff: datetime) -> RowCounts:
+        require_aware(cutoff)
         async with self._pool.connection() as conn:
             cur = await conn.execute(_COUNT_UNTHREADED, {"cutoff": cutoff})
             row = await cur.fetchone()
+        if row is None:  # two COUNTs always give one row; None would be a broken driver
+            raise RuntimeError("the count of rows with no thread returned no row")
         return RowCounts(runs=int(row["runs"]), guard_decisions=int(row["guard_decisions"]))
 
     async def delete_unthreaded_before(self, cutoff: datetime) -> RowCounts:
+        require_aware(cutoff)
         return await self._delete_both(
             (_DELETE_UNTHREADED_RUNS, _DELETE_UNTHREADED_GUARD_DECISIONS), (cutoff,)
         )

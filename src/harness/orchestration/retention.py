@@ -41,6 +41,13 @@ class PurgeResult:
     failed_threads: int  # stale threads whose deletion failed (always 0 in a dry run)
     thread_rows: RowCounts  # rows deleted with those threads; none in a dry run
     unthreaded_rows: RowCounts  # rows with no thread before cutoff: deleted, or found
+    # True when deleting the rows with no thread failed; they wait for the next pass.
+    unthreaded_failed: bool = False
+
+    @property
+    def complete(self) -> bool:
+        """True when nothing the pass tried to delete failed."""
+        return self.failed_threads == 0 and not self.unthreaded_failed
 
 
 async def purge(
@@ -56,8 +63,9 @@ async def purge(
     Refuses retention_days below 1 (0 means "keep everything", and as a cutoff it
     would be `now`) and a naive `now` (compared with stored UTC times, it would shift
     the cutoff by the machine's offset). A thread whose deletion fails is counted and
-    skipped; errors that stop the whole pass, like a failed query for the stale
-    threads, propagate.
+    skipped; if deleting the rows with no thread fails, the result says so and still
+    counts the threads that went. Errors that stop the whole pass, like a failed query
+    for the stale threads, propagate.
     """
     if retention_days < 1:
         raise ValueError(f"retention_days must be at least 1, not {retention_days}")
@@ -80,11 +88,26 @@ async def purge(
         deleted += 1
         runs += rows.runs
         decisions += rows.guard_decisions
+    unthreaded = await _delete_unthreaded(run_store, cutoff)
     return PurgeResult(
         cutoff=cutoff, dry_run=False, threads=deleted, failed_threads=failed,
         thread_rows=RowCounts(runs=runs, guard_decisions=decisions),
-        unthreaded_rows=await run_store.delete_unthreaded_before(cutoff),
+        unthreaded_rows=_NONE if unthreaded is None else unthreaded,
+        unthreaded_failed=unthreaded is None,
     )
+
+
+async def _delete_unthreaded(run_store: RunStore, cutoff: datetime) -> RowCounts | None:
+    """Delete the old rows with no thread; None if that failed.
+
+    Caught rather than raised, so the counts of the threads already deleted still
+    reach the log. One transaction, so a failure deleted none of them.
+    """
+    try:
+        return await run_store.delete_unthreaded_before(cutoff)
+    except Exception as exc:
+        logger.error("purge: deleting the rows with no thread failed (%s)", type(exc).__name__)
+        return None
 
 
 async def _delete_thread(

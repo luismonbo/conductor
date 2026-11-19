@@ -345,7 +345,8 @@ follow-up counts too. One pass deletes, for every conversation past that:
    leaves them for the next pass to retry;
 2. its `runs` and `guard_decisions` rows;
 
-and then the old rows that belong to no conversation (blocked first messages).
+and then the old rows that belong to no conversation: blocked first messages, and older
+runs saved without one.
 
 ```bash
 make purge ARGS=--dry-run   # count what a pass would delete; delete nothing
@@ -353,9 +354,12 @@ make purge                  # run one pass
 ```
 
 The log line carries counts and the cutoff, never a thread id, session id or message
-text. The exit code is 1 when a conversation couldn't be deleted or the pass couldn't
-run. In production, a Container Apps Job runs the pass daily at 03:00 UTC
-(`docs/superpowers/specs/2026-10-14-retention-purge-design.md`, §8).
+text: `purge: cutoff=...` when everything the pass found went, `purge incomplete:
+cutoff=...` (and exit code 1) when part of it failed, such as one conversation. The
+exit code is 1 too when the pass couldn't run. In production, a Container Apps Job
+runs the pass daily at 03:00 UTC, and an alert fires when a day goes by without a
+`purge: cutoff=` line (`docs/superpowers/specs/2026-10-14-retention-purge-design.md`,
+§8).
 
 The job runs its own image, under a quarter the size of the app's (275 MB against 1.2 GB
 locally): the same Python base, and only pyproject's `purge` dependency group (settings,
