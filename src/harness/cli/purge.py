@@ -1,8 +1,9 @@
 """One retention pass: `python -m harness.cli.purge` (`make purge`; the production job).
 
 Deletes every conversation whose latest activity is more than HARNESS_RETENTION_DAYS
-old: its checkpoints, runs and guard_decisions rows, and the old rows that belong to
-no thread (orchestration/retention.py). Does nothing at retention_days 0.
+old: its checkpoints, runs and guard_decisions rows, the conversations no row names (by
+their newest checkpoint), and the old rows that belong to no thread
+(orchestration/retention.py). Does nothing at retention_days 0.
 `--dry-run` counts what a pass would delete and deletes nothing.
 
 Logs one line of counts, never a thread id, a session id or message text: `purge:
@@ -61,19 +62,19 @@ def _log_result(result: PurgeResult) -> None:
     cutoff = result.cutoff.isoformat(timespec="seconds")
     if result.dry_run:
         logger.info(
-            "purge (dry run): cutoff=%s threads=%d unthreaded_runs=%d "
+            "purge (dry run): cutoff=%s threads=%d unrecorded_threads=%d unthreaded_runs=%d "
             "unthreaded_guard_decisions=%d",
-            cutoff, result.threads,
+            cutoff, result.threads, result.unrecorded_threads,
             result.unthreaded_rows.runs, result.unthreaded_rows.guard_decisions,
         )
         return
     counts = (
-        "cutoff=%s threads=%d thread_runs=%d thread_guard_decisions=%d "
+        "cutoff=%s threads=%d thread_runs=%d thread_guard_decisions=%d unrecorded_threads=%d "
         "unthreaded_runs=%d unthreaded_guard_decisions=%d failed_threads=%d"
     )
     values = (
         cutoff, result.threads,
-        result.thread_rows.runs, result.thread_rows.guard_decisions,
+        result.thread_rows.runs, result.thread_rows.guard_decisions, result.unrecorded_threads,
         result.unthreaded_rows.runs, result.unthreaded_rows.guard_decisions,
         result.failed_threads,
     )

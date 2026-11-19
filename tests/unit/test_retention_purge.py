@@ -46,6 +46,11 @@ class FailingRunStore(SqliteRunStore):
         super().__init__(conn)
         self.failing_rows: set[str] = set()
         self.unthreaded_fails = False
+        self.unrecorded: list[str] = []
+
+    async def unrecorded_threads(self) -> list[str]:
+        # MemorySaver keeps the checkpoints outside this database, so a test names them.
+        return list(self.unrecorded)
 
     async def delete_thread_rows(self, thread_id: str, cutoff: datetime) -> RowCounts:
         if thread_id in self.failing_rows:
@@ -97,6 +102,19 @@ async def _thread(saver: MemorySaver, store: SqliteRunStore, thread_id: str) -> 
         GuardDecision(allowed=True, stage="classifier"),
         session_id=SID, thread_id=thread_id, run_id=run_id, message="hi",
     )
+
+
+async def _unrecorded_thread(
+    saver: MemorySaver, store: FailingRunStore, thread_id: str, at: datetime
+) -> None:
+    """A conversation whose two run-store writes both failed: one checkpoint saved at
+    `at`, and no rows."""
+    checkpoint = empty_checkpoint()
+    checkpoint["ts"] = at.isoformat()
+    await saver.aput(
+        {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}}, checkpoint, {}, {}
+    )
+    store.unrecorded.append(thread_id)
 
 
 async def _blocked_first_message(store: SqliteRunStore) -> None:
@@ -226,6 +244,39 @@ async def test_a_failed_unthreaded_delete_still_reports_the_threads(
     assert "deleting the rows with no thread failed (RuntimeError)" in caplog.text
 
 
+async def test_an_unrecorded_thread_goes_by_its_newest_checkpoint(saver, store, run_store_clock):
+    t0 = run_store_clock.now
+    await _unrecorded_thread(saver, store, "old", t0)
+    await _unrecorded_thread(saver, store, "recent", t0 + 35 * DAY)
+
+    result = await purge(saver, store, now=t0 + 40 * DAY, retention_days=30)
+
+    assert (result.unrecorded_threads, result.threads, result.failed_threads) == (1, 0, 0)
+    assert not await _has_checkpoint(saver, "old")
+    assert await _has_checkpoint(saver, "recent")
+
+
+async def test_a_dry_run_counts_unrecorded_threads_and_deletes_none(saver, store, run_store_clock):
+    t0 = run_store_clock.now
+    await _unrecorded_thread(saver, store, "old", t0)
+
+    result = await purge(saver, store, now=t0 + 40 * DAY, retention_days=30, dry_run=True)
+
+    assert result.unrecorded_threads == 1
+    assert await _has_checkpoint(saver, "old")
+
+
+async def test_a_failed_unrecorded_delete_counts_as_a_failed_thread(saver, store, run_store_clock):
+    t0 = run_store_clock.now
+    await _unrecorded_thread(saver, store, "bad", t0)
+    saver.failing = {"bad"}
+
+    result = await purge(saver, store, now=t0 + 40 * DAY, retention_days=30)
+
+    assert (result.unrecorded_threads, result.failed_threads, result.complete) == (0, 1, False)
+    assert await _has_checkpoint(saver, "bad")
+
+
 async def test_a_message_during_the_pass_keeps_the_thread_findable(store, run_store_clock):
     t0 = run_store_clock.now
     saver = VisitorWritesMidPass(store)
@@ -274,15 +325,17 @@ async def test_now_must_carry_a_time_zone(saver, store):
 
 async def test_a_pass_logs_no_thread_id(saver, store, run_store_clock, caplog):
     # uuid4 ids, as production's are: a word like "old" would match "older" in a log line.
-    bad, old = str(uuid.uuid4()), str(uuid.uuid4())
+    bad, old, lost = str(uuid.uuid4()), str(uuid.uuid4()), str(uuid.uuid4())
     t0 = run_store_clock.now
     await _thread(saver, store, bad)
     await _thread(saver, store, old)
-    saver.failing = {bad}
+    await _unrecorded_thread(saver, store, lost, t0)
+    saver.failing = {bad, lost}
 
     with caplog.at_level(logging.DEBUG, logger="harness"):
         await purge(saver, store, now=t0 + 40 * DAY, retention_days=30)
 
     assert bad not in caplog.text
     assert old not in caplog.text
+    assert lost not in caplog.text
     assert any(record.levelno == logging.ERROR for record in caplog.records)

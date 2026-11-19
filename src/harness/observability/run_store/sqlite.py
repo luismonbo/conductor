@@ -135,6 +135,15 @@ _DELETE_UNTHREADED_GUARD_DECISIONS = (
     "DELETE FROM guard_decisions WHERE thread_id IS NULL AND created_at < ?"
 )
 
+# `checkpoints` is LangGraph's table (AsyncSqliteSaver), in this same database file.
+_HAS_CHECKPOINTS = "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'checkpoints'"
+_UNRECORDED_THREADS = """
+SELECT DISTINCT c.thread_id
+FROM checkpoints c
+WHERE NOT EXISTS (SELECT 1 FROM runs r WHERE r.thread_id = c.thread_id)
+  AND NOT EXISTS (SELECT 1 FROM guard_decisions g WHERE g.thread_id = c.thread_id)
+"""
+
 
 def _now() -> datetime:
     """The time every row is stamped with (tests replace it: run_store_clock)."""
@@ -322,6 +331,12 @@ class SqliteRunStore:
         return await self._delete_both(
             (_DELETE_UNTHREADED_RUNS, _DELETE_UNTHREADED_GUARD_DECISIONS), (_iso_utc(cutoff),)
         )
+
+    async def unrecorded_threads(self) -> list[str]:
+        if await (await self._conn.execute(_HAS_CHECKPOINTS)).fetchone() is None:
+            return []
+        cur = await self._conn.execute(_UNRECORDED_THREADS)
+        return [row[0] for row in await cur.fetchall()]
 
     async def _delete_both(self, statements: tuple[str, str], params: tuple) -> RowCounts:
         """Run a runs DELETE and a guard_decisions DELETE as one transaction.
