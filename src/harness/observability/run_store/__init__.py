@@ -5,7 +5,8 @@
 (run_store/postgres.py: production). tests/contract/test_run_store.py holds both
 to the same behavior, failures included:
 - owns_thread returns False on any error: it gates access, so it fails closed.
-- tokens_since returns 0, so the daily budget fails open.
+- tokens_since returns None, and the guard refuses the message: the daily budget
+  fails closed.
 - list_threads returns []; start_run, finish_run and record_guard_decision log
   and never raise (record_guard_decision returns None).
 - The retention methods (stale_threads, delete_thread_rows, count_unthreaded_before,
@@ -88,8 +89,11 @@ class RunStore(Protocol):
         """Persist one input-guard decision; return its id, or None on failure."""
         ...
 
-    async def tokens_since(self, since: datetime) -> int:
-        """Input + output tokens of runs started at or after `since` (timezone-aware)."""
+    async def tokens_since(self, since: datetime) -> int | None:
+        """Input + output tokens of runs started at or after `since` (timezone-aware).
+
+        None when the store could not read them.
+        """
         ...
 
     # Retention (docs/superpowers/specs/2026-10-14-retention-purge-design.md). A

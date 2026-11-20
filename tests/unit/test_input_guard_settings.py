@@ -36,7 +36,7 @@ def test_guard_on_with_an_azure_endpoint_constructs(clean_env):
 
 @pytest.mark.parametrize("endpoint", ["foundry.example", "ftp://foundry.example"])
 def test_the_guard_refuses_an_azure_endpoint_that_is_not_an_http_url(clean_env, endpoint):
-    # Without a scheme every call would fail, and the guard fails open: silently off.
+    # Without a scheme every call would fail, and the guard would refuse every message.
     with pytest.raises(ValueError, match="HARNESS_AZURE_ENDPOINT"):
         Settings(_env_file=None, api_key="test-key", azure_endpoint=endpoint)
 

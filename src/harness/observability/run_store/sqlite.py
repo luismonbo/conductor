@@ -284,12 +284,12 @@ class SqliteRunStore:
             logger.exception("RunStore.record_guard_decision failed")
             return None
 
-    async def tokens_since(self, since: datetime) -> int:
+    async def tokens_since(self, since: datetime) -> int | None:
         """Input + output tokens of runs started at or after `since`.
 
         Every started_at is written by datetime.now(timezone.utc).isoformat(), so
-        `since` in the same format compares correctly as text. 0 on error, so the
-        daily budget fails open.
+        `since` in the same format compares correctly as text. None on error, so
+        the guard refuses the message: the daily budget fails closed.
         """
         try:
             cur = await self._conn.execute(_TOKENS_SINCE, (_iso_utc(since),))
@@ -297,7 +297,7 @@ class SqliteRunStore:
             return int(row[0]) if row else 0
         except Exception:
             logger.exception("RunStore.tokens_since failed")
-            return 0
+            return None
 
     async def stale_threads(self, cutoff: datetime) -> list[str]:
         require_aware(cutoff)

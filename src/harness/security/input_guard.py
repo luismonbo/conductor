@@ -5,14 +5,17 @@ docs/superpowers/specs/2026-09-27-input-guard-design.md). It does no I/O of
 its own besides the classifier call: the API layer gathers everything else
 into a GuardContext.
 
-Fails open: any classifier failure lets the message through, because the
-chatbot's availability must never depend on the classifier. The fixed limits
-still apply. Cancellation is never swallowed.
+Fails closed: when the guard cannot decide (the classifier call failed, or it
+left a check out), the message is refused with the "unavailable" sentence and
+never reaches the agent. The chat is available only when its messages can be
+checked (the owner's call, 2026-11-20). Cancellation is never swallowed.
 
 The same request asks the visitor's language, and every refusal comes in it. A
-limit that refuses first still asks the language questions alone, with the
-message's first LANGUAGE_ONLY_MESSAGE_CHARS characters; when that request
-fails, the refusal is English.
+language question the classifier leaves out counts as 0, so a bad language
+answer costs at most the refusal's language, never a check. A limit that
+refuses first still asks the language questions alone, with the message's
+first LANGUAGE_ONLY_MESSAGE_CHARS characters; when that request fails, the
+refusal is English.
 """
 from __future__ import annotations
 
@@ -72,7 +75,9 @@ class GuardContext:
     message: str
     system_prompt: str
     previous_reply: str | None = None  # full text; trimmed to the tail here
-    tokens_today: int = 0  # input + output tokens recorded since UTC midnight
+    # Input + output tokens recorded since UTC midnight; None when the run store
+    # could not read them.
+    tokens_today: int | None = 0
 
 
 @dataclass(frozen=True)
@@ -117,6 +122,9 @@ class InputGuard:
         return self._limits
 
     async def screen(self, ctx: GuardContext) -> GuardDecision:
+        if self._limits.daily_token_budget and ctx.tokens_today is None:
+            # The budget cannot be checked, so the message is refused.
+            return self._unavailable("TokensUnavailable", None)
         limit = _limit_hit(ctx, self._limits)
         if limit is not None:
             return await self._refuse_at_limit(ctx, limit)
@@ -219,20 +227,22 @@ class InputGuard:
         # One request carries the checks and the language questions.
         questions = (*self._checks, *self._language_questions.values())
         result, error, latency_ms = await self._ask(
-            classifier, _state(ctx), questions, on_failure="failing open"
+            classifier, _state(ctx), questions, on_failure="refusing"
         )
         if result is None:
-            return _fallback(error or "unknown", latency_ms)
+            return self._unavailable(error or "unknown", latency_ms)
 
-        missing = [c.id for c in self._checks if c.id not in result.probabilities]
+        scores, language = self._language(result.probabilities)
+        missing = [
+            c.id for c in self._checks if not _is_probability(result.probabilities.get(c.id))
+        ]
         if missing:
-            logger.error("input guard: classifier omitted %s; failing open", missing)
-            return _fallback("MissingProbability", latency_ms)
+            logger.error("input guard: classifier gave no usable score for %s; refusing", missing)
+            return self._unavailable("MissingProbability", latency_ms, language)
 
         fired = next(
             (c for c in self._checks if result.probabilities[c.id] >= c.threshold), None
         )
-        scores, language = self._language(result.probabilities)
         return GuardDecision(
             allowed=fired is None,
             stage="classifier",
@@ -248,14 +258,38 @@ class InputGuard:
             language_probabilities=scores,
         )
 
+    def _unavailable(
+        self, error: str, latency_ms: int | None, language: Language = DEFAULT_LANGUAGE
+    ) -> GuardDecision:
+        """The refusal when the guard cannot decide: the message never reaches the agent."""
+        return GuardDecision(
+            allowed=False,
+            stage="fallback",
+            reason="guard_unavailable",
+            refusal=self._refusal("unavailable", language),
+            latency_ms=latency_ms,
+            error=error,
+            language=language,
+        )
+
 
 def _limit_hit(ctx: GuardContext, limits: GuardLimits) -> TextKey | None:
-    """The limit this message hits, named as its refusal, or None."""
-    if limits.daily_token_budget and ctx.tokens_today >= limits.daily_token_budget:
+    """The limit this message hits, named as its refusal, or None.
+
+    An unreadable budget (tokens_today None) never gets here: screen refuses it.
+    """
+    tokens = ctx.tokens_today
+    if limits.daily_token_budget and tokens is not None and tokens >= limits.daily_token_budget:
         return "daily_budget"
     if limits.max_message_chars and len(ctx.message) > limits.max_message_chars:
         return "message_too_long"
     return None
+
+
+def _is_probability(score: float | None) -> bool:
+    """A number in [0, 1]. NaN, infinities and anything out of range count as no score:
+    the policy does not rely on every classifier to filter them."""
+    return score is not None and 0.0 <= score <= 1.0
 
 
 def _previous_reply_tail(ctx: GuardContext) -> str:
@@ -270,16 +304,6 @@ def _state(ctx: GuardContext) -> dict[str, str]:
         "previous_assistant_reply": _previous_reply_tail(ctx),
         "visitor_message": ctx.message,
     }
-
-
-def _fallback(error: str, latency_ms: int) -> GuardDecision:
-    return GuardDecision(
-        allowed=True,
-        stage="fallback",
-        reason="guard_unavailable",
-        latency_ms=latency_ms,
-        error=error,
-    )
 
 
 def _elapsed_ms(started: float) -> int:

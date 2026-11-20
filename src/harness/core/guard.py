@@ -42,7 +42,7 @@ class GuardCheck(GuardQuestion):
 
 @dataclass(frozen=True)
 class ClassifierResult:
-    probabilities: Mapping[str, float]  # question id -> P(yes)
+    probabilities: Mapping[str, float]  # question id -> P(yes), for the questions answered
     model: str  # the versioned model id that answered
     request_id: str | None
     input_tokens: int
@@ -53,8 +53,8 @@ class GuardDecision:
     """The outcome of screening one message.
 
     stage is "precap" (a fixed limit fired), "classifier" (the classifier
-    answered), "fallback" (the classifier failed, so the message was let
-    through), or "none" (nothing was evaluated: no classifier, no limit hit).
+    answered), "fallback" (the guard could not decide, so the message was
+    refused), or "none" (nothing was evaluated: no classifier, no limit hit).
 
     language is the visitor's language as the classifier judged it, English
     when it did not answer. It and language_probabilities are never stored or
@@ -94,7 +94,10 @@ class GuardClassifier(Protocol):
     async def classify(
         self, state: Mapping[str, str], questions: Sequence[GuardQuestion]
     ) -> ClassifierResult:
-        """P(yes) for every question, or raise. Never returns partial results."""
+        """P(yes) for each question answered with a usable probability (a finite
+        number in [0, 1]); the others are left out. Raises when the call fails or
+        nothing usable came back. InputGuard refuses a message whose check is left
+        out or scored outside [0, 1]."""
         ...
 
     async def aclose(self) -> None: ...

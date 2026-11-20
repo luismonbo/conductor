@@ -17,10 +17,16 @@ vendor type. Its message and `cause` carry the HTTP status and the service's
 error code (only when that is a plain identifier), never the service's free
 text or the request: either can hold the visitor's message, and `cause` reaches
 the logs and the guard_decisions table.
+
+A question the reply does not answer, or answers without a probability in
+[0, 1], is left out of the result and logged once per reply (its id and why,
+never the answer); the call fails only when nothing usable came back. What a
+left-out question means is the guard's decision (security/input_guard.py).
 """
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
@@ -37,6 +43,8 @@ from harness.core.guard import (
 _PATH = "/providers/microsoft/v1/systemone"
 _ATTEMPTS = 2  # the call and one retry; InputGuard's own timeout caps the total
 _ERROR_CODE = re.compile(r"[A-Za-z0-9_.\-]{1,60}")  # "DeploymentNotFound", "401"
+
+logger = logging.getLogger(__name__)
 
 
 class AzureDecisionClassifier:
@@ -73,14 +81,16 @@ class AzureDecisionClassifier:
         answers = payload.get("answers")
         if not isinstance(answers, dict):
             raise _invalid("the response has no answers object")
-        probabilities: dict[str, float] = {}
-        for question in questions:
-            if question.id not in answers:
+        probabilities, left_out = _usable_answers(answers, questions)
+        if left_out:
+            listed = ", ".join(f"{question_id} ({cause})" for question_id, cause in left_out.items())
+            if not probabilities:
                 raise GuardClassifierError(
-                    f"no answer for question {question.id!r}", cause="MissingAnswer",
+                    f"no usable answer: {listed}",
+                    cause=next(iter(left_out.values())),
                     misconfigured=True,
                 )
-            probabilities[question.id] = _probability(answers[question.id], question.id)
+            logger.warning("decision classifier: left out %s", listed)
         return ClassifierResult(
             probabilities=probabilities,
             model=_text(payload.get("model")) or self._deployment,
@@ -191,10 +201,29 @@ def _json_object(response: httpx.Response) -> dict[str, Any]:
     return payload
 
 
-def _probability(answer: Any, question_id: str) -> float:
+def _usable_answers(
+    answers: Mapping[str, Any], questions: Sequence[GuardQuestion]
+) -> tuple[dict[str, float], dict[str, str]]:
+    """Each asked question's P(yes), and the ones left out with why, in question order."""
+    probabilities: dict[str, float] = {}
+    left_out: dict[str, str] = {}
+    for question in questions:
+        if question.id not in answers:
+            left_out[question.id] = "MissingAnswer"
+            continue
+        probability = _probability(answers[question.id])
+        if probability is None:
+            left_out[question.id] = "InvalidResponse"
+        else:
+            probabilities[question.id] = probability
+    return probabilities, left_out
+
+
+def _probability(answer: Any) -> float | None:
+    """The answer's P(yes), or None when it carries none in [0, 1]."""
     value = answer.get("noul") if isinstance(answer, dict) else None
     if isinstance(value, bool) or not isinstance(value, int | float) or not 0.0 <= value <= 1.0:
-        raise _invalid(f"the answer for question {question_id!r} has no probability")
+        return None
     return float(value)
 
 

@@ -194,7 +194,8 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _require_a_guard_target_when_guard_enabled(self) -> "Settings":
-        # The guard fails open, so a typo here would switch it off silently.
+        # A typo here would fail every check, and the guard would refuse every
+        # message; failing at startup names the setting instead.
         if not self.input_guard_enabled:
             return self
         if not self.azure_endpoint.startswith(("https://", "http://")):
