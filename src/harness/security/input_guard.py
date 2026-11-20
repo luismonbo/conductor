@@ -233,9 +233,11 @@ class InputGuard:
             return self._unavailable(error or "unknown", latency_ms)
 
         scores, language = self._language(result.probabilities)
-        missing = [c.id for c in self._checks if c.id not in result.probabilities]
+        missing = [
+            c.id for c in self._checks if not _is_probability(result.probabilities.get(c.id))
+        ]
         if missing:
-            logger.error("input guard: classifier omitted %s; refusing", missing)
+            logger.error("input guard: classifier gave no usable score for %s; refusing", missing)
             return self._unavailable("MissingProbability", latency_ms, language)
 
         fired = next(
@@ -282,6 +284,12 @@ def _limit_hit(ctx: GuardContext, limits: GuardLimits) -> TextKey | None:
     if limits.max_message_chars and len(ctx.message) > limits.max_message_chars:
         return "message_too_long"
     return None
+
+
+def _is_probability(score: float | None) -> bool:
+    """A number in [0, 1]. NaN, infinities and anything out of range count as no score:
+    the policy does not rely on every classifier to filter them."""
+    return score is not None and 0.0 <= score <= 1.0
 
 
 def _previous_reply_tail(ctx: GuardContext) -> str:

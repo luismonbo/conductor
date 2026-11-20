@@ -280,6 +280,17 @@ async def test_a_check_left_out_refuses_in_the_language_found():
     assert (decision.refusal, decision.language) == (visitor_text("unavailable", "fr"), "fr")
 
 
+@pytest.mark.parametrize(
+    "score", [float("nan"), -0.1, 1.5, float("inf")], ids=["nan", "negative", "above-1", "inf"]
+)
+async def test_a_check_score_that_is_not_a_probability_refuses(score):
+    # Only the real adapter filters these; the policy must not trust any other classifier.
+    decision = await _guard(_PartialClassifier({"first": score, "second": 0.1})).screen(_ctx())
+    assert (decision.allowed, decision.stage, decision.reason, decision.error) == (
+        False, "fallback", "guard_unavailable", "MissingProbability",
+    )
+
+
 async def test_a_language_question_left_out_counts_as_zero_while_the_checks_decide():
     # A review gap (devlog 040): no test pinned a language the classifier left out.
     decision = await _guard(

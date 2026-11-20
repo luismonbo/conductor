@@ -94,8 +94,10 @@ class GuardClassifier(Protocol):
     async def classify(
         self, state: Mapping[str, str], questions: Sequence[GuardQuestion]
     ) -> ClassifierResult:
-        """P(yes) for each question answered with a usable probability; the others
-        are left out. Raises when the call fails or nothing usable came back."""
+        """P(yes) for each question answered with a usable probability (a finite
+        number in [0, 1]); the others are left out. Raises when the call fails or
+        nothing usable came back. InputGuard refuses a message whose check is left
+        out or scored outside [0, 1]."""
         ...
 
     async def aclose(self) -> None: ...
