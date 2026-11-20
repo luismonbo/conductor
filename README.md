@@ -1,400 +1,178 @@
-# Conductor Agent Harness
+# Conductor
 
-A production-grade AI agent platform with **swappable model backends**, a **LangGraph runtime**, and a **Human-in-the-Loop approval gate**. Swap Azure OpenAI for a local Gemma model by changing an env var — no code changes.
+[![CI](https://github.com/luismonbo/conductor/actions/workflows/ci.yml/badge.svg)](https://github.com/luismonbo/conductor/actions/workflows/ci.yml)
+[![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
-```
-POST /chat/stream  →  LangGraph StateGraph  →  approval gate  →  tools  →  SSE events
-                                                      ↓
-                                              interrupt (requires_approval=True)
-                                                      ↓
-                                         POST /resume/{thread_id}
-```
+An agent harness: the platform an AI agent runs on, with its model access, tools, memory, human
+approvals, evaluations and deployment. Built on LangGraph and FastAPI, it has run the public
+assistant on [luismonbo.com](https://luismonbo.com) since October 2026.
 
----
+## Architecture
 
-## Architecture in one rule
-
-Dependencies point **inward only**.
-
-```
-api ──► orchestration ──► agents ──► adapters ──► core
-                                                  ↑
-                                     no imports outward from here
-```
-
-`core/` is pure Python — no FastAPI, no LangGraph, no OpenAI SDK. Every swap is a config change because the seam is real.
-
----
-
-## What's built
-
-| Feature | Detail |
-|---------|--------|
-| **LangGraph runtime** | Five-node `StateGraph`: `call_model → approval_gate → execute_tools → final/error` |
-| **HITL approval gate** | Tools opt in with `requires_approval = True`; graph suspends via `interrupt()`, state persisted to checkpointer |
-| **Resume endpoint** | `POST /resume/{thread_id}` — approve or reject a paused run, stream resumes |
-| **Swappable LLM** | Azure OpenAI / OpenAI-compatible (llama.cpp, vLLM) / fake (tests) |
-| **Swappable storage** | Checkpointer and run store opened together: `MemorySaver` (tests) · SQLite (local default) · Postgres (production, on Neon) |
-| **SSE streaming** | Real-time `thinking`, `tool_call`, `tool_result`, `interrupt`, `final`, `error` events |
-| **React frontend** | Interrupt state UI: amber dot, "Waiting for approval", Reject button |
-| **RAG** | docling/markitdown ingestion → LLM-normalized sections → structure-aware chunks → pgvector + Milvus Lite; retrieval, grounded generation, and a RAG eval harness |
-| **Multi-provider models** | LiteLLM proxy fans one adapter out to Ollama/Anthropic/OpenAI/Gemini/DeepSeek by model name; `resolve_model()` precedence: tool pin > agent pin > UI picker > default |
-| **Threaded chat UI** | Model picker, thread sidebar with transcript reload (`GET /models`, `GET /threads`) |
-| **970 tests** | Unit, integration, contract, graph scenarios — all pass with zero credentials |
-
----
-
-## Layout
-
-```
-src/harness/
-├── agents/
-│   ├── definition.py     ← AgentDefinition + ToolDeps: the contract every agent folder implements
-│   └── default/          ← one folder per agent: prompt.py, tools.py, agent.py
-├── api/                  ← FastAPI endpoints + SSE
-├── orchestration/        ← shared agent loop, agent loader, composition root, storage (checkpointer + run store)
-├── adapters/
-│   ├── llm/              ← Azure, OpenAI-compatible, fake
-│   ├── tools/            ← calculator, remember, recall, search_documents, wiki
-│   ├── memory/           ← in-memory, pgvector stub (long-term conversational memory)
-│   ├── parsing/          ← docling, markitdown, router
-│   ├── normalization/    ← LLM structured-output normalizer
-│   ├── chunking/         ← structure-aware chunker
-│   ├── embedding/        ← openai-compatible, fake
-│   ├── vectorstore/      ← pgvector, Milvus Lite, in-memory (RAG chunk index)
-│   └── wiki/             ← wiki pages from a local folder or Azure Blob, parsed into memory
-├── core/
-│   ├── rag/              ← RAG schema, ports, ingestion + serving pipelines
-│   └── ...               ← protocols + types, imports nothing outward
-├── cli/                  ← ingest.py, rag_query.py
-├── observability/        ← per-step tracer + token cost
-└── security/             ← input guard, egress filter (what may reach a browser)
-
-frontend/src/
-├── hooks/useChatStream   ← reducer + stream consumer + resumeStream()
-├── components/           ← StatusBar, ChatInput (interrupt-aware)
-└── pages/ChatPage
+```text
+Browser
+  │ luismonbo.com/api/*
+  ▼
+Cloudflare Worker   adds the API key and sets X-Visitor-IP; the page holds no secret
+  │
+  ▼
+FastAPI             key check, per-visitor rate limit, input guard
+  │                 (Azure Container Apps)
+  ▼
+LangGraph loop      call_model → approval_gate → execute_tools → call_model …
+  │                 · model: Azure OpenAI with a managed identity (LiteLLM locally)
+  │                 · state: Postgres on Neon for checkpoints and runs (SQLite locally)
+  │                 · knowledge: a wiki loaded from private Blob storage at startup
+  ▼
+egress filter       deny by default, then SSE events back to the browser
 ```
 
-Local tools to inspect conversations, runs and the vector index live in `scripts/` (see
-[scripts/README.md](scripts/README.md)); they never ship in an image.
+Dependencies point inward: `api → orchestration → agents → adapters → core`. `core/` holds the
+ports and types (LLM, tools, memory, RAG, guard, wiki) and imports nothing outside the standard
+library and the harness itself, so anything behind a port is swapped by configuration.
 
----
+## Design decisions
+
+- **One wire format for every model.** Both LLM clients speak the OpenAI chat format
+  ([openai_wire.py](src/harness/adapters/llm/openai_wire.py)): Azure OpenAI in production, any
+  OpenAI-compatible endpoint otherwise. Locally that endpoint is a LiteLLM proxy that routes
+  profile names ([litellm_config.yaml](litellm_config.yaml)) to Ollama, Anthropic, OpenAI, Gemini
+  or DeepSeek. Changing provider is a config edit, and the agent loop never sees one.
+- **Approvals are graph pauses.** A tool with `requires_approval = True` stops the run with
+  LangGraph's `interrupt()`. The checkpointer keeps the state, so an approval can wait without
+  holding a request open, and `POST /resume/{thread_id}` continues the run with approve, deny, or
+  feedback for the model.
+- **Agents are folders.** `src/harness/agents/<name>/` holds `prompt.py`, `tools.py` and
+  `agent.py`. `HARNESS_AGENT` names the entry agent, loaded by name with no registry to edit, and
+  its document search reaches only the collections its `tools.py` lists. A deployment is a
+  settings file in `config/targets/`, not a fork.
+- **Pinned models win.** Each call site resolves its model as tool pin, then agent pin, then the
+  UI's picker, then the default ([model_resolution.py](src/harness/core/llm/model_resolution.py)).
+  The picker steers the conversation, never a component pinned for cost or capability.
+- **Bad configuration fails at startup, not in front of a visitor.** The app refuses to start
+  with auth on and no key, with the guard on and no endpoint, with an entry agent that doesn't
+  resolve or lacks what it needs (the website agent without its wiki), or with a credential in a
+  target file.
+
+## Production and safety
+
+- **The key never reaches a browser.** The page calls `luismonbo.com/api/*`, where a Cloudflare
+  Worker adds the shared API key and sets `X-Visitor-IP`. The API trusts that header only on a
+  request that carries the valid key, so any proxy that injects the key must set or strip it.
+- **Per-visitor limits and a cost ceiling.** Rate limits key on the visitor's address (an IPv6
+  address as its /64): 15 a minute on the routes that call the model, 60 elsewhere, and the
+  limiter's key is never logged. Messages are capped in length, each model call in output tokens,
+  and all visitors together by a daily token budget derived from the provider's monthly quota.
+- **Input guard.** Microsoft-Decision-1 screens every message for prompt extraction, requests for
+  private information and off-topic use before the agent sees it, with thresholds calibrated on
+  labeled cases. By design a classifier error lets the message through, so the chat's
+  availability never depends on the classifier; the fixed limits still apply. Refusals come in the
+  visitor's language, from a fixed table no model writes.
+- **Egress filter.** Everything a browser receives passes [egress.py](src/harness/security/egress.py),
+  deny by default: an exception never becomes browser text, tool arguments and results stay on
+  the server unless the deployment allows them (an approval card shows the call it asks about),
+  and an unknown event type is dropped.
+- **Visitor data.** An anonymous random `sid` cookie (HttpOnly, Secure, a session cookie on the
+  public site) scopes threads to their visitor. A daily Container Apps Job deletes conversations
+  30 days after their last message, and an alert fires when a day passes without a clean run.
+  Long-term memory stays off in public, because its store isn't partitioned per visitor yet.
+- **Least privilege.** The app reaches the model and the wiki with its managed identity, and its
+  secrets come from the Container App's environment, never from the committed target file.
+  Checkpoints deserialize only an explicit list of types.
+- **Observable without a vendor.** Every run is recorded with its agent, backend, timing, stop
+  reason, tokens and iterations, and every guard decision with its probabilities;
+  [scripts/db.py](scripts/db.py) reads both.
+
+## Evaluation and testing
+
+- [run_eval.py](evaluation/run_eval.py) drives the real LangGraph agent over a dataset and scores
+  tool choice, arguments and answers.
+- [run_retrieval_eval.py](evaluation/run_retrieval_eval.py) measures retrieval alone, with no
+  LLM: recall@k, MRR and nDCG@k, deterministic and seconds per run, so retrieval settings can be
+  swept. [run_rag_eval.py](evaluation/run_rag_eval.py) adds generation: faithfulness and answer
+  relevancy.
+- [run_guard_eval.py](evaluation/run_guard_eval.py) calibrates the input guard; it is rerun
+  whenever the website agent's prompt changes.
+- Datasets and pass thresholds are committed; run reports are not.
+
+About 1,200 tests (unit, integration, contract and graph scenarios) need no network and no
+credentials: `uv run pytest -q`, or `make test` with the frontend's. CI runs ruff, mypy and the
+suite, with the Postgres tests on `pgvector/pgvector:0.8.6-pg18`, the versions Neon runs; a
+missing database fails them instead of skipping them.
 
 ## Quick start
 
-Full local stack (LiteLLM proxy + Postgres), then API and frontend each in their
-own terminal:
+Needs Python 3.13 and [uv](https://docs.astral.sh/uv/). Until you configure a model, a fake one
+answers with a fixed sentence, so this needs no credentials:
 
 ```bash
 uv sync
-cp .env.example .env   # fill in provider keys for the profiles you'll use
-echo "HARNESS_API_KEY=$(openssl rand -hex 32)" >> .env   # required: auth fails closed with no key
-# Local dev: the input guard (fails closed without an Azure endpoint) and the
-# public website's limits off. A public deployment keeps the defaults.
-cat >> .env <<'EOF'
-HARNESS_INPUT_GUARD_ENABLED=false
-HARNESS_MAX_MESSAGE_CHARS=0
-HARNESS_MAX_OUTPUT_TOKENS=0
-HARNESS_DAILY_TOKEN_BUDGET=0
-EOF
+export HARNESS_API_KEY=$(openssl rand -hex 32) HARNESS_INPUT_GUARD_ENABLED=false
+uv run uvicorn harness.api.main:app --app-dir src &
 
-make up     # infra: postgres, litellm
-make api    # FastAPI, reload
-make web    # Vite dev server
+curl --retry 10 --retry-connrefused localhost:8000/health   # waits for the server to start
+curl -N localhost:8000/chat/stream -H "Authorization: Bearer $HARNESS_API_KEY" \
+  -H 'content-type: application/json' -d '{"message": "hello"}'
 ```
 
-`make up` validates `litellm_config.yaml` before starting anything, so a typo
-in a model profile fails fast instead of surfacing as an opaque proxy 400.
+The full stack, with real models through the LiteLLM proxy, Postgres and the chat UI, needs Docker
+and pnpm. In `.env`, set `HARNESS_API_KEY` and `HARNESS_INPUT_GUARD_ENABLED=false`, uncomment the
+LiteLLM block, and set `HARNESS_DEFAULT_MODEL` to a profile you can run: `ollama-gemma` after
+`ollama pull gemma4:e2b`, or `claude`, `gpt`, `gemini-flash` or `deepseek-flash` with that
+provider's key. `.env.example` keeps the public site's limits, such as a 33,000-token daily budget
+for all visitors; `HARNESS_MAX_MESSAGE_CHARS`, `HARNESS_MAX_OUTPUT_TOKENS` and
+`HARNESS_DAILY_TOKEN_BUDGET` at `0` turn them off.
 
-Fallback — raw commands, no proxy, fake LLM, zero credentials:
 ```bash
-export HARNESS_API_KEY=$(openssl rand -hex 32)
-export HARNESS_INPUT_GUARD_ENABLED=false   # the input guard fails closed without an Azure endpoint
-uv run uvicorn harness.api.main:app --reload --app-dir src
-
-# health check (the one route auth never gates)
-curl localhost:8000/health
-
-# stream a response (fake LLM, no credentials needed beyond the shared key)
-curl -N -X POST localhost:8000/chat/stream \
-  -H "Authorization: Bearer $HARNESS_API_KEY" \
-  -H 'content-type: application/json' \
-  -d '{"message": "what is 12 * 9?"}'
+cp .env.example .env   # then edit it as above
+make up                # Postgres and the LiteLLM proxy
+make api               # the API on :8000
+make web               # in a second terminal: the chat UI (after `pnpm -C frontend install`)
 ```
 
-Frontend (raw):
-```bash
-cd frontend && pnpm install && pnpm dev
-```
+## Layout
 
-Tests (no network, no credentials):
-```bash
-uv run pytest -q   # 970 tests
-# the Postgres tests (run store, checkpointer, db.py, pgvector) skip unless `make infra` runs;
-# HARNESS_TEST_POSTGRES_DSN points them at another server (CI runs them on Postgres 18)
+```text
+src/harness/
+├── core/            ports and types: LLM, tools, memory, RAG, guard, wiki
+├── adapters/        implementations: llm, tools, memory, guard, wiki, RAG ingestion, vector stores
+├── agents/          one folder per agent: default (tools, memory, RAG) and website (the public one)
+├── orchestration/   the LangGraph loop, agent loading, the composition root, storage, retention
+├── security/        the input guard, the egress filter, the visitor-facing texts
+├── observability/   logging, tracing, token counting, the run store
+├── api/             FastAPI routes, auth, sessions, rate limits, SSE
+├── config/          settings and deployment targets
+└── cli/             ingest, rag_query, purge
+evaluation/          agent, retrieval, RAG and guard evaluations
+frontend/            React and TypeScript chat: streaming, approval cards, model picker, threads
+scripts/             local tools for conversations, runs and the vector index (scripts/README.md)
 ```
-
----
 
 ## Configuration
 
-| Env var | Default | Options |
-|---------|---------|---------|
-| `HARNESS_LLM_BACKEND` | `fake` | `fake` · `openai_compatible` · `azure` |
-| `HARNESS_CHECKPOINTER` | `sqlite` | `memory` · `sqlite` · `postgres`: where threads and the run store live |
-| `HARNESS_CHECKPOINTER_URL` | `./harness.sqlite` | the SQLite file, or for `postgres` a `postgresql://` connection string (a secret) |
-| `HARNESS_AGENT` | `default` | entry agent: a folder under `src/harness/agents/` (see [Agents](#agents)) |
-| `HARNESS_TOOL_PARSER` | `native` | `native` · `prompted` |
-| `HARNESS_MAX_ITERATIONS` | `8` | integer |
-| `HARNESS_CONTEXT_TURNS` | `10` | integer, visitor turns the model sees; `0` = the whole thread |
-| `HARNESS_MEMORY_TOOLS_ENABLED` | `false` | `true` · `false` — gates the shared `remember`/`recall` long-term memory tools; must stay off on a public deployment since that store is not partitioned per visitor |
-| `HARNESS_SHOW_TOOL_DETAILS` | `false` | `true` · `false` — whether tool arguments and results reach the browser (the chat stream and `GET /threads/{id}`); off, a browser gets each tool's name only. Keep it off on a public deployment |
-| `HARNESS_SESSION_COOKIE_SECURE` | `true` | `true` · `false` — marks the visitor `sid` cookie `Secure`, so browsers only send it over HTTPS; set `false` only for local development on a browser that does not treat `http://localhost` as a secure context |
-| `HARNESS_SESSION_COOKIE_PERSISTENT` | `true` | `true` · `false` — how long the visitor `sid` cookie lasts: `true` keeps it for a year, `false` sends it without a `Max-Age`, so the browser drops it when it closes (the public site's target sets `false`, as its privacy page says) |
-| `HARNESS_RETENTION_DAYS` | `0` | integer ≥ 0 — days a conversation is kept after its last message; `0` keeps everything. The daily purge (`make purge`, or the production job; see [Retention purge](#retention-purge)) deletes the checkpoints, `runs` and `guard_decisions` of older conversations (the public site's target sets `30`, as its privacy page says) |
-| `HARNESS_LOG_LEVEL` | `INFO` | `DEBUG` · `INFO` · `WARNING` · `ERROR` — level of the harness's own log lines (stderr); every other library stays at `WARNING`. Never set an SDK's own debug switch in production (`OPENAI_LOG=debug`), nor run uvicorn with `--log-level trace`: they log visitor messages, the `sid` cookie or the API key |
-| `HARNESS_RATE_LIMIT_ENABLED` | `true` | `true` · `false` |
-| `HARNESS_RATE_LIMIT_STRICT` | `15/minute` | slowapi rate string; applies to LLM-invoking endpoints |
-| `HARNESS_RATE_LIMIT_DEFAULT` | `60/minute` | slowapi rate string; applies to all other rate-limited endpoints |
-| `HARNESS_AUTH_ENABLED` | `true` | `true` · `false` — fails closed: refuses to start if `true` with no `HARNESS_API_KEY` set |
-| `HARNESS_API_KEY` | — | shared bearer key gating every route except `/health`; generate with `openssl rand -hex 32` |
-| `HARNESS_INPUT_GUARD_ENABLED` | `true` | `true` · `false` — Microsoft-Decision-1 (a Foundry deployment, called with the Azure LLM's endpoint and credentials) screens every chat message for extraction, private-info and off-topic requests before the agent sees it; fails closed: refuses to start if `true` with no `HARNESS_AZURE_ENDPOINT`. Without `HARNESS_AZURE_API_KEY` the managed identity needs the Cognitive Services User role on the resource |
-| `HARNESS_GUARD_DEPLOYMENT` | `Decision-1` | name of the Foundry deployment of Microsoft-Decision-1; pin its model version there, since the guard's thresholds are calibrated against one version |
-| `HARNESS_MAX_MESSAGE_CHARS` | `2000` | integer; `0` = off |
-| `HARNESS_MAX_OUTPUT_TOKENS` | `1500` | integer, per LLM call; `0` = off |
-| `HARNESS_AZURE_REASONING_EFFORT` | — | `none` — sent as `reasoning_effort` on every Azure chat call; blank = not sent (the deployment's default). gpt-6-luna needs `none`: over Chat Completions it takes tools only with reasoning off |
-| `HARNESS_DAILY_TOKEN_BUDGET` | `33000` | integer, all visitors per UTC day; `0` = off |
-| `HARNESS_EMBEDDING_BACKEND` | `fake` | `fake` · `openai_compatible` · `azure` (azure not yet wired) |
-| `HARNESS_EMBEDDING_MODEL` | `nomic-embed-text-v1.5` | any model your embedding endpoint serves |
-| `HARNESS_EMBEDDING_DIMENSION` | `768` | must match the vector store schema; changing it forces a reindex |
-| `HARNESS_PGVECTOR_URL` | — | Postgres DSN for the RAG chunk index |
-| `HARNESS_MILVUS_URI` | `./data/milvus_papers.db` | file path = Milvus Lite; `http(s)://` = a real server |
-| vector store (CLI `--vector-store`) | `pgvector` | `pgvector` · `milvus` · `in_memory` |
-| `HARNESS_RAG_K` | `5` | retrieval depth |
-| `HARNESS_RAG_PER_DOCUMENT_K` | `2` | max chunks per document; `0` = plain flat top-k |
-| `HARNESS_WIKI_DIR` | — | a local wiki folder holding `index.md`, e.g. `wiki` (the repo's gitignored `wiki/`; see [Agents](#agents)); set this or the Blob settings, not both |
-| `HARNESS_WIKI_BLOB_ACCOUNT_URL` | — | `https://<account>.blob.core.windows.net`; read with `DefaultAzureCredential` (needs Storage Blob Data Reader) |
-| `HARNESS_WIKI_BLOB_CONTAINER` | — | the private container holding the wiki's pages; set together with the account URL |
-| `HARNESS_WIKI_BLOB_PREFIX` | — | optional folder inside the container, e.g. `wiki/` |
-| `HARNESS_DEFAULT_MODEL` | — | LiteLLM profile name sent when no pin/override applies; supersedes `HARNESS_LLM_MODEL` when set |
-| `LITELLM_MASTER_KEY` | — | proxy auth; must equal `HARNESS_LLM_API_KEY` |
+Settings are `HARNESS_*` environment variables, documented in [.env.example](.env.example). A
+deployment is a target: `HARNESS_TARGET=<name>` layers `config/targets/<name>.yaml` under the
+environment ([example.yaml](config/targets/example.yaml)), and a target never holds a secret. The
+ones to know first:
 
-**Rate limiting and visitors.** The limiter keys on the connection's address as uvicorn sees it. In production a Cloudflare Worker holds `HARNESS_API_KEY`, adds it to every request and sets `X-Visitor-IP` to the visitor's address; the limiter then keys on that address, so each visitor gets their own limit instead of the whole internet sharing the platform ingress's address. The header is honored only on a request that carries the valid `HARNESS_API_KEY`; every other request is limited by its connection address. An IPv6 address counts as its /64, and a missing, malformed or repeated header counts as absent. Any proxy that injects the key must therefore own the header: set it to the real visitor's address, or strip it. Caddy and the dev-server proxies strip it, so behind them the limiter keys on whatever address uvicorn sees (with Caddy in the Compose stack, the caller's, taken from `X-Forwarded-For`). Neither the harness nor slowapi logs the limiter key (slowapi's own 429 line, which names it, is silenced), but uvicorn's access log prints the connection's address: on Container Apps that is the platform's proxy, in the Compose stack it is the caller.
-
-Azure example:
-```bash
-export HARNESS_LLM_BACKEND=azure
-export HARNESS_AZURE_ENDPOINT=https://<resource>.openai.azure.com
-export HARNESS_AZURE_DEPLOYMENT=gpt-4o
-# omit HARNESS_AZURE_API_KEY to use managed identity
-```
-
-Local model / any provider, via the LiteLLM proxy (default; see "Model routing" below):
-```bash
-export HARNESS_LLM_BACKEND=openai_compatible
-export HARNESS_LLM_BASE_URL=http://localhost:4000/v1
-export HARNESS_LLM_API_KEY=$LITELLM_MASTER_KEY
-export HARNESS_DEFAULT_MODEL=ollama-gemma
-```
-
----
-
-## Agents
-
-An agent is a folder under `src/harness/agents/`:
-
-```
-src/harness/agents/<name>/
-├── prompt.py   ← SYSTEM_PROMPT
-├── tools.py    ← build_tools(deps) -> ToolRegistry, from the shared infrastructure (ToolDeps)
-└── agent.py    ← AGENT = AgentDefinition(name="<name>", prompt=SYSTEM_PROMPT, tools=build_tools)
-```
-
-`HARNESS_AGENT=<name>` picks the entry agent, the one that talks to users. It is loaded by name
-(`harness.agents.<name>.agent`), so there is no registry to edit, and only that agent is imported.
-Every agent runs the same loop, `orchestration/loop.py`. The API builds the entry agent once at
-startup; a name that doesn't resolve, or a backend the agent requires, stops the app before it
-serves. Prompts live only in `prompt.py`: never in `.env`, Settings or a target file. An agent's
-`search_documents` searches only the collections its `tools.py` lists; any other collection the
-model names is refused.
-
-**Wiki.** Instead of searching documents, an agent can read a wiki: `read_wiki_index` returns its
-`index.md`, and `read_wiki_page` one page by the name its `[[...]]` links use (the page's path
-without `.md`). The wiki loads into memory at startup from `HARNESS_WIKI_DIR`, a local folder (in
-this repo, the gitignored `wiki/`: `HARNESS_WIKI_DIR=wiki`), or, in production, from a private
-Azure Blob container (`HARNESS_WIKI_BLOB_ACCOUNT_URL`,
-`HARNESS_WIKI_BLOB_CONTAINER`, optional `HARNESS_WIKI_BLOB_PREFIX`) read with the app's managed
-identity; restart the app after changing it. The website agent (`agents/website/`) answers from its
-wiki only and does not start without it.
-
-**Private agents.** To keep an agent out of a public repo, gitignore its folder under
-`src/harness/agents/`; the Dockerfile's `COPY src/ src/` still bakes it into the image. That relies
-on the editable install `uv sync` performs (a `.pth` file pointing at `src/`): a non-editable wheel
-build drops gitignored files.
-`TARGET_NAME=<target> make proxy` runs that same image locally behind Caddy, with
-`config/targets/<target>.yaml` baked in and only secrets taken from the environment.
-
----
-
-## HITL approval gate
-
-Mark any tool as requiring human approval before execution:
-
-```python
-class MyMutatingSomethingTool:
-    @property
-    def requires_approval(self) -> bool:
-        return True
-```
-
-The graph pauses, emits an `interrupt` SSE event (its `args` hold what to review and the `interrupt_id`), and closes the stream. State is persisted to the checkpointer. Answer it via:
-
-```bash
-curl -X POST localhost:8000/resume/<thread_id> \
-  -H "Authorization: Bearer $HARNESS_API_KEY" \
-  -H 'content-type: application/json' \
-  -d '{"interrupt_id": "<args.interrupt_id>", "decision": {"action": "approve"}}'
-```
-
-An answer counts only for the interrupt it names: once that one is answered (another tab, a retry), the same request gets 409, as does any request while another run of the thread is still going. `{"action": "deny"}` tells the agent the call was rejected and lets it carry on; `{"action": "feedback", "feedback": "..."}` sends your note back to the model.
-
----
-
-## Model routing
-
-The harness keeps exactly one LLM adapter in the hot path — `OpenAICompatibleClient`
-— pointed at a LiteLLM proxy container that fans out to Ollama/Anthropic/OpenAI/Gemini/DeepSeek
-by model name. Six profiles ship by default (`litellm_config.yaml`); the `ollama-*` ones
-are pinned to specific pulled tags rather than auto-discovered — LiteLLM's wildcard
-routing doesn't reliably enumerate Ollama models, so each one you want in the picker
-gets its own entry, same as every cloud profile below:
-
-| Profile | Provider |
-|---------|----------|
-| `ollama-gemma` | Ollama, on the host (`gemma4:e2b`) |
-| `ollama-gemma-12b` | Ollama, on the host (`gemma4:12b-mlx`) |
-| `claude` | Anthropic |
-| `gpt` | OpenAI |
-| `gemini-flash` | Gemini |
-| `deepseek-flash` | DeepSeek |
-
-Every call site resolves its model by precedence — **tool pin > agent pin > UI
-picker > default** — via `resolve_model()`
-([model_resolution.py](src/harness/core/llm/model_resolution.py)). Pins beat the
-picker on purpose: the model picker steers the conductor, never a component that
-was pinned for cost or capability reasons.
-
-### Troubleshooting `make up`
-
-- **An `ollama-*` profile fails or 404s**: `litellm_config.yaml`'s Ollama entries
-  point at specific pulled tags (`gemma4:e2b`, `gemma4:12b-mlx`) — run `ollama list`
-  and edit those lines to match what you've actually pulled.
-- **Reusing a `postgres_data` volume from before this Makefile existed**: the
-  `litellm` database only gets created by `create-databases.sql` on a *fresh*
-  volume. Run `make init-dbs` once.
-
----
-
-## RAG
-
-Drop documents into `data/raw/<collection>/` (gitignored), then ingest and query.
-Retrieval is a standalone primitive — it returns raw chunks, never a pre-baked
-answer — so a future agent tool can assess sufficiency and re-retrieve.
-
-```bash
-# Postgres + pgvector (Milvus Lite is embedded, no service needed)
-docker compose up -d postgres
-
-# ingest into both vector stores, then query one
-uv run python -m harness.cli.ingest --collection papers --vector-store all
-uv run python -m harness.cli.rag_query "What method does the paper use?" --show-context
-
-# same golden set against each backend, to compare them
-uv run python evaluation/run_rag_eval.py --vector-store pgvector
-uv run python evaluation/run_rag_eval.py --vector-store milvus
-```
-
-Ingestion is `parse → normalize → chunk → embed → upsert`. PDFs route to docling
-(layout-aware); everything else to markitdown, which is also the fallback if
-docling fails, so one bad document never aborts a run. Parser output is
-normalized into a common section schema by the model via tool-calling — long
-documents are windowed to stay inside the context budget.
-
-`evaluation/rag/datasets/papers_v1.json` ships empty on purpose: cases need
-known-correct passages from real documents, so it gets populated once a corpus
-exists. The eval runs clean against an empty index and reports a baseline.
-
----
-
-## Retention purge
-
-`HARNESS_RETENTION_DAYS` (`0`, keep everything, by default; the public site's target
-sets `30`) is how long a conversation is kept after its last message. A conversation's
-last message is the newest of its `runs` and `guard_decisions` rows, so a blocked
-follow-up counts too. One pass deletes, for every conversation past that:
-
-1. its checkpoints, first: the rows are how a pass finds a thread, so a failed delete
-   leaves them for the next pass to retry;
-2. its `runs` and `guard_decisions` rows;
-
-then every conversation no row names (both of the API's best-effort writes for it
-failed), once its newest checkpoint is that old; and then the old rows that belong to
-no conversation: blocked first messages, and older runs saved without one.
-
-```bash
-make purge ARGS=--dry-run   # count what a pass would delete; delete nothing
-make purge                  # run one pass
-```
-
-The log line carries counts and the cutoff, never a thread id, session id or message
-text: `purge: cutoff=...` when everything the pass found went, `purge incomplete:
-cutoff=...` (and exit code 1) when part of it failed, such as one conversation. The
-exit code is 1 too when the pass couldn't run. In production, a Container Apps Job
-runs the pass daily at 03:00 UTC, and an alert fires when a day goes by without a
-`purge: cutoff=` line (`docs/superpowers/specs/2026-10-14-retention-purge-design.md`,
-§8).
-
-The job runs its own image, under a quarter the size of the app's (275 MB against 1.2 GB
-locally): the same Python base, and only pyproject's `purge` dependency group (settings,
-psycopg, LangGraph's Postgres checkpointer) at the versions `uv.lock` pins for the app,
-minus the packages those require that a pass never loads (the Dockerfile's
-`purge-builder` stage lists them). Build both from the same commit:
-
-```bash
-docker build --build-arg TARGET_NAME=luismonbo-com -t harness:<sha> .                       # the app
-docker build --build-arg TARGET_NAME=luismonbo-com --target purge -t harness-purge:<sha> .  # the job
-```
-
-Its entrypoint is `python -m harness.cli.purge`, so `--dry-run` is the only argument a
-run needs. `tests/unit/test_purge_image_dependencies.py` fails when a pass imports a
-package the group doesn't install.
-
-To run it by hand against production, set `HARNESS_CHECKPOINTER=postgres`,
-`HARNESS_CHECKPOINTER_URL`, `HARNESS_RETENTION_DAYS=30` and `HARNESS_AUTH_ENABLED=false`
-in the environment of that one command: `.env` values beat the target file, so
-`HARNESS_TARGET` alone isn't enough on a machine with a `.env`.
-
----
+| Variable | Default | |
+|---|---|---|
+| `HARNESS_LLM_BACKEND` | `fake` | `openai_compatible` (LiteLLM, llama.cpp, vLLM) or `azure` |
+| `HARNESS_AGENT` | `default` | the entry agent's folder under `src/harness/agents/` |
+| `HARNESS_CHECKPOINTER` | `sqlite` | `memory`, `sqlite` or `postgres`: threads and the run store |
+| `HARNESS_API_KEY` | none | required while `HARNESS_AUTH_ENABLED` is `true`, the default |
+| `HARNESS_INPUT_GUARD_ENABLED` | `true` | needs `HARNESS_AZURE_ENDPOINT`; turn it off for local use |
 
 ## Roadmap
 
-- [x] ReAct agent, tools, short-term memory, tracing, FastAPI
-- [x] Azure embeddings stub + pgvector `LongTermMemory` protocol
-- [x] React + TypeScript frontend (SSE streaming, cancel)
-- [x] **LangGraph `StateGraph` runtime + checkpointer**
-- [x] **HITL approval gate (`interrupt` / `resume`)**
-- [x] **RAG ingestion** — docling/markitdown parsing, LLM-normalized schema,
-      structure-aware chunking, dual pgvector + Milvus Lite vector stores
-- [x] **RAG retrieval + grounded generation**, RAG eval harness (recall@k, MRR,
-      faithfulness, answer relevancy)
-- [x] Token streaming (`LLMClient.stream()`)
-- [x] **Multi-provider models** — LiteLLM proxy, `resolve_model()` precedence hierarchy
-- [x] **Model picker + thread sidebar** — `GET /models`, `GET /threads`, transcript reload
-- [ ] Full HITL UI (approve button, editable args)
-- [x] **Postgres storage** — checkpointer and run store on one pool; Neon in production
-- [ ] Multi-agent: supervisor + specialized sub-agents
-- [ ] Verify gate (post-execution fact-checking)
-- [ ] RAG Phase 2 (hybrid retrieval, reranking, enforced idempotent re-ingestion,
-      groundedness checking, citations) and Phase 3 (agentic retrieval)
-- [ ] Tool-level model pins (`resolve_model` supports `tool_pin`; no consumer yet)
+- Multi-agent delegation: the entry agent calls specialized sub-agents as tools.
+- Retrieval, phase 2: hybrid search, reranking, contextual chunks and citations, then RAG on the
+  production Postgres.
+- Scaling past one replica: the rate limiter and the one-run-per-thread claim keep their state in
+  memory, so both need a shared store first.
+- The retrieval eval and the frontend's tests and type-check in CI (they run locally today).
+- Jailbreak and abuse checks in the input guard.
+
+## License
+
+[Apache License 2.0](LICENSE). Copyright 2026 Luis Monge.

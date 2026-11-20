@@ -15,7 +15,7 @@ WORKDIR /app
 # Dependencies first, in their own layer, so code-only changes below don't
 # invalidate the install. --no-dev leaves out the dependency group that holds
 # pytest, ruff and mypy. No extras are named: every runtime dependency is in the
-# base [project] table, and the optional `dev` and `docling` extras stay out.
+# base [project] table, and the optional `docling` extra stays out.
 COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev --no-install-project

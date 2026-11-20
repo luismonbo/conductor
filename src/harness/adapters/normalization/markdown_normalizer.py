@@ -24,7 +24,8 @@ class MarkdownNormalizer:
     ) -> list[NormalizedDocument]:
         sections: list[DocumentSection] = []
         title = ""
-        cur_title, cur_level, cur_lines = "", 0, []
+        cur_title, cur_level = "", 0
+        cur_lines: list[str] = []
 
         def flush() -> None:
             text = "\n".join(cur_lines).strip()

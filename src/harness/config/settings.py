@@ -114,7 +114,7 @@ class Settings(BaseSettings):
     max_iterations: int = 8
     # Visitor turns the model sees; 0 = the whole thread. The checkpoint keeps
     # every message either way (orchestration/loop.py _window).
-    context_turns: int = Field(10, ge=0)
+    context_turns: int = Field(default=10, ge=0)
 
     # Long-term memory is a single shared store with no per-visitor partition,
     # so remember/recall must stay off on any public deployment. Default-safe;
@@ -160,7 +160,7 @@ class Settings(BaseSettings):
     # guard limits' "off at 0" convention); otherwise harness.cli.purge deletes
     # older ones (docs/superpowers/specs/2026-10-14-retention-purge-design.md). The
     # public site's target sets 30, as its privacy page says.
-    retention_days: int = Field(0, ge=0)
+    retention_days: int = Field(default=0, ge=0)
 
     # Input guard (SL-2) — see docs/superpowers/specs/2026-09-27-input-guard-design.md.
     # input_guard_enabled gates only the Microsoft-Decision-1 checks and fails
@@ -173,10 +173,10 @@ class Settings(BaseSettings):
     # The deployment's name, not the model's. Thresholds are calibrated against
     # one model version, so pin the version on the deployment (no auto-upgrade).
     guard_deployment: str = "Decision-1"
-    guard_timeout_seconds: float = Field(3.0, gt=0)
-    max_message_chars: int = Field(2000, ge=0)
-    max_output_tokens: int = Field(1500, ge=0)  # per LLM call
-    daily_token_budget: int = Field(33000, ge=0)  # all visitors per UTC day: monthly quota / 30
+    guard_timeout_seconds: float = Field(default=3.0, gt=0)
+    max_message_chars: int = Field(default=2000, ge=0)
+    max_output_tokens: int = Field(default=1500, ge=0)  # per LLM call
+    daily_token_budget: int = Field(default=33000, ge=0)  # all visitors per UTC day: monthly quota / 30
 
     @field_validator("log_level", mode="before")
     @classmethod

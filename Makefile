@@ -45,6 +45,6 @@ ingest:
 
 # One retention pass against HARNESS_CHECKPOINTER: deletes the conversations older
 # than HARNESS_RETENTION_DAYS (does nothing at 0). `make purge ARGS=--dry-run` only
-# counts. Logs counts, never thread ids. See the README's "Retention purge".
+# counts. Logs counts, never thread ids. See src/harness/cli/purge.py.
 purge:
 	uv run python -m harness.cli.purge $(ARGS)
