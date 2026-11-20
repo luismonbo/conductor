@@ -3,6 +3,7 @@ name = "agent-harness"
 version = "0.1.0"
 description = "Production AI agent harness with swappable model/memory backends"
 requires-python = ">=3.13"
+license = "Apache-2.0"
 dependencies = [
     "fastapi",
     "uvicorn[standard]",
