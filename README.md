@@ -65,9 +65,10 @@ library and the harness itself, so anything behind a port is swapped by configur
   and all visitors together by a daily token budget derived from the provider's monthly quota.
 - **Input guard.** Microsoft-Decision-1 screens every message for prompt extraction, requests for
   private information and off-topic use before the agent sees it, with thresholds calibrated on
-  labeled cases. By design a classifier error lets the message through, so the chat's
-  availability never depends on the classifier; the fixed limits still apply. Refusals come in the
-  visitor's language, from a fixed table no model writes.
+  labeled cases. It fails closed: when it cannot decide (the classifier fails or leaves a check
+  out, or the daily budget cannot be read), the message is refused, so the chat answers only
+  messages it could check. Refusals come in the visitor's language, from a fixed table no model
+  writes.
 - **Egress filter.** Everything a browser receives passes [egress.py](src/harness/security/egress.py),
   deny by default: an exception never becomes browser text, tool arguments and results stay on
   the server unless the deployment allows them (an approval card shows the call it asks about),
