@@ -5,14 +5,17 @@ docs/superpowers/specs/2026-09-27-input-guard-design.md). It does no I/O of
 its own besides the classifier call: the API layer gathers everything else
 into a GuardContext.
 
-Fails open: any classifier failure lets the message through, because the
-chatbot's availability must never depend on the classifier. The fixed limits
-still apply. Cancellation is never swallowed.
+Fails closed: when the guard cannot decide (the classifier call failed, or it
+left a check out), the message is refused with the "unavailable" sentence and
+never reaches the agent. The chat is available only when its messages can be
+checked (the owner's call, 2026-11-20). Cancellation is never swallowed.
 
 The same request asks the visitor's language, and every refusal comes in it. A
-limit that refuses first still asks the language questions alone, with the
-message's first LANGUAGE_ONLY_MESSAGE_CHARS characters; when that request
-fails, the refusal is English.
+language question the classifier leaves out counts as 0, so a bad language
+answer costs at most the refusal's language, never a check. A limit that
+refuses first still asks the language questions alone, with the message's
+first LANGUAGE_ONLY_MESSAGE_CHARS characters; when that request fails, the
+refusal is English.
 """
 from __future__ import annotations
 
@@ -219,20 +222,20 @@ class InputGuard:
         # One request carries the checks and the language questions.
         questions = (*self._checks, *self._language_questions.values())
         result, error, latency_ms = await self._ask(
-            classifier, _state(ctx), questions, on_failure="failing open"
+            classifier, _state(ctx), questions, on_failure="refusing"
         )
         if result is None:
-            return _fallback(error or "unknown", latency_ms)
+            return self._unavailable(error or "unknown", latency_ms)
 
+        scores, language = self._language(result.probabilities)
         missing = [c.id for c in self._checks if c.id not in result.probabilities]
         if missing:
-            logger.error("input guard: classifier omitted %s; failing open", missing)
-            return _fallback("MissingProbability", latency_ms)
+            logger.error("input guard: classifier omitted %s; refusing", missing)
+            return self._unavailable("MissingProbability", latency_ms, language)
 
         fired = next(
             (c for c in self._checks if result.probabilities[c.id] >= c.threshold), None
         )
-        scores, language = self._language(result.probabilities)
         return GuardDecision(
             allowed=fired is None,
             stage="classifier",
@@ -246,6 +249,20 @@ class InputGuard:
             input_tokens=result.input_tokens,
             language=language,
             language_probabilities=scores,
+        )
+
+    def _unavailable(
+        self, error: str, latency_ms: int | None, language: Language = DEFAULT_LANGUAGE
+    ) -> GuardDecision:
+        """The refusal when the guard cannot decide: the message never reaches the agent."""
+        return GuardDecision(
+            allowed=False,
+            stage="fallback",
+            reason="guard_unavailable",
+            refusal=self._refusal("unavailable", language),
+            latency_ms=latency_ms,
+            error=error,
+            language=language,
         )
 
 
@@ -270,16 +287,6 @@ def _state(ctx: GuardContext) -> dict[str, str]:
         "previous_assistant_reply": _previous_reply_tail(ctx),
         "visitor_message": ctx.message,
     }
-
-
-def _fallback(error: str, latency_ms: int) -> GuardDecision:
-    return GuardDecision(
-        allowed=True,
-        stage="fallback",
-        reason="guard_unavailable",
-        latency_ms=latency_ms,
-        error=error,
-    )
 
 
 def _elapsed_ms(started: float) -> int:

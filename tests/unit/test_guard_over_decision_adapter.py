@@ -77,6 +77,27 @@ async def test_a_bad_language_answer_still_lets_the_checks_refuse(bad):
     assert (decision.language, decision.refusal) == ("it", visitor_text("not_shareable", "it"))
 
 
+@pytest.mark.parametrize(
+    "left_out",
+    [("off_topic",), ("extraction", "private_info", "off_topic")],
+    ids=["one-check", "every-check"],
+)
+async def test_a_check_answer_left_out_refuses(left_out):
+    answers = {
+        qid: answer
+        for qid, answer in {**_all_low(), "language_es": _p(0.95)}.items()
+        if qid not in left_out
+    }
+    guard, _ = _guard(answers)
+
+    decision = await guard.screen(_ctx("hola"))
+
+    assert (decision.allowed, decision.stage, decision.reason, decision.error) == (
+        False, "fallback", "guard_unavailable", "MissingProbability",
+    )
+    assert decision.refusal == visitor_text("unavailable", "es")
+
+
 async def test_a_limit_refusal_keeps_the_language_when_another_language_answer_is_bad():
     # language_fr left out
     answers = {"language_es": _p(0.01), "language_it": _p(0.02), "language_de": _p(0.93)}

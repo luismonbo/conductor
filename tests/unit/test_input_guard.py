@@ -1,4 +1,4 @@
-"""InputGuard policy: limits first, then the classifier, then thresholds; fails open."""
+"""InputGuard policy: limits first, then the classifier, then thresholds; fails closed."""
 from __future__ import annotations
 
 import asyncio
@@ -225,7 +225,7 @@ async def test_no_classifier_or_a_failed_one_means_english():
     assert (await failing.screen(_ctx())).language == "en"
 
 
-# --- fail open ------------------------------------------------------------------
+# --- fail closed ----------------------------------------------------------------
 
 class _SlowClassifier(FakeClassifier):
     async def classify(self, state, checks):
@@ -234,42 +234,60 @@ class _SlowClassifier(FakeClassifier):
 
 
 class _PartialClassifier(FakeClassifier):
+    """Answers exactly the probabilities it was given and leaves every other question out."""
+
+    def __init__(self, probabilities: dict[str, float]) -> None:
+        super().__init__()
+        self._given = dict(probabilities)
+
     async def classify(self, state, checks):
         return ClassifierResult(
-            probabilities={"first": 0.1}, model="m", request_id=None, input_tokens=0
+            probabilities=self._given, model="m", request_id=None, input_tokens=0
         )
 
 
-async def test_timeout_fails_open():
+async def test_timeout_refuses():
     decision = await _guard(_SlowClassifier(), timeout=0.01).screen(_ctx())
     assert (decision.allowed, decision.stage, decision.reason, decision.error) == (
-        True, "fallback", "guard_unavailable", "TimeoutError",
+        False, "fallback", "guard_unavailable", "TimeoutError",
     )
+    assert (decision.refusal, decision.language) == (visitor_text("unavailable"), "en")
 
 
 @pytest.mark.parametrize(
     "misconfigured,level", [(False, logging.WARNING), (True, logging.ERROR)]
 )
-async def test_classifier_error_fails_open_and_logs_by_severity(caplog, misconfigured, level):
+async def test_a_classifier_error_refuses_and_logs_by_severity(caplog, misconfigured, level):
     error = GuardClassifierError("boom", cause="HTTP401", misconfigured=misconfigured)
     with caplog.at_level(logging.WARNING, logger="harness.security.input_guard"):
         decision = await _guard(FakeClassifier(error=error)).screen(_ctx())
     assert (decision.allowed, decision.stage, decision.error) == (
-        True, "fallback", "HTTP401",
+        False, "fallback", "HTTP401",
     )
     assert caplog.records[-1].levelno == level
 
 
-async def test_unexpected_error_fails_open():
+async def test_an_unexpected_error_refuses():
     decision = await _guard(FakeClassifier(error=KeyError("bug"))).screen(_ctx())
-    assert (decision.allowed, decision.stage, decision.error) == (True, "fallback", "KeyError")
+    assert (decision.allowed, decision.stage, decision.error) == (False, "fallback", "KeyError")
 
 
-async def test_missing_probability_fails_open():
-    decision = await _guard(_PartialClassifier()).screen(_ctx())
-    assert (decision.allowed, decision.stage, decision.error) == (
-        True, "fallback", "MissingProbability",
+async def test_a_check_left_out_refuses_in_the_language_found():
+    decision = await _guard(_PartialClassifier({"first": 0.1, "language_fr": 0.9})).screen(_ctx())
+    assert (decision.allowed, decision.stage, decision.reason, decision.error) == (
+        False, "fallback", "guard_unavailable", "MissingProbability",
     )
+    assert (decision.refusal, decision.language) == (visitor_text("unavailable", "fr"), "fr")
+
+
+async def test_a_language_question_left_out_counts_as_zero_while_the_checks_decide():
+    # A review gap (devlog 040): no test pinned a language the classifier left out.
+    decision = await _guard(
+        _PartialClassifier({"first": 0.9, "second": 0.1, "language_it": 0.95})
+    ).screen(_ctx())
+    assert (decision.allowed, decision.reason, decision.language) == (False, "first", "it")
+    assert decision.refusal == visitor_text("not_shareable", "it")
+    assert decision.language_probabilities == {"language_it": 0.95}
 
 
 async def test_cancellation_is_never_swallowed():

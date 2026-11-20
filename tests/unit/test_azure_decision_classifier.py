@@ -344,7 +344,8 @@ async def test_an_error_names_the_service_code_and_never_the_visitor_message():
 
 @pytest.mark.parametrize("value", [0, 0.0, 1, 1.0], ids=["int-0", "float-0", "int-1", "float-1"])
 async def test_the_probability_bounds_are_valid_answers(value):
-    # A saturated hazard scores exactly 1.0: rejecting it would fail open on the worst messages.
+    # A saturated hazard scores exactly 1.0: rejecting it would leave the check out on the
+    # worst messages.
     result = await _classifier(_Service(_answers(a=value))).classify({}, [CHECK_A])
 
     assert result.probabilities == {"a": float(value)}

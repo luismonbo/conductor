@@ -53,8 +53,8 @@ class GuardDecision:
     """The outcome of screening one message.
 
     stage is "precap" (a fixed limit fired), "classifier" (the classifier
-    answered), "fallback" (the classifier failed, so the message was let
-    through), or "none" (nothing was evaluated: no classifier, no limit hit).
+    answered), "fallback" (the guard could not decide, so the message was
+    refused), or "none" (nothing was evaluated: no classifier, no limit hit).
 
     language is the visitor's language as the classifier judged it, English
     when it did not answer. It and language_probabilities are never stored or
