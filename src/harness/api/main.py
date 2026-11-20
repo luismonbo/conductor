@@ -107,6 +107,7 @@ async def _visitor_session(
 app.state.limiter = limiter
 
 
+@app.exception_handler(RateLimitExceeded)
 async def _rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:
     """429 body reshaped to this API's {"detail": ...} convention (matching the
     404 on GET /threads/{id} and other existing error responses), rather than
@@ -133,8 +134,6 @@ async def _rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONR
         headers={"Retry-After": "60"},
     )
 
-
-app.add_exception_handler(RateLimitExceeded, _rate_limit_handler)
 
 # thread_id -> (session_id of the visitor whose run holds the thread, that run's
 # task, or None while the run is being set up). See _claim_thread.

@@ -34,6 +34,8 @@ def _render(page: WikiPage) -> str:
 
 
 class ReadWikiIndexTool:
+    requires_approval = False
+
     def __init__(self, wiki: Wiki) -> None:
         self._wiki = wiki
 
@@ -50,6 +52,8 @@ class ReadWikiIndexTool:
 
 
 class ReadWikiPageTool:
+    requires_approval = False
+
     def __init__(self, wiki: Wiki) -> None:
         self._wiki = wiki
 

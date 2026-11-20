@@ -77,12 +77,15 @@ markers = [
 line-length = 90
 src = ["src"]
 
+[tool.ruff.lint.per-file-ignores]
+# Run as a script: its sys.path fix has to come before the imports it makes work.
+"evaluation/run_eval.py" = ["E402"]
+
 [tool.mypy]
 mypy_path = "src"
 packages = ["harness"]
-# Relaxed for now: the existing scaffold carries pre-existing type debt
-# (bare generics, an untyped eval helper, optional deps without stubs).
-# Tighten back toward strict in a dedicated cleanup pass later.
+# Not strict, in two ways: a function may go unannotated (its body is still
+# checked), and a package without type information is treated as Any.
 check_untyped_defs = true
 ignore_missing_imports = true
 

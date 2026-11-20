@@ -37,6 +37,8 @@ def _safe_eval(node: ast.AST) -> float:
 
 
 class CalculatorTool:
+    requires_approval = False
+
     @property
     def spec(self) -> ToolSpec:
         return ToolSpec(

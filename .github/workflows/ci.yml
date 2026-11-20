@@ -40,5 +40,11 @@ jobs:
           python-version: "3.13"
           enable-cache: true
 
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Type-check
+        run: uv run mypy
+
       - name: Run pytest
         run: uv run pytest -q

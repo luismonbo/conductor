@@ -17,6 +17,8 @@ _DEFAULT_K = 3
 
 
 class RecallTool:
+    requires_approval = False
+
     def __init__(self, memory: LongTermMemory) -> None:
         self._memory = memory
 
