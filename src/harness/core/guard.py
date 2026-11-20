@@ -42,7 +42,7 @@ class GuardCheck(GuardQuestion):
 
 @dataclass(frozen=True)
 class ClassifierResult:
-    probabilities: Mapping[str, float]  # question id -> P(yes)
+    probabilities: Mapping[str, float]  # question id -> P(yes), for the questions answered
     model: str  # the versioned model id that answered
     request_id: str | None
     input_tokens: int
@@ -94,7 +94,8 @@ class GuardClassifier(Protocol):
     async def classify(
         self, state: Mapping[str, str], questions: Sequence[GuardQuestion]
     ) -> ClassifierResult:
-        """P(yes) for every question, or raise. Never returns partial results."""
+        """P(yes) for each question answered with a usable probability; the others
+        are left out. Raises when the call fails or nothing usable came back."""
         ...
 
     async def aclose(self) -> None: ...

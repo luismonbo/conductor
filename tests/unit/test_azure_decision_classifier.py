@@ -2,16 +2,18 @@
 from __future__ import annotations
 
 import json
+import logging
 import threading
 
 import httpx
 import pytest
 
 from harness.adapters.guard.azure_decision import AzureDecisionClassifier
-from harness.core.guard import Criterion, GuardCheck, GuardClassifierError
+from harness.core.guard import Criterion, GuardCheck, GuardClassifierError, GuardQuestion
 
 ENDPOINT = "https://foundry.example"
 URL = "https://foundry.example/providers/microsoft/v1/systemone"
+ADAPTER_LOG = "harness.adapters.guard.azure_decision"
 
 CHECK_A = GuardCheck(
     id="a",
@@ -25,6 +27,8 @@ CHECK_B = GuardCheck(
     id="b", question="Is it B?", yes=Criterion("y"), no=Criterion("n"),
     threshold=0.7, refusal="r",
 )
+# A question that never blocks, as the language questions are.
+QUESTION_C = GuardQuestion(id="c", question="Is it C?", yes=Criterion("y"), no=Criterion("n"))
 
 
 class _Service:
@@ -174,13 +178,66 @@ async def test_exactly_one_credential_is_required(auth):
         await client.aclose()
 
 
-async def test_a_check_the_service_did_not_answer_is_misconfigured():
-    service = _Service(_answers(a=0.1))
+async def test_a_question_the_service_did_not_answer_is_left_out(caplog):
+    service = _Service(_answers(a=0.1, zz=0.9))  # zz was never asked
+    with caplog.at_level(logging.WARNING, logger=ADAPTER_LOG):
+        result = await _classifier(service).classify({}, [CHECK_A, CHECK_B])
+
+    assert result.probabilities == {"a": 0.1}
+    assert "b (MissingAnswer)" in caplog.text
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        '{"type": "noul"}',
+        '{"noul": "high", "type": "noul"}',
+        '{"noul": 1.5, "type": "noul"}',
+        '{"noul": -0.1, "type": "noul"}',
+        '{"noul": true, "type": "noul"}',
+        '{"noul": NaN, "type": "noul"}',
+        "null",
+        "[0.9]",
+    ],
+    ids=["no-probability", "string", "above-1", "negative", "boolean", "nan", "null", "list"],
+)
+async def test_an_answer_without_a_usable_probability_is_left_out(caplog, answer):
+    # Raw JSON, so the reply can carry NaN.
+    body = '{"answers": {"a": {"noul": 0.2, "type": "noul"}, "b": ' + answer + "}}"
+    reply = httpx.Response(200, content=body.encode(), headers={"content-type": "application/json"})
+    with caplog.at_level(logging.WARNING, logger=ADAPTER_LOG):
+        result = await _classifier(_Service(reply)).classify({}, [CHECK_A, CHECK_B])
+
+    assert result.probabilities == {"a": 0.2}
+    assert "b (InvalidResponse)" in caplog.text
+
+
+async def test_one_warning_names_every_answer_left_out_and_never_the_message(caplog):
+    reply = httpx.Response(200, json={"answers": {
+        "a": {"noul": 0.2, "type": "noul"},
+        "c": {"noul": "my private question", "type": "noul"},
+    }})
+    with caplog.at_level(logging.WARNING, logger=ADAPTER_LOG):
+        await _classifier(_Service(reply)).classify(
+            {"visitor_message": "my private question"}, [CHECK_A, CHECK_B, QUESTION_C]
+        )
+
+    assert len([r for r in caplog.records if r.levelno == logging.WARNING]) == 1
+    assert "b (MissingAnswer)" in caplog.text and "c (InvalidResponse)" in caplog.text
+    assert "my private question" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    "answers,cause",
+    [({}, "MissingAnswer"), ({"a": {"type": "noul"}}, "InvalidResponse")],
+    ids=["none-answered", "first-malformed-rest-missing"],
+)
+async def test_a_reply_with_no_usable_answer_still_fails_the_call(answers, cause):
+    service = _Service(httpx.Response(200, json={"answers": answers}))
     with pytest.raises(GuardClassifierError) as info:
         await _classifier(service).classify({}, [CHECK_A, CHECK_B])
 
-    assert info.value.cause == "MissingAnswer"
-    assert info.value.misconfigured is True
+    assert (info.value.cause, info.value.misconfigured) == (cause, True)
 
 
 @pytest.mark.parametrize("status", [400, 401, 403, 404, 422])
