@@ -1,32 +1,35 @@
 # Conductor
 
 [![CI](https://github.com/luismonbo/conductor/actions/workflows/ci.yml/badge.svg)](https://github.com/luismonbo/conductor/actions/workflows/ci.yml)
+[![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
 An agent harness: the platform an AI agent runs on, with its model access, tools, memory, human
-approvals, evaluations and deployment. Built on LangGraph and FastAPI, it runs the public
-assistant on [luismonbo.com](https://luismonbo.com).
+approvals, evaluations and deployment. Built on LangGraph and FastAPI, it has run the public
+assistant on [luismonbo.com](https://luismonbo.com) since October 2026.
 
 ## Architecture
 
 ```text
-Browser ──► luismonbo.com/api/* ──► Cloudflare Worker: adds the API key, sets X-Visitor-IP
-                                        │
-                                        ▼
-                     FastAPI on Azure Container Apps: key check, per-visitor rate limit, input guard
-                                        │
-                                        ▼
-                     LangGraph loop: call_model → approval_gate → execute_tools → call_model …
-                       ├─ model:     Azure OpenAI with a managed identity (a LiteLLM proxy locally)
-                       ├─ state:     Postgres on Neon, checkpoints and run store (SQLite locally)
-                       └─ knowledge: a wiki read from a private Blob container at startup
-                                        │
-                                        ▼
-                     egress filter ──► SSE events back to the browser
+Browser
+  │ luismonbo.com/api/*
+  ▼
+Cloudflare Worker   adds the API key and sets X-Visitor-IP; the page holds no secret
+  │
+  ▼
+FastAPI             key check, per-visitor rate limit, input guard
+  │                 (Azure Container Apps)
+  ▼
+LangGraph loop      call_model → approval_gate → execute_tools → call_model …
+  │                 · model: Azure OpenAI with a managed identity (LiteLLM locally)
+  │                 · state: Postgres on Neon for checkpoints and runs (SQLite locally)
+  │                 · knowledge: a wiki loaded from private Blob storage at startup
+  ▼
+egress filter       deny by default, then SSE events back to the browser
 ```
 
 Dependencies point inward: `api → orchestration → agents → adapters → core`. `core/` holds the
-ports and types (LLM, tools, memory, RAG, guard, wiki) and imports no framework, SDK or adapter,
-so anything behind a port is swapped by configuration.
+ports and types (LLM, tools, memory, RAG, guard, wiki) and imports nothing outside the standard
+library and the harness itself, so anything behind a port is swapped by configuration.
 
 ## Design decisions
 
@@ -56,15 +59,15 @@ so anything behind a port is swapped by configuration.
 - **The key never reaches a browser.** The page calls `luismonbo.com/api/*`, where a Cloudflare
   Worker adds the shared API key and sets `X-Visitor-IP`. The API trusts that header only on a
   request that carries the valid key, so any proxy that injects the key must set or strip it.
-- **Per-visitor limits.** Rate limits key on the visitor's address (an IPv6 address as its /64):
-  15 a minute on the routes that call the model, 60 elsewhere, and the limiter's key is never
-  logged. Messages are capped in length, each model call in output tokens, and all visitors
-  together by a daily token budget derived from the provider's monthly quota.
+- **Per-visitor limits and a cost ceiling.** Rate limits key on the visitor's address (an IPv6
+  address as its /64): 15 a minute on the routes that call the model, 60 elsewhere, and the
+  limiter's key is never logged. Messages are capped in length, each model call in output tokens,
+  and all visitors together by a daily token budget derived from the provider's monthly quota.
 - **Input guard.** Microsoft-Decision-1 screens every message for prompt extraction, requests for
-  private information and off-topic use before the agent sees it. Its thresholds are calibrated on
-  labeled cases. A classifier error lets the message through, so availability never depends on
-  it, and the fixed limits still apply. Refusals come in the visitor's language, from a fixed
-  table no model writes.
+  private information and off-topic use before the agent sees it, with thresholds calibrated on
+  labeled cases. By design a classifier error lets the message through, so the chat's
+  availability never depends on the classifier; the fixed limits still apply. Refusals come in the
+  visitor's language, from a fixed table no model writes.
 - **Egress filter.** Everything a browser receives passes [egress.py](src/harness/security/egress.py),
   deny by default: an exception never becomes browser text, tool arguments and results stay on
   the server unless the deployment allows them, and an unknown event type is dropped.
@@ -75,6 +78,9 @@ so anything behind a port is swapped by configuration.
 - **Least privilege.** The app reaches the model and the wiki with its managed identity, and its
   secrets come from the Container App's environment, never from the committed target file.
   Checkpoints deserialize only an explicit list of types.
+- **Observable without a vendor.** Every run is recorded with its agent, backend, timing, stop
+  reason, tokens and iterations, and every guard decision with its probabilities;
+  [scripts/db.py](scripts/db.py) reads both.
 
 ## Evaluation and testing
 
@@ -86,7 +92,7 @@ so anything behind a port is swapped by configuration.
   relevancy.
 - [run_guard_eval.py](evaluation/run_guard_eval.py) calibrates the input guard; it is rerun
   whenever the website agent's prompt changes.
-- Datasets and thresholds are committed; reports stay local.
+- Datasets and pass thresholds are committed; run reports are not.
 
 About 1,200 tests (unit, integration, contract and graph scenarios) need no network and no
 credentials: `uv run pytest -q`, or `make test` with the frontend's. CI runs ruff, mypy and the
@@ -112,9 +118,11 @@ The full stack, with real models through the LiteLLM proxy, Postgres and the cha
 and pnpm:
 
 ```bash
-cp .env.example .env   # set HARNESS_API_KEY and HARNESS_INPUT_GUARD_ENABLED=false; uncomment the LiteLLM block
+cp .env.example .env   # set HARNESS_API_KEY and HARNESS_INPUT_GUARD_ENABLED=false, then uncomment
+                       # the LiteLLM block and add a provider key (or pull the Ollama models)
 make up                # Postgres and the LiteLLM proxy
-make api & make web    # the API on :8000 and the chat UI (run `pnpm -C frontend install` once)
+make api               # the API on :8000
+make web               # in a second terminal: the chat UI (after `pnpm -C frontend install`)
 ```
 
 ## Layout
@@ -155,7 +163,11 @@ ones to know first:
 - Multi-agent delegation: the entry agent calls specialized sub-agents as tools.
 - Retrieval, phase 2: hybrid search, reranking, contextual chunks and citations, then RAG on the
   production Postgres.
-- More than one replica: the rate limiter and the one-run-per-thread claim keep their state in
-  memory today.
-- The retrieval eval and the frontend's checks in CI.
+- Scaling past one replica: the rate limiter and the one-run-per-thread claim keep their state in
+  memory, so both need a shared store first.
+- The retrieval eval and the frontend's tests and type-check in CI (they run locally today).
 - Jailbreak and abuse checks in the input guard.
+
+## License
+
+[Apache License 2.0](LICENSE). Copyright 2026 Luis Monge.
