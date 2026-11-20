@@ -290,6 +290,21 @@ async def test_a_language_question_left_out_counts_as_zero_while_the_checks_deci
     assert decision.language_probabilities == {"language_it": 0.95}
 
 
+async def test_an_unreadable_budget_refuses_without_asking_the_classifier():
+    fake = FakeClassifier()
+    guard = _guard(fake, limits=GuardLimits(daily_token_budget=100))
+    decision = await guard.screen(_ctx(tokens_today=None))
+    assert (decision.allowed, decision.stage, decision.reason, decision.error) == (
+        False, "fallback", "guard_unavailable", "TokensUnavailable",
+    )
+    assert decision.refusal == visitor_text("unavailable")
+    assert fake.calls == []
+
+
+async def test_an_unreadable_budget_changes_nothing_when_the_budget_is_off():
+    assert (await _guard(FakeClassifier()).screen(_ctx(tokens_today=None))).allowed
+
+
 async def test_cancellation_is_never_swallowed():
     """A client disconnect must cancel the request, never turn into an allow."""
     with pytest.raises(asyncio.CancelledError):

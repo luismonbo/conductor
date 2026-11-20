@@ -56,7 +56,7 @@ async def broken_store(request) -> AsyncIterator[RunStore]:
     """A store whose every query fails: its connection, or its whole pool, is closed.
 
     Its one run is finished with tokens, so a healthy store would answer tokens_since
-    with 15: a 0 is the store failing open, not the answer for a run still in flight.
+    with 15: anything else is the store's failure, not the answer for a run in flight.
     """
     async with AsyncExitStack() as stack:
         broken = await _open(request.param, stack)
@@ -161,10 +161,10 @@ async def test_a_message_with_a_nul_character_still_gets_its_decision_row(store)
     assert decision_id is not None
 
 
-async def test_a_failing_store_fails_closed_on_ownership_and_open_on_limits(broken_store):
+async def test_a_failing_store_fails_closed_on_ownership_and_limits(broken_store):
     assert await broken_store.owns_thread(SID_A, "mine") is False
     day_ago = datetime.now(timezone.utc) - timedelta(days=1)
-    assert await broken_store.tokens_since(day_ago) == 0
+    assert await broken_store.tokens_since(day_ago) is None
     assert await broken_store.list_threads(SID_A) == []
 
 

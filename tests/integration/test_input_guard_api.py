@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import httpx2
 import pytest
@@ -121,6 +122,20 @@ async def test_a_classifier_failure_refuses_and_is_recorded(guarded):
     assert guarded.llm.calls == []
     assert await _decision_rows() == [
         (0, "fallback", "guard_unavailable", None, None, "hi", "HTTP503")
+    ]
+
+
+async def test_a_budget_the_store_cannot_read_refuses(guarded, monkeypatch):
+    guarded.install(limits=GuardLimits(daily_token_budget=1000))
+    store = await _main._get_run_store()
+    monkeypatch.setattr(store, "tokens_since", AsyncMock(return_value=None))
+    frames = sse_frames(await guarded.client.post("/chat/stream", json={"message": "hi"}))
+    assert (frames[-1]["text"], frames[-1]["stopped_reason"]) == (
+        visitor_text("unavailable"), "blocked",
+    )
+    assert guarded.llm.calls == []
+    assert await _decision_rows() == [
+        (0, "fallback", "guard_unavailable", None, None, "hi", "TokensUnavailable")
     ]
 
 

@@ -75,7 +75,9 @@ class GuardContext:
     message: str
     system_prompt: str
     previous_reply: str | None = None  # full text; trimmed to the tail here
-    tokens_today: int = 0  # input + output tokens recorded since UTC midnight
+    # Input + output tokens recorded since UTC midnight; None when the run store
+    # could not read them.
+    tokens_today: int | None = 0
 
 
 @dataclass(frozen=True)
@@ -120,6 +122,9 @@ class InputGuard:
         return self._limits
 
     async def screen(self, ctx: GuardContext) -> GuardDecision:
+        if self._limits.daily_token_budget and ctx.tokens_today is None:
+            # The budget cannot be checked, so the message is refused.
+            return self._unavailable("TokensUnavailable", None)
         limit = _limit_hit(ctx, self._limits)
         if limit is not None:
             return await self._refuse_at_limit(ctx, limit)
@@ -267,8 +272,12 @@ class InputGuard:
 
 
 def _limit_hit(ctx: GuardContext, limits: GuardLimits) -> TextKey | None:
-    """The limit this message hits, named as its refusal, or None."""
-    if limits.daily_token_budget and ctx.tokens_today >= limits.daily_token_budget:
+    """The limit this message hits, named as its refusal, or None.
+
+    An unreadable budget (tokens_today None) never gets here: screen refuses it.
+    """
+    tokens = ctx.tokens_today
+    if limits.daily_token_budget and tokens is not None and tokens >= limits.daily_token_budget:
         return "daily_budget"
     if limits.max_message_chars and len(ctx.message) > limits.max_message_chars:
         return "message_too_long"

@@ -273,11 +273,11 @@ class PostgresRunStore:
             logger.exception("RunStore.record_guard_decision failed")
             return None
 
-    async def tokens_since(self, since: datetime) -> int:
+    async def tokens_since(self, since: datetime) -> int | None:
         """Input + output tokens of runs started at or after `since`.
 
-        Compared as timestamps, so the session's TimeZone doesn't matter. 0 on
-        error, so the daily budget fails open.
+        Compared as timestamps, so the session's TimeZone doesn't matter. None on
+        error, so the guard refuses the message: the daily budget fails closed.
         """
         try:
             async with self._pool.connection() as conn:
@@ -286,7 +286,7 @@ class PostgresRunStore:
             return int(row["tokens"]) if row else 0
         except Exception:
             logger.exception("RunStore.tokens_since failed")
-            return 0
+            return None
 
     async def stale_threads(self, cutoff: datetime) -> list[str]:
         require_aware(cutoff)
