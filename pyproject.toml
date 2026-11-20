@@ -31,9 +31,9 @@ dependencies = [
     "certifi>=2026.10.19",
     "slowapi>=0.1.10",
     "httpx>=0.28.1",
-    "langchain-azure-storage>=1.2.1",
     "langgraph-checkpoint-postgres>=3.2.0",
     "psycopg-pool>=3.3.3",
+    "azure-storage-blob>=12.31.0",
 ]
 
 [project.optional-dependencies]
