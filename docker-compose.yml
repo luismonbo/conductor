@@ -22,9 +22,6 @@ services:
       # run store, and the pgvector RAG store.
       HARNESS_CHECKPOINTER_URL: postgresql://harness:harness@postgres:5432/harness
       HARNESS_PGVECTOR_URL: postgresql://harness:harness@postgres:5432/harness
-      LANGFUSE_PUBLIC_KEY: "${LANGFUSE_PUBLIC_KEY:-}"
-      LANGFUSE_SECRET_KEY: "${LANGFUSE_SECRET_KEY:-}"
-      LANGFUSE_HOST: "${LANGFUSE_HOST:-https://cloud.langfuse.com}"
     volumes:
       - "./data:/app/data"   # collection manifests, and Milvus Lite if a target uses it
     command: ["uvicorn", "harness.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--app-dir", "src", "--proxy-headers", "--forwarded-allow-ips=172.28.0.0/24"]
@@ -97,14 +94,6 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
-
-  # Langfuse tracing runs against Langfuse Cloud (see .env.example), not a
-  # local container. Self-hosting would pull in ClickHouse/Redis/MinIO for a
-  # tool only one person (or a few site visitors) uses, and the official
-  # ClickHouse image also hit an unresolved first-boot bootstrap race on this
-  # machine (see docs/devlog/009). Tracing stays optional either way (blank
-  # LANGFUSE_* keys = no-op); self-host config is recoverable from git
-  # history if data residency ever requires it.
 
   # ollama:                      # runs natively on the host (menu-bar app);
   #   image: ollama/ollama:latest  # uncomment only if you prefer containerized

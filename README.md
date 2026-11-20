@@ -39,7 +39,6 @@ api ──► orchestration ──► agents ──► adapters ──► core
 | **React frontend** | Interrupt state UI: amber dot, "Waiting for approval", Reject button |
 | **RAG** | docling/markitdown ingestion → LLM-normalized sections → structure-aware chunks → pgvector + Milvus Lite; retrieval, grounded generation, and a RAG eval harness |
 | **Multi-provider models** | LiteLLM proxy fans one adapter out to Ollama/Anthropic/OpenAI/Gemini/DeepSeek by model name; `resolve_model()` precedence: tool pin > agent pin > UI picker > default |
-| **Langfuse Cloud tracing** | Trace grouping via LangChain callbacks, per-call `generation`/`tool` observations via `langfuse.openai` + explicit spans (neither the LLM call nor tool dispatch goes through LangChain itself) — a dead/misconfigured Langfuse never blocks chat |
 | **Threaded chat UI** | Model picker, thread sidebar with transcript reload (`GET /models`, `GET /threads`) |
 | **970 tests** | Unit, integration, contract, graph scenarios — all pass with zero credentials |
 
@@ -84,8 +83,8 @@ Local tools to inspect conversations, runs and the vector index live in `scripts
 
 ## Quick start
 
-Full local stack (LiteLLM proxy + Postgres — Langfuse is cloud-hosted, see
-Configuration below), then API and frontend each in their own terminal:
+Full local stack (LiteLLM proxy + Postgres), then API and frontend each in their
+own terminal:
 
 ```bash
 uv sync
@@ -108,7 +107,7 @@ make web    # Vite dev server
 `make up` validates `litellm_config.yaml` before starting anything, so a typo
 in a model profile fails fast instead of surfacing as an opaque proxy 400.
 
-Fallback — raw commands, no proxy/tracing, fake LLM, zero credentials:
+Fallback — raw commands, no proxy, fake LLM, zero credentials:
 ```bash
 export HARNESS_API_KEY=$(openssl rand -hex 32)
 export HARNESS_INPUT_GUARD_ENABLED=false   # the input guard fails closed without an Azure endpoint
@@ -154,7 +153,7 @@ uv run pytest -q   # 970 tests
 | `HARNESS_SESSION_COOKIE_SECURE` | `true` | `true` · `false` — marks the visitor `sid` cookie `Secure`, so browsers only send it over HTTPS; set `false` only for local development on a browser that does not treat `http://localhost` as a secure context |
 | `HARNESS_SESSION_COOKIE_PERSISTENT` | `true` | `true` · `false` — how long the visitor `sid` cookie lasts: `true` keeps it for a year, `false` sends it without a `Max-Age`, so the browser drops it when it closes (the public site's target sets `false`, as its privacy page says) |
 | `HARNESS_RETENTION_DAYS` | `0` | integer ≥ 0 — days a conversation is kept after its last message; `0` keeps everything. The daily purge (`make purge`, or the production job; see [Retention purge](#retention-purge)) deletes the checkpoints, `runs` and `guard_decisions` of older conversations (the public site's target sets `30`, as its privacy page says) |
-| `HARNESS_LOG_LEVEL` | `INFO` | `DEBUG` · `INFO` · `WARNING` · `ERROR` — level of the harness's own log lines (stderr); every other library stays at `WARNING`. Never set an SDK's own debug switch in production (`OPENAI_LOG=debug`, `LANGFUSE_DEBUG=true`), nor run uvicorn with `--log-level trace`: they log visitor messages, the `sid` cookie or the API key |
+| `HARNESS_LOG_LEVEL` | `INFO` | `DEBUG` · `INFO` · `WARNING` · `ERROR` — level of the harness's own log lines (stderr); every other library stays at `WARNING`. Never set an SDK's own debug switch in production (`OPENAI_LOG=debug`), nor run uvicorn with `--log-level trace`: they log visitor messages, the `sid` cookie or the API key |
 | `HARNESS_RATE_LIMIT_ENABLED` | `true` | `true` · `false` |
 | `HARNESS_RATE_LIMIT_STRICT` | `15/minute` | slowapi rate string; applies to LLM-invoking endpoints |
 | `HARNESS_RATE_LIMIT_DEFAULT` | `60/minute` | slowapi rate string; applies to all other rate-limited endpoints |
@@ -180,8 +179,6 @@ uv run pytest -q   # 970 tests
 | `HARNESS_WIKI_BLOB_PREFIX` | — | optional folder inside the container, e.g. `wiki/` |
 | `HARNESS_DEFAULT_MODEL` | — | LiteLLM profile name sent when no pin/override applies; supersedes `HARNESS_LLM_MODEL` when set |
 | `LITELLM_MASTER_KEY` | — | proxy auth; must equal `HARNESS_LLM_API_KEY` |
-| `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` | — | empty = tracing disabled, chat unaffected |
-| `LANGFUSE_HOST` | `https://cloud.langfuse.com` | Langfuse Cloud project (EU region; US: `https://us.cloud.langfuse.com`) |
 
 **Rate limiting and visitors.** The limiter keys on the connection's address as uvicorn sees it. In production a Cloudflare Worker holds `HARNESS_API_KEY`, adds it to every request and sets `X-Visitor-IP` to the visitor's address; the limiter then keys on that address, so each visitor gets their own limit instead of the whole internet sharing the platform ingress's address. The header is honored only on a request that carries the valid `HARNESS_API_KEY`; every other request is limited by its connection address. An IPv6 address counts as its /64, and a missing, malformed or repeated header counts as absent. Any proxy that injects the key must therefore own the header: set it to the real visitor's address, or strip it. Caddy and the dev-server proxies strip it, so behind them the limiter keys on whatever address uvicorn sees (with Caddy in the Compose stack, the caller's, taken from `X-Forwarded-For`). Neither the harness nor slowapi logs the limiter key (slowapi's own 429 line, which names it, is silenced), but uvicorn's access log prints the connection's address: on Container Apps that is the platform's proxy, in the Compose stack it is the caller.
 
@@ -296,10 +293,6 @@ was pinned for cost or capability reasons.
 - **Reusing a `postgres_data` volume from before this Makefile existed**: the
   `litellm` database only gets created by `create-databases.sql` on a *fresh*
   volume. Run `make init-dbs` once.
-- **Langfuse tracing not showing up**: it's Langfuse Cloud now (see Configuration),
-  not part of `make up` — `docker compose up -d postgres litellm` never touches it.
-  Blank `LANGFUSE_PUBLIC_KEY`/`SECRET_KEY` just no-ops tracing either way; chat
-  itself is unaffected.
 
 ---
 
@@ -397,7 +390,6 @@ in the environment of that one command: `.env` values beat the target file, so
       faithfulness, answer relevancy)
 - [x] Token streaming (`LLMClient.stream()`)
 - [x] **Multi-provider models** — LiteLLM proxy, `resolve_model()` precedence hierarchy
-- [x] **Langfuse Cloud tracing** — LangChain callbacks + `langfuse.openai` generation tracing + explicit tool spans, fire-and-forget
 - [x] **Model picker + thread sidebar** — `GET /models`, `GET /threads`, transcript reload
 - [ ] Full HITL UI (approve button, editable args)
 - [x] **Postgres storage** — checkpointer and run store on one pool; Neon in production

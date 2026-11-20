@@ -32,7 +32,6 @@ from harness.api.schemas import ChatRequest, ResumeRequest
 from harness.config.settings import get_settings
 from harness.core.llm.errors import ContentFiltered
 from harness.core.types import AgentEvent, Message, Role
-from harness.observability.langfuse_tracing import langfuse_configured
 from harness.observability.logging_setup import configure_logging
 from harness.observability.run_store import RunStore
 from harness.observability.token_accumulator import TokenAccumulator
@@ -41,11 +40,10 @@ from harness.security import egress
 from harness.security.input_guard import GuardContext, InputGuard
 from harness.security.visitor_text import VisitorLanguage, configured_language
 
-# Settings() reads HARNESS_-prefixed vars straight from .env itself, but the
-# readers that go through os.environ (the Langfuse keys, behind
-# langfuse_configured() and the SDK, and HARNESS_TARGET in get_settings()) need
-# the file loaded into the real process environment first — Docker's
-# env_file: only does this for the containerized api service, not `make api`.
+# Settings() reads HARNESS_-prefixed vars straight from .env itself, but
+# get_settings() reads HARNESS_TARGET through os.environ, which needs the file
+# loaded into the real process environment first — Docker's env_file: only does
+# this for the containerized api service, not `make api`.
 # override=False: a real shell export always wins over .env.
 load_dotenv(override=False)
 
@@ -382,36 +380,6 @@ async def thread_messages(request: Request, thread_id: str, _auth: None = Depend
 
 
 # ---------------------------------------------------------------------------
-# Observability
-# ---------------------------------------------------------------------------
-
-def _make_langfuse_handler() -> Any:
-    # Separate function so tests can stub construction failures.
-    from langfuse.langchain import CallbackHandler
-
-    return CallbackHandler()
-
-
-def _build_callbacks(thread_id: str, agent_name: str) -> tuple[list, dict]:
-    """Langfuse tracing config. Fire-and-forget: any failure returns empty.
-
-    The SDK reads LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY / LANGFUSE_HOST
-    from the environment itself; we only gate on their presence.
-    """
-    if not langfuse_configured():
-        return [], {}
-    try:
-        handler = _make_langfuse_handler()
-    except Exception:
-        logging.getLogger(__name__).exception("langfuse handler unavailable")
-        return [], {}
-    return [handler], {
-        "langfuse_session_id": thread_id,
-        "langfuse_tags": [agent_name],
-    }
-
-
-# ---------------------------------------------------------------------------
 # Shared SSE generator
 # ---------------------------------------------------------------------------
 
@@ -612,7 +580,6 @@ async def _start_chat(
     accumulator = TokenAccumulator()
     stopped_reason_holder: list[str] = ["unknown"]
     event_queue: asyncio.Queue[AgentEvent | None] = asyncio.Queue()
-    callbacks, lf_metadata = _build_callbacks(thread_id, agent_name)
     config = {
         "configurable": {
             "thread_id": thread_id,
@@ -622,9 +589,6 @@ async def _start_chat(
             # Found by the guard; English when it did not answer. Never stored.
             "visitor_language": VisitorLanguage(decision.language),
         },
-        "callbacks": callbacks,
-        "metadata": lf_metadata,
-        "run_name": "chat-response",
     }
     input_state = {
         "messages": [Message(role=Role.USER, content=req.message)],
@@ -693,7 +657,6 @@ async def _start_resume(
     accumulator = TokenAccumulator()
     stopped_reason_holder: list[str] = ["unknown"]
     event_queue: asyncio.Queue[AgentEvent | None] = asyncio.Queue()
-    callbacks, lf_metadata = _build_callbacks(thread_id, settings.agent)
     config = {
         "configurable": {
             "thread_id": thread_id,
@@ -701,9 +664,6 @@ async def _start_resume(
             "token_accumulator": accumulator,
             "stopped_reason_holder": stopped_reason_holder,
         },
-        "callbacks": callbacks,
-        "metadata": lf_metadata,
-        "run_name": "chat-resume",
     }
 
     run_store = await _get_run_store()

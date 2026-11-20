@@ -17,7 +17,6 @@ from typing import Any
 
 from harness.adapters.llm.openai_wire import _OpenAIBaseClient
 from harness.core.llm.tool_parsing import ToolCallParser
-from harness.observability.langfuse_tracing import langfuse_configured
 
 
 class AzureOpenAIClient(_OpenAIBaseClient):
@@ -36,10 +35,7 @@ class AzureOpenAIClient(_OpenAIBaseClient):
         client: Any | None = None,
     ) -> None:
         if client is None:
-            if langfuse_configured():
-                from langfuse.openai import AsyncAzureOpenAI
-            else:
-                from openai import AsyncAzureOpenAI
+            from openai import AsyncAzureOpenAI
 
             if api_key:
                 client = AsyncAzureOpenAI(
