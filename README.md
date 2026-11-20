@@ -70,7 +70,8 @@ library and the harness itself, so anything behind a port is swapped by configur
   visitor's language, from a fixed table no model writes.
 - **Egress filter.** Everything a browser receives passes [egress.py](src/harness/security/egress.py),
   deny by default: an exception never becomes browser text, tool arguments and results stay on
-  the server unless the deployment allows them, and an unknown event type is dropped.
+  the server unless the deployment allows them (an approval card shows the call it asks about),
+  and an unknown event type is dropped.
 - **Visitor data.** An anonymous random `sid` cookie (HttpOnly, Secure, a session cookie on the
   public site) scopes threads to their visitor. A daily Container Apps Job deletes conversations
   30 days after their last message, and an alert fires when a day passes without a clean run.
@@ -115,11 +116,15 @@ curl -N localhost:8000/chat/stream -H "Authorization: Bearer $HARNESS_API_KEY" \
 ```
 
 The full stack, with real models through the LiteLLM proxy, Postgres and the chat UI, needs Docker
-and pnpm:
+and pnpm. In `.env`, set `HARNESS_API_KEY` and `HARNESS_INPUT_GUARD_ENABLED=false`, uncomment the
+LiteLLM block, and set `HARNESS_DEFAULT_MODEL` to a profile you can run: `ollama-gemma` after
+`ollama pull gemma4:e2b`, or `claude`, `gpt`, `gemini-flash` or `deepseek-flash` with that
+provider's key. `.env.example` keeps the public site's limits, such as a 33,000-token daily budget
+for all visitors; `HARNESS_MAX_MESSAGE_CHARS`, `HARNESS_MAX_OUTPUT_TOKENS` and
+`HARNESS_DAILY_TOKEN_BUDGET` at `0` turn them off.
 
 ```bash
-cp .env.example .env   # set HARNESS_API_KEY and HARNESS_INPUT_GUARD_ENABLED=false, then uncomment
-                       # the LiteLLM block and add a provider key (or pull the Ollama models)
+cp .env.example .env   # then edit it as above
 make up                # Postgres and the LiteLLM proxy
 make api               # the API on :8000
 make web               # in a second terminal: the chat UI (after `pnpm -C frontend install`)
