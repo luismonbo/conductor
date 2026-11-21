@@ -4,8 +4,8 @@
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
 An agent harness: the platform an AI agent runs on, with its model access, tools, memory, human
-approvals, evaluations and deployment. Built on LangGraph and FastAPI, it has run the public
-assistant on [luismonbo.com](https://luismonbo.com) since October 2026.
+approvals, evaluations and deployment. Built on LangGraph and FastAPI, it runs the public
+assistant on [luismonbo.com](https://luismonbo.com).
 
 ## Architecture
 
@@ -163,16 +163,6 @@ ones to know first:
 | `HARNESS_CHECKPOINTER` | `sqlite` | `memory`, `sqlite` or `postgres`: threads and the run store |
 | `HARNESS_API_KEY` | none | required while `HARNESS_AUTH_ENABLED` is `true`, the default |
 | `HARNESS_INPUT_GUARD_ENABLED` | `true` | needs `HARNESS_AZURE_ENDPOINT`; turn it off for local use |
-
-## Roadmap
-
-- Multi-agent delegation: the entry agent calls specialized sub-agents as tools.
-- Retrieval, phase 2: hybrid search, reranking, contextual chunks and citations, then RAG on the
-  production Postgres.
-- Scaling past one replica: the rate limiter and the one-run-per-thread claim keep their state in
-  memory, so both need a shared store first.
-- The retrieval eval and the frontend's tests and type-check in CI (they run locally today).
-- Jailbreak and abuse checks in the input guard.
 
 ## License
 
