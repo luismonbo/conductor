@@ -100,7 +100,8 @@ library and the harness itself, so anything behind a port is swapped by configur
 - **Per-visitor limits and a cost ceiling.** Rate limits key on the visitor's address (an IPv6
   address as its /64): 15 a minute on the routes that call the model, 60 elsewhere, and the
   limiter's key is never logged. Messages are capped in length, each model call in output tokens,
-  and all visitors together by a daily token budget derived from the provider's monthly quota.
+  and all visitors together by a daily token budget: the provider's monthly quota divided by 30,
+  so one heavy day can't spend the month.
 - **Input guard.** Microsoft-Decision-1 screens every message for prompt extraction, requests for
   private information and off-topic use before the agent sees it, with thresholds calibrated on
   labeled cases. It fails closed: when it cannot decide (the classifier fails or leaves a check
