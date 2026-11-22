@@ -402,7 +402,10 @@ export function useChatStream() {
 
   const resumeStream = useCallback(
     async (decision: Record<string, unknown>, displayText = '') => {
-      if (!state.threadId) return;
+      // The answer names the card it answers: the server refuses it (409) once that
+      // card is no longer pending, so it never lands on the card after it.
+      const interruptId = state.interruptPayload?.interrupt_id;
+      if (!state.threadId || !interruptId) return;
 
       abortRef.current?.abort();
       const controller = new AbortController();
@@ -412,11 +415,11 @@ export function useChatStream() {
       dispatch({ type: 'SEND_USER_MESSAGE', text: displayText, assistantId });
 
       await _consumeStream(
-        resumeChat(state.threadId, decision, controller.signal),
+        resumeChat(state.threadId, interruptId, decision, controller.signal),
         state.threadId,
       );
     },
-    [state.threadId, _consumeStream],
+    [state.threadId, state.interruptPayload, _consumeStream],
   );
 
   const cancelStream = useCallback(() => {

@@ -14,6 +14,7 @@ from harness.security.input_guard import GuardContext, GuardLimits
 
 ENDPOINT = "https://foundry.example"
 CHECK_IDS = ("extraction", "private_info", "off_topic")
+LANGUAGE_IDS = ("language_es", "language_it", "language_fr", "language_de")
 
 
 @pytest.fixture(autouse=True)
@@ -41,11 +42,12 @@ class _Foundry:
 
     def handle(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
+        asked = json.loads(request.content)["questions"]
         return httpx.Response(
             200,
             json={
                 "model": "microsoft-decision-1",
-                "answers": {id_: {"noul": 0.0, "type": "noul"} for id_ in CHECK_IDS},
+                "answers": {id_: {"noul": 0.0, "type": "noul"} for id_ in asked},
                 "usage": {"input_tokens": 10, "output_tokens": 1},
             },
         )
@@ -68,13 +70,10 @@ def foundry(monkeypatch) -> _Foundry:
 
 def test_guard_off_builds_limits_only():
     guard = build_input_guard(_settings(
-        input_guard_enabled=False, max_message_chars=10, max_thread_turns=3,
-        daily_token_budget=500,
+        input_guard_enabled=False, max_message_chars=10, daily_token_budget=500,
     ))
     assert guard.classifier_enabled is False
-    assert guard.limits == GuardLimits(
-        max_message_chars=10, max_thread_turns=3, daily_token_budget=500
-    )
+    assert guard.limits == GuardLimits(max_message_chars=10, daily_token_budget=500)
 
 
 async def test_guard_on_with_a_resource_key_calls_the_decision_endpoint_tight(foundry):
@@ -93,7 +92,7 @@ async def test_guard_on_with_a_resource_key_calls_the_decision_endpoint_tight(fo
     body = json.loads(request.content)
     assert body["model"] == "my-decision"
     assert body["state"]["visitor_message"] == "hi"
-    assert set(body["questions"]) == set(CHECK_IDS)
+    assert set(body["questions"]) == set(CHECK_IDS) | set(LANGUAGE_IDS)
     assert foundry.client_kwargs["timeout"] == 2.5
     await guard.aclose()
 

@@ -34,6 +34,8 @@ def _cited_name(chunk: Chunk) -> str:
 
 
 class SearchDocumentsTool:
+    requires_approval = False
+
     def __init__(
         self,
         retriever: Retriever,

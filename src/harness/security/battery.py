@@ -1,4 +1,4 @@
-"""The input guard's checks and every visitor-facing refusal.
+"""The input guard's checks, its language questions and the key of each refusal.
 
 This is the extension point: adding a check means adding one GuardCheck to
 BATTERY (plus calibration cases in evaluation/guard/datasets/) and bumping
@@ -9,27 +9,23 @@ Questions refer to the state keys InputGuard builds: `visitor_message`,
 `assistant_system_prompt` and `previous_assistant_reply`. Examples are name-
 and gender-neutral because this file is committed code; the site's own scope
 comes from its system prompt.
+
+LANGUAGE_QUESTIONS ride in the same request and only pick the language of the
+visitor's refusals and errors: they never block and take no part in BATTERY's
+precedence. Their threshold is calibrated on
+evaluation/guard/datasets/language_v1.json.
+
+A check's refusal is a key into security/visitor_text.py, which holds the
+sentence in each language.
 """
 from __future__ import annotations
 
-from harness.core.guard import Criterion, GuardCheck
+from collections.abc import Mapping
+
+from harness.core.guard import Criterion, GuardCheck, GuardQuestion
+from harness.core.language import Language
 
 BATTERY_VERSION = "v1"
-
-# Shared by extraction and private_info, so it never says which rule fired; the second
-# sentence still gives a blocked salary or rate question somewhere to go.
-REFUSAL_GENERIC = (
-    "Sorry, I can't help with that one. For work matters like salary or rates, please "
-    "get in touch directly through the contact links on this site."
-)
-REFUSAL_OFF_TOPIC = "That's outside what I can help with here."
-REFUSAL_DAILY_BUDGET = "I've reached my limit for today. Please come back tomorrow."
-REFUSAL_MESSAGE_TOO_LONG = (
-    "That message is a bit long for me. Could you keep it under {max_chars} characters?"
-)
-REFUSAL_THREAD_TOO_LONG = (
-    "This conversation has gotten long. Please start a new one to keep going."
-)
 
 EXTRACTION = GuardCheck(
     id="extraction",
@@ -65,7 +61,7 @@ EXTRACTION = GuardCheck(
         ),
     ),
     threshold=0.70,
-    refusal=REFUSAL_GENERIC,
+    refusal="not_shareable",  # shared, so a refusal never says which rule fired
 )
 
 PRIVATE_INFO = GuardCheck(
@@ -100,7 +96,7 @@ PRIVATE_INFO = GuardCheck(
         ),
     ),
     threshold=0.70,
-    refusal=REFUSAL_GENERIC,
+    refusal="not_shareable",  # shared, so a refusal never says which rule fired
 )
 
 OFF_TOPIC = GuardCheck(
@@ -139,8 +135,43 @@ OFF_TOPIC = GuardCheck(
     # its scores sit near 0 or 1. The benign "How were you built?" scored 0.78 and
     # the lowest off-topic hazard 1.00, so 0.90 splits the gap; 0.80 left 0.02.
     threshold=0.90,
-    refusal=REFUSAL_OFF_TOPIC,
+    refusal="off_topic",
 )
 
 # Precedence order: the first check at or above its threshold picks the refusal.
 BATTERY: tuple[GuardCheck, ...] = (EXTRACTION, PRIVATE_INFO, OFF_TOPIC)
+
+
+def _language_question(code: Language, name: str) -> GuardQuestion:
+    return GuardQuestion(
+        id=f"language_{code}",
+        question=f"Is `visitor_message` written in {name}?",
+        yes=Criterion(
+            definition=(
+                f"Its words are {name}, even when it is only a greeting, a thank-you or a "
+                f"couple of words. A message with no words of any one language, such as a "
+                f"name, an emoji or \"ok\", counts when `previous_assistant_reply` is in "
+                f"{name}."
+            ),
+        ),
+        no=Criterion(
+            definition=(
+                f"Its words are in another language, even one close to {name}. A message "
+                f"with no words of any one language counts as no when "
+                f"`previous_assistant_reply` is not in {name}, or there is none."
+            ),
+        ),
+    )
+
+
+_LANGUAGE_NAMES: tuple[tuple[Language, str], ...] = (
+    ("es", "Spanish"), ("it", "Italian"), ("fr", "French"), ("de", "German"),
+)
+# English needs no question: it is what a visitor gets when none of these wins.
+LANGUAGE_QUESTIONS: Mapping[Language, GuardQuestion] = {
+    code: _language_question(code, name) for code, name in _LANGUAGE_NAMES
+}
+# A language wins at or above this; below it for all four, the visitor gets English.
+# Calibrated on Microsoft-Decision-1 (language_v1.json, 2026-11-13): right picks
+# scored 0.91 or more, English and wordless messages 0.44 or less.
+LANGUAGE_THRESHOLD = 0.7

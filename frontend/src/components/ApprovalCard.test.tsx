@@ -5,6 +5,7 @@ import type { ToolApprovalPayload } from '@/types';
 
 const singleToolPayload: ToolApprovalPayload = {
   mode: 'approval',
+  interrupt_id: 'interrupt-1',
   tool_calls: [
     { name: 'calculator', args: { expression: '2+2' }, call_id: 'c1' },
   ],
@@ -12,6 +13,7 @@ const singleToolPayload: ToolApprovalPayload = {
 
 const multiToolPayload: ToolApprovalPayload = {
   mode: 'approval',
+  interrupt_id: 'interrupt-2',
   tool_calls: [
     { name: 'read_file', args: { path: 'data.txt' }, call_id: 'c1' },
     { name: 'write_file', args: { path: 'out.txt', content: 'hi' }, call_id: 'c2' },

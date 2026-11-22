@@ -5,12 +5,19 @@
 (run_store/postgres.py: production). tests/contract/test_run_store.py holds both
 to the same behavior, failures included:
 - owns_thread returns False on any error: it gates access, so it fails closed.
-- count_thread_runs and tokens_since return 0, so the limits fail open.
+- tokens_since returns None, and the guard refuses the message: the daily budget
+  fails closed.
 - list_threads returns []; start_run, finish_run and record_guard_decision log
   and never raise (record_guard_decision returns None).
+- The retention methods (stale_threads, delete_thread_rows, count_unthreaded_before,
+  delete_unthreaded_before, unrecorded_threads) raise: the purge
+  (orchestration/retention.py) must not report a pass that deleted nothing as a
+  success. Those that take a cutoff refuse one with no time zone (ValueError, see
+  require_aware).
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
@@ -28,6 +35,25 @@ def storable_text(message: str) -> str:
     still leave its row. Both stores store the same text.
     """
     return message[:GUARD_MESSAGE_TEXT_CHARS].replace("\x00", "�")
+
+
+def require_aware(cutoff: datetime) -> None:
+    """Raise ValueError unless `cutoff` carries a time zone.
+
+    The stores compare it with UTC times: SQLite would read a naive one as the
+    machine's local time and Postgres in the session's TimeZone, shifting the
+    cutoff by that offset.
+    """
+    if cutoff.tzinfo is None or cutoff.utcoffset() is None:
+        raise ValueError("cutoff must be timezone-aware")
+
+
+@dataclass(frozen=True)
+class RowCounts:
+    """How many rows of each table a retention query counted or deleted."""
+
+    runs: int
+    guard_decisions: int
 
 
 class RunStore(Protocol):
@@ -63,8 +89,47 @@ class RunStore(Protocol):
         """Persist one input-guard decision; return its id, or None on failure."""
         ...
 
-    async def count_thread_runs(self, thread_id: str) -> int: ...
+    async def tokens_since(self, since: datetime) -> int | None:
+        """Input + output tokens of runs started at or after `since` (timezone-aware).
 
-    async def tokens_since(self, since: datetime) -> int:
-        """Input + output tokens of runs started at or after `since` (timezone-aware)."""
+        None when the store could not read them.
+        """
+        ...
+
+    # Retention (docs/superpowers/specs/2026-10-14-retention-purge-design.md). A
+    # thread's latest activity is the newest of its runs.started_at and
+    # guard_decisions.created_at: a blocked follow-up still means the visitor was
+    # there. All four raise on failure, and ValueError on a `cutoff` with no time zone.
+
+    async def stale_threads(self, cutoff: datetime) -> list[str]:
+        """Ids of the threads whose latest activity is before `cutoff`, oldest first."""
+        ...
+
+    async def delete_thread_rows(self, thread_id: str, cutoff: datetime) -> RowCounts:
+        """Delete the thread's runs and guard_decisions rows from before `cutoff`, in
+        one transaction.
+
+        Only those: a message that lands while a pass runs keeps its rows, so a later
+        pass still finds the thread and the checkpoints that message's turn writes.
+        """
+        ...
+
+    async def count_unthreaded_before(self, cutoff: datetime) -> RowCounts:
+        """Count the rows with no thread (blocked first messages, legacy runs) before `cutoff`."""
+        ...
+
+    async def delete_unthreaded_before(self, cutoff: datetime) -> RowCounts:
+        """Delete the rows count_unthreaded_before counts; return how many went."""
+        ...
+
+    async def unrecorded_threads(self) -> list[str]:
+        """Ids of the threads that have checkpoints but no runs or guard_decisions row.
+
+        The two writes that name a thread (start_run, record_guard_decision) are
+        best-effort, so a conversation whose two writes both failed has checkpoints
+        that stale_threads can't find. Reads LangGraph's `checkpoints` table, which
+        shares this store's database in sqlite and postgres modes
+        (orchestration/storage.py); [] where there is no such table (memory mode,
+        whose checkpoints MemorySaver keeps).
+        """
         ...

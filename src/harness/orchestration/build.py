@@ -54,6 +54,7 @@ def build_llm(settings: Settings, parser: ToolCallParser) -> LLMClient:
             parser=parser,
             api_key=settings.azure_api_key or None,
             max_output_tokens=settings.max_output_tokens,
+            reasoning_effort=settings.azure_reasoning_effort or None,
         )
     if settings.llm_backend == "openai_compatible":
         from harness.adapters.llm.openai_compatible import OpenAICompatibleClient
@@ -315,6 +316,7 @@ def build_agent(
         registry=definition.tools(build_tool_deps(settings, long_term)),
         system_prompt=definition.prompt,
         model_pin=definition.model,
+        context_turns=settings.context_turns,
     )
 
 
@@ -387,7 +389,6 @@ def build_input_guard(settings: Settings) -> InputGuard:
         classifier=classifier,
         limits=GuardLimits(
             max_message_chars=settings.max_message_chars,
-            max_thread_turns=settings.max_thread_turns,
             daily_token_budget=settings.daily_token_budget,
         ),
         timeout_seconds=settings.guard_timeout_seconds,

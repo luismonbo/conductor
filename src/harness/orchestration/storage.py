@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from harness.config.settings import Settings
+from harness.core.types import CHECKPOINT_TYPES
 from harness.observability.run_store import RunStore
 
 # Annotations only, so importing this module (and with it orchestration.build) does
@@ -26,6 +27,7 @@ from harness.observability.run_store import RunStore
 # opener imports its own saver when it runs.
 if TYPE_CHECKING:
     from langgraph.checkpoint.base import BaseCheckpointSaver
+    from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
     _Opened = tuple[BaseCheckpointSaver, RunStore]
 
@@ -57,12 +59,31 @@ async def _sqlite_run_store(path: str, stack: AsyncExitStack) -> RunStore:
     return store
 
 
+def _checkpoint_serde() -> JsonPlusSerializer:
+    """The serializer every checkpointer uses: it rebuilds LangGraph's built-in safe
+    types and the harness's own (CHECKPOINT_TYPES), and nothing else a checkpoint names.
+
+    LangGraph's default rebuilds any type a checkpoint names, so write access to the
+    checkpoint tables becomes code execution on the next load (CVE-2026-28277). The
+    Dockerfile sets LANGGRAPH_STRICT_MSGPACK=true, which makes a compiled graph derive
+    this list from its state schema as well. The savers carry it regardless: strict mode
+    blocks reads outside a graph, and where the variable is unset (make api, scripts,
+    evaluation) it is the only allowlist, even inside the graph. A blocked type comes
+    back as a plain dict, so a type added to the graph state has to join
+    CHECKPOINT_TYPES too; test_checkpoint_serde.py checks that.
+    """
+    from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+
+    return JsonPlusSerializer(allowed_msgpack_modules=CHECKPOINT_TYPES)
+
+
 async def _open_memory(settings: Settings, stack: AsyncExitStack) -> _Opened:
     from langgraph.checkpoint.memory import MemorySaver
 
     # Thread ownership is checked against the run store in every mode, so memory
     # mode keeps one too: a database that lives exactly as long as its connection.
-    return MemorySaver(), await _sqlite_run_store(":memory:", stack)
+    checkpointer = MemorySaver(serde=_checkpoint_serde())
+    return checkpointer, await _sqlite_run_store(":memory:", stack)
 
 
 async def _open_sqlite(settings: Settings, stack: AsyncExitStack) -> _Opened:
@@ -71,7 +92,7 @@ async def _open_sqlite(settings: Settings, stack: AsyncExitStack) -> _Opened:
 
     conn = await aiosqlite.connect(settings.checkpointer_url)
     stack.push_async_callback(conn.close)
-    checkpointer = AsyncSqliteSaver(conn)
+    checkpointer = AsyncSqliteSaver(conn, serde=_checkpoint_serde())
     await checkpointer.setup()
     return checkpointer, await _sqlite_run_store(settings.checkpointer_url, stack)
 
@@ -84,7 +105,7 @@ async def _open_postgres(settings: Settings, stack: AsyncExitStack) -> _Opened:
 
     pool = await open_pool(settings.checkpointer_url)
     stack.push_async_callback(pool.close)
-    checkpointer = AsyncPostgresSaver(pool)
+    checkpointer = AsyncPostgresSaver(pool, serde=_checkpoint_serde())
     # LangGraph's own migrations, recorded in checkpoint_migrations, so a later
     # version upgrades its tables on the next start.
     await checkpointer.setup()

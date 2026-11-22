@@ -8,6 +8,7 @@ describe('describeHttpError', () => {
     [429, "You're sending messages too quickly. Please wait a minute and try again."],
     [413, 'That message is too long. Please shorten it.'],
     [404, 'That conversation has expired. Your next message will start a new one.'],
+    [409, 'This conversation is busy or has changed elsewhere. Reopen it from the sidebar to see where it stands.'],
     [500, 'The assistant is unavailable right now. Please try again later.'],
     [401, 'The assistant is unavailable right now. Please try again later.'],
   ])('maps %i to a sentence', (status, sentence) => {

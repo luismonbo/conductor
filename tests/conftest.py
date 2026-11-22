@@ -1,12 +1,23 @@
 """Suite-wide test defaults."""
 from __future__ import annotations
 
+import os
+
+# Run the suite as production runs: LangGraph loads only its built-in safe types and the
+# ones a graph's state declares (the Dockerfile sets the same variable). LangGraph reads
+# the variable when it is first imported, so this comes before every other import, and
+# pytest imports this file before the conftests below it (tests/integration/conftest.py
+# imports the API, which loads LangGraph). test_checkpoint_serde.py fails if it stops
+# taking effect.
+os.environ.setdefault("LANGGRAPH_STRICT_MSGPACK", "true")
+
 import functools
 import logging
-import os
+import types
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from urllib.parse import quote
 
 import psycopg
@@ -130,3 +141,22 @@ def postgres_dsn() -> Iterator[str]:
     """A DSN on the test Postgres, in a schema of this test's own."""
     with postgres_schema() as dsn:
         yield dsn
+
+
+# --- Run store clock -----------------------------------------------------------
+
+
+@pytest.fixture
+def run_store_clock(monkeypatch):
+    """Every row the run stores write takes run_store_clock.now as its time.
+
+    Starts at 2026-10-01 12:00 UTC; a test moves it by assigning .now. The retention
+    tests use it to write rows that are already old.
+    """
+    import harness.observability.run_store.postgres as postgres_store
+    import harness.observability.run_store.sqlite as sqlite_store
+
+    clock = types.SimpleNamespace(now=datetime(2026, 10, 1, 12, 0, tzinfo=timezone.utc))
+    for module in (sqlite_store, postgres_store):
+        monkeypatch.setattr(module, "_now", lambda: clock.now)
+    return clock

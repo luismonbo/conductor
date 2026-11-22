@@ -8,7 +8,7 @@ import {
   threadMessagesToConversation,
 } from '@/hooks/useChatStream';
 import type { ChatState } from '@/hooks/useChatStream';
-import type { AgentEvent } from '@/types';
+import type { AgentEvent, InterruptPayload } from '@/types';
 
 function withStreamingAssistant(): ChatState {
   return chatReducer(initialState, {
@@ -75,6 +75,29 @@ describe('LOAD_THREAD / NEW_THREAD', () => {
     );
     expect(state.threadId).toBeNull();
     expect(state.messages).toEqual([]);
+  });
+});
+
+describe('approval reviews', () => {
+  const proposal = (proposed: string, call_id: string): InterruptPayload => ({
+    mode: 'memory_proposal', proposed, call_id, interrupt_id: `interrupt-${call_id}`,
+  });
+
+  it('the next review of a turn replaces the card of the one just answered', () => {
+    // A turn can hold several reviews: each resumed stream ends on the next one.
+    let state = withStreamingAssistant();
+    state = chatReducer(state, { type: 'STREAM_INTERRUPT', payload: proposal('likes tea', 'c1') });
+    // Answering a card resumes the run with no user text (resumeStream).
+    state = chatReducer(state, { type: 'SEND_USER_MESSAGE', text: '', assistantId: 'assist-2' });
+    state = chatReducer(state, {
+      type: 'STREAM_INTERRUPT', payload: proposal('lives in Rome', 'c2'),
+    });
+
+    const cards = state.messages.flatMap((m) =>
+      m.role === 'assistant' && m.interruptPayload ? [[m.id, m.interruptPayload]] : [],
+    );
+    expect(cards).toEqual([['assist-2', proposal('lives in Rome', 'c2')]]);
+    expect(state.streamStatus).toBe('interrupted');
   });
 });
 

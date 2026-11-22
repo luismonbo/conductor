@@ -87,7 +87,10 @@ async def test_a_thread_id_with_nul_is_a_quiet_404(postgres_client, caplog):
     responses = [
         await postgres_client.post("/chat/stream", json={"message": "hi", "thread_id": forged}),
         await postgres_client.get(f"/threads/{in_path}"),
-        await postgres_client.post(f"/resume/{in_path}", json={"decision": {"approved": False}}),
+        await postgres_client.post(
+            f"/resume/{in_path}",
+            json={"interrupt_id": "any", "decision": {"approved": False}},
+        ),
     ]
 
     assert [(r.status_code, r.json()) for r in responses] == [

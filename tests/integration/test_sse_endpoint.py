@@ -216,11 +216,12 @@ async def test_hitl_resume_approved_produces_final(monkeypatch, tmp_path):
             f"Expected interrupt in first stream; got: {[e.get('type') for e in events1]}"
         )
         thread_id = events1[0]["thread_id"]
+        interrupt_id = events1[-1]["args"]["interrupt_id"]
 
         events2 = []
         async with client.stream(
             "POST", f"/resume/{thread_id}",
-            json={"decision": {"approved": True}},
+            json={"interrupt_id": interrupt_id, "decision": {"approved": True}},
             timeout=10.0,
         ) as response:
             async for line in response.aiter_lines():
@@ -280,11 +281,12 @@ async def test_hitl_resume_rejected_agent_recovers(monkeypatch, tmp_path):
             f"Expected interrupt in first stream; got: {[e.get('type') for e in events1]}"
         )
         thread_id = events1[0]["thread_id"]
+        interrupt_id = events1[-1]["args"]["interrupt_id"]
 
         events2 = []
         async with client.stream(
             "POST", f"/resume/{thread_id}",
-            json={"decision": {"approved": False}},
+            json={"interrupt_id": interrupt_id, "decision": {"approved": False}},
             timeout=10.0,
         ) as response:
             async for line in response.aiter_lines():

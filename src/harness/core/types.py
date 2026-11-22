@@ -37,6 +37,13 @@ class ToolCall:
     arguments: dict[str, Any]
 
 
+# The types LangGraph's checkpointer stores and loads back: the graph state holds a list
+# of Message, and a Message holds a Role and ToolCalls. The savers built in
+# orchestration/storage.py and the readers in scripts/_stores.py allow exactly these,
+# so add a type here when it joins the graph state.
+CHECKPOINT_TYPES: tuple[type, ...] = (Message, Role, ToolCall)
+
+
 @dataclass(frozen=True)
 class ToolResult:
     tool_call_id: str
@@ -95,7 +102,7 @@ class AgentResult:
 @dataclass(frozen=True)
 class AgentEvent:
     """A single streaming event emitted during an agent run, serialized to SSE."""
-    type: str  # "token" | "tool_call" | "tool_result" | "interrupt" | "final" | "error" | "thinking" (handle_rejection only)
+    type: str  # "token" | "tool_call" | "tool_result" | "interrupt" | "final" | "error" | "thinking"
     text: str = ""
     name: str = ""
     args: dict[str, Any] = field(default_factory=dict)

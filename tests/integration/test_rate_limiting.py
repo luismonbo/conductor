@@ -248,7 +248,9 @@ async def test_the_429_line_names_the_route_template_not_the_thread_id(monkeypat
         statuses = [
             (
                 await client.post(
-                    f"/resume/{thread_id}", json={"decision": {"approved": True}}, timeout=10.0
+                    f"/resume/{thread_id}",
+                    json={"interrupt_id": "any", "decision": {"approved": True}},
+                    timeout=10.0,
                 )
             ).status_code
             for _ in range(16)

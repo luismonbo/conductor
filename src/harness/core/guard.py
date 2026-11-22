@@ -11,6 +11,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
+from harness.core.language import DEFAULT_LANGUAGE, Language
+
 
 @dataclass(frozen=True)
 class Criterion:
@@ -21,20 +23,26 @@ class Criterion:
 
 
 @dataclass(frozen=True)
-class GuardCheck:
-    """One yes/no question. Yes always means hazard."""
+class GuardQuestion:
+    """One yes/no question about a message, answered with P(yes)."""
 
     id: str
     question: str
     yes: Criterion
     no: Criterion
+
+
+@dataclass(frozen=True)
+class GuardCheck(GuardQuestion):
+    """A question that blocks. Yes always means hazard."""
+
     threshold: float  # block when P(yes) is at or above this
-    refusal: str  # what the visitor sees when this check blocks
+    refusal: str  # the key of what the visitor sees (security/visitor_text.py)
 
 
 @dataclass(frozen=True)
 class ClassifierResult:
-    probabilities: Mapping[str, float]  # check id -> P(yes)
+    probabilities: Mapping[str, float]  # question id -> P(yes), for the questions answered
     model: str  # the versioned model id that answered
     request_id: str | None
     input_tokens: int
@@ -45,14 +53,18 @@ class GuardDecision:
     """The outcome of screening one message.
 
     stage is "precap" (a fixed limit fired), "classifier" (the classifier
-    answered), "fallback" (the classifier failed, so the message was let
-    through), or "none" (nothing was evaluated: no classifier, no limit hit).
+    answered), "fallback" (the guard could not decide, so the message was
+    refused), or "none" (nothing was evaluated: no classifier, no limit hit).
+
+    language is the visitor's language as the classifier judged it, English
+    when it did not answer. It and language_probabilities are never stored or
+    logged; probabilities holds the checks' scores only.
     """
 
     allowed: bool
     stage: str
     reason: str | None = None
-    refusal: str | None = None
+    refusal: str | None = None  # the visitor's text, in `language`
     probabilities: Mapping[str, float] | None = None
     battery_version: str | None = None
     model: str | None = None
@@ -60,6 +72,8 @@ class GuardDecision:
     latency_ms: int | None = None
     input_tokens: int | None = None
     error: str | None = None
+    language: Language = DEFAULT_LANGUAGE
+    language_probabilities: Mapping[str, float] | None = None
 
 
 class GuardClassifierError(Exception):
@@ -78,9 +92,12 @@ class GuardClassifierError(Exception):
 
 class GuardClassifier(Protocol):
     async def classify(
-        self, state: Mapping[str, str], checks: Sequence[GuardCheck]
+        self, state: Mapping[str, str], questions: Sequence[GuardQuestion]
     ) -> ClassifierResult:
-        """P(yes) for every check, or raise. Never returns partial results."""
+        """P(yes) for each question answered with a usable probability (a finite
+        number in [0, 1]); the others are left out. Raises when the call fails or
+        nothing usable came back. InputGuard refuses a message whose check is left
+        out or scored outside [0, 1]."""
         ...
 
     async def aclose(self) -> None: ...

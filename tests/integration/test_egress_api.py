@@ -7,11 +7,13 @@ import httpx2
 
 import harness.api.main as _main
 import harness.orchestration.build as build_module
+from harness.adapters.guard.fake import FakeClassifier
 from harness.adapters.llm.fake import FakeLLMClient
 from harness.core.llm.errors import ContentFiltered
 from harness.core.types import LLMResponse, ToolCall
 from harness.observability.run_store.sqlite import SqliteRunStore
-from harness.security.egress import CONTENT_FILTERED_TEXT, UNAVAILABLE_TEXT
+from harness.security.input_guard import GuardLimits, InputGuard
+from harness.security.visitor_text import visitor_text
 from tests.integration.conftest import _TEST_API_KEY, sse_frames, thread_id_from
 
 _CALCULATE = LLMResponse(
@@ -89,7 +91,7 @@ async def test_a_failed_run_sends_the_generic_sentence_not_the_exception(client_
     response = await client.post("/chat/stream", json={"message": "hi"})
 
     assert sse_frames(response)[-1] == {
-        "type": "error", "text": UNAVAILABLE_TEXT, "name": "", "args": {}, "call_id": "",
+        "type": "error", "text": visitor_text("unavailable"), "name": "", "args": {}, "call_id": "",
         "is_error": False, "stopped_reason": "error",
     }
     assert "leaked" not in response.text
@@ -108,7 +110,7 @@ async def test_a_filtered_prompt_mid_run_reaches_the_browser_as_the_filter_sente
 
     frames = sse_frames(response)
     assert [f.get("type") for f in frames[1:]] == ["tool_call", "tool_result", "error"]
-    assert (frames[-1]["text"], frames[-1]["stopped_reason"]) == (CONTENT_FILTERED_TEXT, "content_filter")
+    assert (frames[-1]["text"], frames[-1]["stopped_reason"]) == (visitor_text("content_filter"), "content_filter")
     store = await _main._get_run_store()
     cursor = await store._conn.execute("SELECT stopped_reason FROM runs")
     assert await cursor.fetchall() == [("content_filter",)]
@@ -157,3 +159,19 @@ async def test_health_names_nothing_about_the_deployment(client_with_fake):
     client, _ = client_with_fake
 
     assert (await client.get("/health")).json() == {"status": "ok"}
+
+
+async def test_an_italian_run_stopped_by_the_content_filter_gets_the_italian_sentence(
+    client_with_fake, monkeypatch
+):
+    client, _ = client_with_fake
+    _main._input_guard = InputGuard(
+        FakeClassifier({"language_it": 0.99}), GuardLimits(), timeout_seconds=1.0
+    )
+    _use_llm(monkeypatch, _FailingLLM(ContentFiltered("prompt", ("violence",))))
+
+    frames = sse_frames(await client.post("/chat/stream", json={"message": "ciao"}))
+
+    assert (frames[-1]["text"], frames[-1]["stopped_reason"]) == (
+        visitor_text("content_filter", "it"), "content_filter",
+    )

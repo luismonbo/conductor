@@ -13,7 +13,7 @@ from psycopg.types.json import Jsonb
 
 from harness.adapters.postgres.pool import PostgresPool
 from harness.core.guard import GuardDecision
-from harness.observability.run_store import storable_text
+from harness.observability.run_store import RowCounts, require_aware, storable_text
 from harness.observability.token_accumulator import TokenAccumulator
 
 logger = logging.getLogger(__name__)
@@ -89,8 +89,6 @@ _OWNS_THREAD = (
     "SELECT 1 AS owned FROM runs WHERE thread_id = %s AND session_id = %s LIMIT 1"
 )
 
-_COUNT_THREAD_RUNS = "SELECT COUNT(*) AS runs FROM runs WHERE thread_id = %s"
-
 # Runs still in flight have NULL token counts and count as 0 until they finish.
 _TOKENS_SINCE = """
 SELECT COALESCE(SUM(COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0)), 0) AS tokens
@@ -103,6 +101,47 @@ INSERT INTO guard_decisions (
     probabilities, battery_version, model, request_id, latency_ms, input_tokens,
     error, message_chars, message_text
 ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+"""
+
+# Retention (RunStore's protocol says what each returns). A thread's latest activity
+# is the newest of its runs and guard_decisions rows; TIMESTAMPTZ compares instants,
+# so the session's TimeZone doesn't matter.
+_STALE_THREADS = """
+SELECT thread_id
+FROM (
+    SELECT thread_id, started_at AS at FROM runs WHERE thread_id IS NOT NULL
+    UNION ALL
+    SELECT thread_id, created_at AS at FROM guard_decisions WHERE thread_id IS NOT NULL
+) AS activity
+GROUP BY thread_id
+HAVING MAX(at) < %s
+ORDER BY MAX(at), thread_id
+"""
+
+_DELETE_THREAD_RUNS = "DELETE FROM runs WHERE thread_id = %s AND started_at < %s"
+_DELETE_THREAD_GUARD_DECISIONS = (
+    "DELETE FROM guard_decisions WHERE thread_id = %s AND created_at < %s"
+)
+
+_COUNT_UNTHREADED = """
+SELECT
+    (SELECT COUNT(*) FROM runs WHERE thread_id IS NULL AND started_at < %(cutoff)s) AS runs,
+    (SELECT COUNT(*) FROM guard_decisions
+     WHERE thread_id IS NULL AND created_at < %(cutoff)s) AS guard_decisions
+"""
+_DELETE_UNTHREADED_RUNS = "DELETE FROM runs WHERE thread_id IS NULL AND started_at < %s"
+_DELETE_UNTHREADED_GUARD_DECISIONS = (
+    "DELETE FROM guard_decisions WHERE thread_id IS NULL AND created_at < %s"
+)
+
+# `checkpoints` is LangGraph's table (AsyncPostgresSaver), in this same database.
+# to_regclass looks it up on the search_path, as an unqualified query would.
+_HAS_CHECKPOINTS = "SELECT to_regclass('checkpoints') IS NOT NULL AS present"
+_UNRECORDED_THREADS = """
+SELECT DISTINCT c.thread_id
+FROM checkpoints c
+WHERE NOT EXISTS (SELECT 1 FROM runs r WHERE r.thread_id = c.thread_id)
+  AND NOT EXISTS (SELECT 1 FROM guard_decisions g WHERE g.thread_id = c.thread_id)
 """
 
 
@@ -234,22 +273,11 @@ class PostgresRunStore:
             logger.exception("RunStore.record_guard_decision failed")
             return None
 
-    async def count_thread_runs(self, thread_id: str) -> int:
-        """Runs recorded on this thread. 0 on error, so the turn limit fails open."""
-        try:
-            async with self._pool.connection() as conn:
-                cur = await conn.execute(_COUNT_THREAD_RUNS, (thread_id,))
-                row = await cur.fetchone()
-            return int(row["runs"]) if row else 0
-        except Exception:
-            logger.exception("RunStore.count_thread_runs failed for thread_id=%s", thread_id)
-            return 0
-
-    async def tokens_since(self, since: datetime) -> int:
+    async def tokens_since(self, since: datetime) -> int | None:
         """Input + output tokens of runs started at or after `since`.
 
-        Compared as timestamps, so the session's TimeZone doesn't matter. 0 on
-        error, so the daily budget fails open.
+        Compared as timestamps, so the session's TimeZone doesn't matter. None on
+        error, so the guard refuses the message: the daily budget fails closed.
         """
         try:
             async with self._pool.connection() as conn:
@@ -258,4 +286,51 @@ class PostgresRunStore:
             return int(row["tokens"]) if row else 0
         except Exception:
             logger.exception("RunStore.tokens_since failed")
-            return 0
+            return None
+
+    async def stale_threads(self, cutoff: datetime) -> list[str]:
+        require_aware(cutoff)
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(_STALE_THREADS, (cutoff,))
+            return [row["thread_id"] for row in await cur.fetchall()]
+
+    async def delete_thread_rows(self, thread_id: str, cutoff: datetime) -> RowCounts:
+        require_aware(cutoff)
+        return await self._delete_both(
+            (_DELETE_THREAD_RUNS, _DELETE_THREAD_GUARD_DECISIONS), (thread_id, cutoff)
+        )
+
+    async def count_unthreaded_before(self, cutoff: datetime) -> RowCounts:
+        require_aware(cutoff)
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(_COUNT_UNTHREADED, {"cutoff": cutoff})
+            row = await cur.fetchone()
+        if row is None:  # two COUNTs always give one row; None would be a broken driver
+            raise RuntimeError("the count of rows with no thread returned no row")
+        return RowCounts(runs=int(row["runs"]), guard_decisions=int(row["guard_decisions"]))
+
+    async def delete_unthreaded_before(self, cutoff: datetime) -> RowCounts:
+        require_aware(cutoff)
+        return await self._delete_both(
+            (_DELETE_UNTHREADED_RUNS, _DELETE_UNTHREADED_GUARD_DECISIONS), (cutoff,)
+        )
+
+    async def unrecorded_threads(self) -> list[str]:
+        async with self._pool.connection() as conn:
+            found = await (await conn.execute(_HAS_CHECKPOINTS)).fetchone()
+            if found is None or not found["present"]:
+                return []
+            cur = await conn.execute(_UNRECORDED_THREADS)
+            return [row["thread_id"] for row in await cur.fetchall()]
+
+    async def _delete_both(self, statements: tuple[str, str], params: tuple) -> RowCounts:
+        """Run a runs DELETE and a guard_decisions DELETE as one transaction.
+
+        The pool's connections are autocommit (adapters/postgres/pool.py), so the
+        transaction is explicit: both go, or neither does.
+        """
+        runs_sql, decisions_sql = statements
+        async with self._pool.connection() as conn, conn.transaction():
+            runs = await conn.execute(runs_sql, params)
+            decisions = await conn.execute(decisions_sql, params)
+        return RowCounts(runs=runs.rowcount, guard_decisions=decisions.rowcount)

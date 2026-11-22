@@ -122,3 +122,19 @@ async def test_a_failed_build_closes_the_storage(monkeypatch, tmp_path, fixture_
     for conn in (storage.checkpointer.conn, storage.run_store._conn):
         with pytest.raises(ValueError, match="no active connection"):
             await conn.execute("select 1")
+
+
+async def test_build_agent_applies_the_settings_context_window(monkeypatch):
+    llm = _RecordingLLM()
+    monkeypatch.setattr(build_module, "build_llm", lambda s, parser: llm)
+    graph = build_module.build_agent(_settings(context_turns=1), MemorySaver())
+    history = [
+        Message(role=Role.USER, content="q1"),
+        Message(role=Role.ASSISTANT, content="a1"),
+        Message(role=Role.USER, content="q2"),
+    ]
+    await graph.ainvoke(
+        {"messages": history, "iteration": 0, "max_iterations": 2},
+        {"configurable": {"thread_id": "t", "event_queue": asyncio.Queue()}},
+    )
+    assert [m.content for m in llm.calls[0] if m.role == Role.USER] == ["q2"]

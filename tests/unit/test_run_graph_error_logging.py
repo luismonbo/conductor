@@ -7,7 +7,7 @@ import pytest
 
 from harness.api.main import _run_graph
 from harness.core.llm.errors import ContentFiltered
-from harness.security.egress import CONTENT_FILTERED_TEXT, UNAVAILABLE_TEXT
+from harness.security.visitor_text import VisitorLanguage, visitor_text
 
 
 class _RaisingGraph:
@@ -25,13 +25,13 @@ class _NullRunStore:
         pass
 
 
-async def _run(exc: Exception) -> tuple[list, list[str]]:
+async def _run(exc: Exception, config: dict | None = None) -> tuple[list, list[str]]:
     queue: asyncio.Queue = asyncio.Queue()
     stopped_reason = [""]
     await _run_graph(
         graph=_RaisingGraph(exc),
         invoke_arg={},
-        config={},
+        config=config or {},
         thread_id="t1",
         run_id="r1",
         event_queue=queue,
@@ -74,7 +74,7 @@ async def test_run_graph_sends_the_client_the_generic_sentence_never_the_excepti
 
     assert stopped_reason == ["error"]
     [error] = [e for e in events if e.type == "error"]
-    assert (error.text, error.stopped_reason) == (UNAVAILABLE_TEXT, "error")
+    assert (error.text, error.stopped_reason) == (visitor_text("unavailable"), "error")
 
 
 async def test_a_content_filter_hit_is_one_warning_line_and_its_own_sentence(caplog):
@@ -83,12 +83,26 @@ async def test_a_content_filter_hit_is_one_warning_line_and_its_own_sentence(cap
 
     assert stopped_reason == ["content_filter"]
     [error] = [e for e in events if e.type == "error"]
-    assert (error.text, error.stopped_reason) == (CONTENT_FILTERED_TEXT, "content_filter")
+    assert (error.text, error.stopped_reason) == (visitor_text("content_filter"), "content_filter")
     [record] = [r for r in caplog.records if r.name == "harness.api.main"]
     assert record.levelno == logging.WARNING
     assert record.exc_info is None  # expected, so no traceback
     message = record.getMessage()
     assert "jailbreak" in message and "t1" in message and "r1" in message
+
+
+async def test_a_failed_run_speaks_the_runs_language():
+    config = {"configurable": {"visitor_language": VisitorLanguage("fr")}}
+    events, _ = await _run(ValueError("boom"), config)
+    [error] = [e for e in events if e.type == "error"]
+    assert error.text == visitor_text("unavailable", "fr")
+
+
+async def test_a_run_with_no_language_fails_in_english():
+    # A resumed run's config carries no language.
+    events, _ = await _run(ContentFiltered("completion"), {"configurable": {}})
+    [error] = [e for e in events if e.type == "error"]
+    assert error.text == visitor_text("content_filter")
 
 
 async def test_a_cancelled_run_still_says_cancelled():

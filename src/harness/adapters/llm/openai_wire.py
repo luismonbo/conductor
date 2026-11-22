@@ -20,15 +20,6 @@ from harness.core.llm.errors import ContentFiltered
 from harness.core.llm.tool_parsing import ToolCallParser
 from harness.core.types import LLMResponse, Message, Role, ToolCall, ToolSpec
 
-# The graph's LangChain CallbackHandler only sees LangGraph's own node-level
-# spans — it has no visibility into a plain async function's raw SDK call.
-# `langfuse.openai` closes that gap by patching AsyncOpenAI/AsyncAzureOpenAI
-# in place so `chat.completions.create()` itself becomes a `generation`
-# observation (model, tokens, cost), nested under the active trace. The
-# patch is process-wide and permanent once imported, so callers below only
-# use `langfuse_configured()` to decide whether to import it at all —
-# keeping credential-free test runs from ever touching langfuse.
-
 
 def message_to_wire(msg: Message) -> dict[str, Any]:
     """Translate a core Message into the OpenAI chat wire format."""
@@ -171,16 +162,27 @@ class _OpenAIBaseClient(LLMClient):
         parser: ToolCallParser,
         temperature: float,
         max_output_tokens: int = 0,
+        reasoning_effort: str | None = None,
     ) -> None:
         self._client = client
         self._model_id = model_id
         self._parser = parser
         self._temperature = temperature
         self._max_output_tokens = max_output_tokens  # 0 = no limit sent
+        self._reasoning_effort = reasoning_effort  # None = not sent
 
     @property
     def model_id(self) -> str:
         return self._model_id
+
+    def _optional_params(self) -> dict[str, Any]:
+        """The request parameters sent only when configured, for generate() and stream()."""
+        params: dict[str, Any] = {}
+        if self._max_output_tokens:
+            params[self._OUTPUT_LIMIT_PARAM] = self._max_output_tokens
+        if self._reasoning_effort:
+            params["reasoning_effort"] = self._reasoning_effort
+        return params
 
     async def generate(
         self,
@@ -197,8 +199,7 @@ class _OpenAIBaseClient(LLMClient):
         if tools:
             kwargs["tools"] = [spec_to_wire(s) for s in tools]
             kwargs["tool_choice"] = "auto"
-        if self._max_output_tokens:
-            kwargs[self._OUTPUT_LIMIT_PARAM] = self._max_output_tokens
+        kwargs.update(self._optional_params())
         completion = await _create_completion(self._client, kwargs)
         return parse_completion(completion)
 
@@ -220,8 +221,7 @@ class _OpenAIBaseClient(LLMClient):
             kwargs["tool_choice"] = "auto"
 
         kwargs["stream_options"] = {"include_usage": True}
-        if self._max_output_tokens:
-            kwargs[self._OUTPUT_LIMIT_PARAM] = self._max_output_tokens
+        kwargs.update(self._optional_params())
 
         text_acc: list[str] = []
         tc_acc: dict[int, dict] = {}  # chunk index → accumulated data

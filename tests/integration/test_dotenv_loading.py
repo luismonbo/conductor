@@ -1,8 +1,8 @@
 """main.py must load .env into the real process environment on import.
 
 Settings() reads HARNESS_-prefixed keys straight from the file itself, but
-_build_callbacks() reads LANGFUSE_* directly via os.environ.get() — those
-keys only become visible if something loads the file into os.environ first.
+get_settings() reads HARNESS_TARGET directly via os.environ.get() — it only
+becomes visible if something loads the file into os.environ first.
 Docker's env_file: only does this for the containerized api service; `make
 api` (bare uvicorn) has no other mechanism.
 
@@ -41,14 +41,14 @@ def _run_import(tmp_path: Path, src_path: str, extra_env: dict) -> subprocess.Co
     # frame-walking path production does, not the cwd-fallback for -c/REPL.
     runner = tmp_path / "run.py"
     runner.write_text(
-        "import pkg.mod\nimport os\nprint(os.environ.get('LANGFUSE_HOST', ''))\n"
+        "import pkg.mod\nimport os\nprint(os.environ.get('HARNESS_TARGET', ''))\n"
     )
-    # Strip LANGFUSE_HOST inherited from the parent pytest process — earlier
+    # Strip HARNESS_TARGET inherited from the parent pytest process — earlier
     # tests importing pymilvus (which calls load_dotenv() itself) can leave
     # the real repo's .env values sitting in this process's os.environ, and
     # override=False would then preserve that stale value over the fake
     # .env this test just wrote.
-    clean_env = {k: v for k, v in os.environ.items() if k != "LANGFUSE_HOST"}
+    clean_env = {k: v for k, v in os.environ.items() if k != "HARNESS_TARGET"}
     return subprocess.run(
         [sys.executable, str(runner)],
         capture_output=True,
@@ -60,22 +60,22 @@ def _run_import(tmp_path: Path, src_path: str, extra_env: dict) -> subprocess.Co
 
 def test_import_loads_dotenv_from_the_package_root(tmp_path):
     src_path = _build_fake_package(tmp_path)
-    (tmp_path / ".env").write_text("LANGFUSE_HOST=http://from-dotenv:3000\n")
+    (tmp_path / ".env").write_text("HARNESS_TARGET=from-dotenv\n")
 
     result = _run_import(tmp_path, src_path, {})
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "http://from-dotenv:3000"
+    assert result.stdout.strip() == "from-dotenv"
 
 
 def test_real_shell_export_beats_dotenv_file(tmp_path):
     src_path = _build_fake_package(tmp_path)
-    (tmp_path / ".env").write_text("LANGFUSE_HOST=http://from-dotenv:3000\n")
+    (tmp_path / ".env").write_text("HARNESS_TARGET=from-dotenv\n")
 
-    result = _run_import(tmp_path, src_path, {"LANGFUSE_HOST": "http://from-shell:3000"})
+    result = _run_import(tmp_path, src_path, {"HARNESS_TARGET": "from-shell"})
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "http://from-shell:3000"
+    assert result.stdout.strip() == "from-shell"
 
 
 def test_main_py_actually_calls_load_dotenv():

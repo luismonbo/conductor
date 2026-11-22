@@ -3,14 +3,14 @@ name = "agent-harness"
 version = "0.1.0"
 description = "Production AI agent harness with swappable model/memory backends"
 requires-python = ">=3.13"
+license = "Apache-2.0"
 dependencies = [
     "fastapi",
     "uvicorn[standard]",
     "pydantic",
     "pydantic-settings",
-    "openai[local]>=1.54",
+    "openai>=1.54",
     "azure-identity>=1.19",
-    "cryptography>=50.0.0",
     "pgvector>=0.3",
     "psycopg[binary]>=3.2",
     "langgraph>=1.2.2",
@@ -18,34 +18,16 @@ dependencies = [
     "markitdown[docx,pdf,pptx,xlsx]>=0.1.6",
     "pymilvus[milvus-lite]>=3.0.0",
     "pyyaml>=6.0.3",
-    "langfuse>=4.14.4",
-    "langchain>=1.3.15",
     "python-dotenv>=1.2.2",
-    # Transitive deps pinned above the vulnerable versions the resolver
-    # would otherwise pick (see `docker scout cves`) — not organic feature
-    # deps of this project.
-    "starlette>=1.3.1",
-    "msgpack>=1.2.1",
-    "langsmith>=0.8.18",
-    "setuptools>=78.1.1",
-    # eMudhra intermediate-CA key compromise (Oct 2026): 2026.10.19 is the first
-    # bundle without the emSign ECC Root CA - G3 root those intermediates chain to.
-    "certifi>=2026.10.19",
+    "starlette>=1.3.1",  # above the vulnerable versions (`docker scout cves`)
     "slowapi>=0.1.10",
     "httpx>=0.28.1",
-    "langchain-azure-storage>=1.2.1",
     "langgraph-checkpoint-postgres>=3.2.0",
     "psycopg-pool>=3.3.3",
+    "azure-storage-blob>=12.31.0",
 ]
 
 [project.optional-dependencies]
-dev = [
-    "pytest>=8.3",
- "pytest-asyncio>=0.24",
- "ruff>=0.7",
- "mypy>=1.13",
- "fpdf2>=2.8.7",
-]
 # Docling runs ONLY inside the Linux ingest container (Dockerfile.ingest) —
 # torch + onnxruntime crash via libomp on macOS. See
 # harness/adapters/parsing/docling_parser.py.
@@ -57,6 +39,19 @@ dev = [
 # resolves the default PyPI wheel (which drags in ~2GB of CUDA packages on
 # Linux). Verified empirically: see task-9-report.md.
 docling = ["docling>=2.123,<3", "torch", "torchvision"]
+
+[tool.uv]
+# Floors for packages the code doesn't import. As constraints they bound every
+# resolution (app, groups, extras) without becoming dependencies of their own.
+constraint-dependencies = [
+    # Above the vulnerable versions the resolver would otherwise pick (`docker scout cves`).
+    "cryptography>=50.0.0",
+    "langsmith>=0.8.18",
+    "setuptools>=78.1.1",
+    # eMudhra intermediate-CA key compromise (Oct 2026): 2026.10.19 is the first
+    # bundle without the emSign ECC Root CA - G3 root those intermediates chain to.
+    "certifi>=2026.10.19",
+]
 
 [tool.uv.sources]
 # CPU-only torch/torchvision: docling's PDF pipeline never needs CUDA, and the
@@ -83,12 +78,15 @@ markers = [
 line-length = 90
 src = ["src"]
 
+[tool.ruff.lint.per-file-ignores]
+# Run as a script: its sys.path fix has to come before the imports it makes work.
+"evaluation/run_eval.py" = ["E402"]
+
 [tool.mypy]
 mypy_path = "src"
 packages = ["harness"]
-# Relaxed for now: the existing scaffold carries pre-existing type debt
-# (bare generics, an untyped eval helper, optional deps without stubs).
-# Tighten back toward strict in a dedicated cleanup pass later.
+# Not strict, in two ways: a function may go unannotated (its body is still
+# checked), and a package without type information is treated as Any.
 check_untyped_defs = true
 ignore_missing_imports = true
 
@@ -103,6 +101,20 @@ dev = [
     "pytest>=9.0.3",
     "pytest-asyncio>=1.4.0",
     "ruff>=0.15.15",
+]
+# The retention job's image installs only this group (the Dockerfile's `purge` stage;
+# docs/superpowers/specs/2026-10-14-retention-purge-design.md §8.3), so it stays a
+# fraction of the app's. uv.lock resolves it with everything else: the same versions
+# as the app. tests/unit/test_purge_image_dependencies.py fails if a pass imports a
+# package outside it.
+purge = [
+    "pydantic-settings",
+    "python-dotenv>=1.2.2",
+    "pyyaml>=6.0.3",
+    "psycopg[binary]>=3.2",
+    "psycopg-pool>=3.3.3",
+    "langgraph-checkpoint-postgres>=3.2.0",
+    "certifi>=2026.10.19",
 ]
 
 [tool.hatch.build.targets.wheel]

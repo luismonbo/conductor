@@ -23,6 +23,7 @@ checkpointer: postgres          # memory | sqlite | postgres
 azure_endpoint: https://your-resource.openai.azure.com
 azure_deployment: gpt-5.4-mini
 azure_api_version: "2024-10-21"  # quoted: unquoted, YAML parses this as a date, not a string
+# azure_reasoning_effort: "none"  # reasoning off; gpt-6-luna takes tools only with it
 azure_embedding_deployment: text-embedding-3-large
 
 # --- RAG / knowledge base ------------------------------------------------
@@ -32,8 +33,8 @@ pgvector_table: rag_chunks
 embedding_dimension: 3072
 
 # --- Agent -----------------------------------------------------------------
-# The entry agent: a folder under src/harness/agents/ (see the README's Agents
-# section). Its prompt.py holds the prompt, and the input guard judges
+# The entry agent: a folder under src/harness/agents/ (see "Agents are folders"
+# in the README). Its prompt.py holds the prompt, and the input guard judges
 # off-topic messages against it. Prompts never go in a target file, .env or
 # Settings.
 agent: default
@@ -58,7 +59,6 @@ guard_timeout_seconds: 3.0
 # and input_guard_enabled to false.
 max_message_chars: 2000
 max_output_tokens: 1500
-max_thread_turns: 20
 daily_token_budget: 33000        # provider monthly token quota / 30
 
 # Using the openai_compatible backend (e.g. pointing at a LiteLLM proxy)

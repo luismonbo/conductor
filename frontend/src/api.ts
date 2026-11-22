@@ -29,6 +29,9 @@ export function describeHttpError(status: number): string {
       return 'That message is too long. Please shorten it.';
     case 404:
       return 'That conversation has expired. Your next message will start a new one.';
+    case 409:
+      // A reply is still running in the thread, or the card was already answered.
+      return 'This conversation is busy or has changed elsewhere. Reopen it from the sidebar to see where it stands.';
     default:
       return UNAVAILABLE_TEXT;
   }
@@ -73,10 +76,11 @@ export async function* streamChat(
 
 export async function* resumeChat(
   threadId: string,
+  interruptId: string,
   decision: Record<string, unknown>,
   signal: AbortSignal,
 ): AsyncGenerator<ThreadIdPayload | AgentEvent> {
-  const payload: ResumeRequest = { decision };
+  const payload: ResumeRequest = { interrupt_id: interruptId, decision };
   const response = await fetch(`${BASE}/resume/${threadId}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

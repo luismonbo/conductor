@@ -19,7 +19,7 @@ import psycopg
 from pgvector import Vector
 from pgvector.psycopg import register_vector_async
 from psycopg.rows import dict_row
-from psycopg.sql import SQL, Identifier, Literal
+from psycopg.sql import SQL, Composable, Identifier, Literal
 from psycopg.types.json import Jsonb
 
 from harness.adapters.postgres.pool import check_dsn
@@ -150,7 +150,7 @@ class PgVectorStore:
     ) -> list[ScoredChunk]:
         conn = await self._connect()
         async with conn:
-            where_parts = []
+            where_parts: list[Composable] = []
             params: list[object] = []
             if collection is not None:
                 where_parts.append(SQL("collection = %s"))
@@ -200,15 +200,17 @@ class PgVectorStore:
                 )
                 async with conn.cursor() as cur:
                     await cur.execute(stmt)
-                    (n,) = await cur.fetchone()
+                    row = await cur.fetchone()
             else:
                 stmt = SQL("SELECT count(*) FROM {table} WHERE collection = %s").format(
                     table=Identifier(self._table)
                 )
                 async with conn.cursor() as cur:
                     await cur.execute(stmt, (collection,))
-                    (n,) = await cur.fetchone()
-        return int(n)
+                    row = await cur.fetchone()
+        if row is None:  # unreachable: count(*) always returns one row
+            raise RuntimeError(f"SELECT count(*) on {self._table} returned no row")
+        return int(row[0])
 
     async def document_stats(self, collection: str | None = None) -> dict[str, int]:
         conn = await self._connect()

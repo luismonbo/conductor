@@ -17,7 +17,6 @@ from typing import Any
 
 from harness.adapters.llm.openai_wire import _OpenAIBaseClient
 from harness.core.llm.tool_parsing import ToolCallParser
-from harness.observability.langfuse_tracing import langfuse_configured
 
 # Most local servers (llama-server) ignore auth, but the SDK rejects an empty
 # api_key, so we substitute a harmless placeholder when none is configured.
@@ -37,13 +36,7 @@ class OpenAICompatibleClient(_OpenAIBaseClient):
     ) -> None:
         if client is None:
             # Imported lazily so core/tests don't require the SDK installed.
-            # When Langfuse is configured, langfuse.openai patches AsyncOpenAI
-            # in place so this call becomes a generation observation instead
-            # of an invisible raw HTTP call — see langfuse_configured().
-            if langfuse_configured():
-                from langfuse.openai import AsyncOpenAI
-            else:
-                from openai import AsyncOpenAI
+            from openai import AsyncOpenAI
 
             client = AsyncOpenAI(base_url=base_url, api_key=api_key or _PLACEHOLDER_KEY)
         super().__init__(client, model, parser, temperature, max_output_tokens)

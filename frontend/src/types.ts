@@ -1,7 +1,7 @@
 // Raw event from the backend stream
 export type AgentEventType =
   | 'token'       // one text token streamed from the LLM
-  | 'thinking'    // used by handle_rejection feedback messages
+  | 'thinking'    // streamed text, shown like a token
   | 'tool_call'
   | 'tool_result'
   | 'interrupt'
@@ -18,9 +18,11 @@ export interface AgentEvent {
   readonly stopped_reason: string;
 }
 
-// Interrupt payload variants carried inside AgentEvent.args when type === 'interrupt'
+// Interrupt payload variants carried inside AgentEvent.args when type === 'interrupt'.
+// interrupt_id names the interrupt; an answer must send it back (ResumeRequest).
 export interface ToolApprovalPayload {
   readonly mode: 'approval';
+  readonly interrupt_id: string;
   readonly tool_calls: ReadonlyArray<{
     name: string;
     args: Record<string, unknown>;
@@ -30,6 +32,7 @@ export interface ToolApprovalPayload {
 
 export interface MemoryProposalPayload {
   readonly mode: 'memory_proposal';
+  readonly interrupt_id: string;
   readonly proposed: string;
   readonly call_id: string;
 }
@@ -138,6 +141,7 @@ export interface ThreadMessagesResponse {
 }
 
 export interface ResumeRequest {
+  readonly interrupt_id: string;
   readonly decision: Record<string, unknown>;
 }
 

@@ -24,9 +24,9 @@ from harness.config.targets import resolve_target_overrides
 
 
 class Settings(BaseSettings):
-    # extra="ignore": .env is shared with docker-compose (litellm/langfuse
-    # container config) and main.py's direct os.environ reads for Langfuse —
-    # those keys aren't HARNESS_-prefixed and must not fail validation here.
+    # extra="ignore": .env is shared with docker-compose (the LiteLLM proxy's
+    # master and provider keys) — those keys aren't HARNESS_-prefixed and must
+    # not fail validation here.
     # hide_input_in_errors: a validation error otherwise ends with input_value=, the
     # first and last characters of every setting, and the API keys are among them.
     model_config = SettingsConfigDict(
@@ -55,6 +55,11 @@ class Settings(BaseSettings):
     azure_deployment: str = "gpt-5.4-mini"
     azure_api_version: str = "2024-10-21"
     azure_api_key: str = ""            # empty -> managed identity
+    # Sent as reasoning_effort on every chat call; empty sends nothing (the
+    # deployment's default). "none" is the only value: the adapter always sends
+    # tools and temperature 0 over Chat Completions, and gpt-6-luna takes tools
+    # there only with reasoning off (a 400 on every request otherwise).
+    azure_reasoning_effort: Literal["", "none"] = ""
 
     # pgvector long-term memory (Postgres DSN; may equal the checkpointer DSN).
     # Empty until the pgvector backend is wired in Phase 5.
@@ -107,6 +112,9 @@ class Settings(BaseSettings):
     # the prompt; prompts never come from config.
     agent: str = "default"
     max_iterations: int = 8
+    # Visitor turns the model sees; 0 = the whole thread. The checkpoint keeps
+    # every message either way (orchestration/loop.py _window).
+    context_turns: int = Field(default=10, ge=0)
 
     # Long-term memory is a single shared store with no per-visitor partition,
     # so remember/recall must stay off on any public deployment. Default-safe;
@@ -148,22 +156,27 @@ class Settings(BaseSettings):
     # says so.
     session_cookie_persistent: bool = True
 
+    # Days a conversation is kept after its last message. 0 keeps everything (the
+    # guard limits' "off at 0" convention); otherwise harness.cli.purge deletes
+    # older ones (docs/superpowers/specs/2026-10-14-retention-purge-design.md). The
+    # public site's target sets 30, as its privacy page says.
+    retention_days: int = Field(default=0, ge=0)
+
     # Input guard (SL-2) — see docs/superpowers/specs/2026-09-27-input-guard-design.md.
     # input_guard_enabled gates only the Microsoft-Decision-1 checks and fails
     # closed without an Azure endpoint (validator below). The checks run on the
     # Foundry resource azure_endpoint names, with the LLM's credentials
-    # (azure_api_key, else the managed identity). The four limits are independent
+    # (azure_api_key, else the managed identity). The three limits are independent
     # of it and each is off at 0. Defaults are the public website's values; a
     # single-operator deployment turns all of it off in its target file.
     input_guard_enabled: bool = True
     # The deployment's name, not the model's. Thresholds are calibrated against
     # one model version, so pin the version on the deployment (no auto-upgrade).
     guard_deployment: str = "Decision-1"
-    guard_timeout_seconds: float = Field(3.0, gt=0)
-    max_message_chars: int = Field(2000, ge=0)
-    max_output_tokens: int = Field(1500, ge=0)  # per LLM call
-    max_thread_turns: int = Field(20, ge=0)  # runs per thread
-    daily_token_budget: int = Field(33000, ge=0)  # all visitors per UTC day: monthly quota / 30
+    guard_timeout_seconds: float = Field(default=3.0, gt=0)
+    max_message_chars: int = Field(default=2000, ge=0)
+    max_output_tokens: int = Field(default=1500, ge=0)  # per LLM call
+    daily_token_budget: int = Field(default=33000, ge=0)  # all visitors per UTC day: monthly quota / 30
 
     @field_validator("log_level", mode="before")
     @classmethod
@@ -181,7 +194,8 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _require_a_guard_target_when_guard_enabled(self) -> "Settings":
-        # The guard fails open, so a typo here would switch it off silently.
+        # A typo here would fail every check, and the guard would refuse every
+        # message; failing at startup names the setting instead.
         if not self.input_guard_enabled:
             return self
         if not self.azure_endpoint.startswith(("https://", "http://")):
@@ -239,6 +253,10 @@ _REMOVED_ENV_VARS = {
     "HARNESS_SYSTEM_PROMPT": (
         "HARNESS_SYSTEM_PROMPT was removed: the prompt lives in "
         "src/harness/agents/<name>/prompt.py and HARNESS_AGENT picks the agent."
+    ),
+    "HARNESS_MAX_THREAD_TURNS": (
+        "HARNESS_MAX_THREAD_TURNS was removed: threads are no longer capped, and "
+        "HARNESS_CONTEXT_TURNS sets how many visitor turns the model sees."
     ),
 }
 

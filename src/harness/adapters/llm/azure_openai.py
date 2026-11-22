@@ -17,7 +17,6 @@ from typing import Any
 
 from harness.adapters.llm.openai_wire import _OpenAIBaseClient
 from harness.core.llm.tool_parsing import ToolCallParser
-from harness.observability.langfuse_tracing import langfuse_configured
 
 
 class AzureOpenAIClient(_OpenAIBaseClient):
@@ -32,18 +31,11 @@ class AzureOpenAIClient(_OpenAIBaseClient):
         api_key: str | None = None,
         temperature: float = 0.0,
         max_output_tokens: int = 0,
+        reasoning_effort: str | None = None,
         client: Any | None = None,
     ) -> None:
         if client is None:
-            # Imported lazily so core/tests don't require the SDK installed.
-            # When Langfuse is configured, langfuse.openai patches
-            # AsyncAzureOpenAI in place so this call becomes a generation
-            # observation instead of an invisible raw HTTP call — see
-            # langfuse_configured().
-            if langfuse_configured():
-                from langfuse.openai import AsyncAzureOpenAI
-            else:
-                from openai import AsyncAzureOpenAI
+            from openai import AsyncAzureOpenAI
 
             if api_key:
                 client = AsyncAzureOpenAI(
@@ -67,4 +59,6 @@ class AzureOpenAIClient(_OpenAIBaseClient):
                     azure_endpoint=endpoint,
                     azure_ad_token_provider=token_provider,
                 )
-        super().__init__(client, deployment, parser, temperature, max_output_tokens)
+        super().__init__(
+            client, deployment, parser, temperature, max_output_tokens, reasoning_effort
+        )

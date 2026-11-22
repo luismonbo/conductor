@@ -165,10 +165,10 @@ async def test_resuming_another_visitors_thread_is_404(two_clients, monkeypatch)
     monkeypatch.setattr(build_module, "build_llm", lambda settings, parser: fake)
 
     response = await alice.post("/chat/stream", json={"message": "remember my secret"})
-    assert "interrupt" in [f.get("type") for f in sse_frames(response)]
+    [card] = [f["args"] for f in sse_frames(response) if f.get("type") == "interrupt"]
     alice_thread = thread_id_from(response)
 
-    deny = {"decision": {"action": "deny"}}
+    deny = {"interrupt_id": card["interrupt_id"], "decision": {"action": "deny"}}
     assert (await bob.post(f"/resume/{alice_thread}", json=deny)).status_code == 404
 
     own = await alice.post(f"/resume/{alice_thread}", json=deny)
@@ -207,7 +207,10 @@ async def test_a_thread_id_the_server_never_issued_is_404_without_asking_the_run
     responses = [
         await alice.post("/chat/stream", json={"message": "hi", "thread_id": thread_id}),
         await alice.get(f"/threads/{in_path}"),
-        await alice.post(f"/resume/{in_path}", json={"decision": {"approved": False}}),
+        await alice.post(
+            f"/resume/{in_path}",
+            json={"interrupt_id": "any", "decision": {"approved": False}},
+        ),
     ]
 
     assert [(r.status_code, r.json()) for r in responses] == [

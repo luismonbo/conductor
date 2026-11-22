@@ -18,6 +18,7 @@ def isolated(monkeypatch, tmp_path):
     monkeypatch.delenv("HARNESS_TARGET", raising=False)
     monkeypatch.delenv("HARNESS_AGENT", raising=False)
     monkeypatch.delenv("HARNESS_SYSTEM_PROMPT", raising=False)
+    monkeypatch.delenv("HARNESS_MAX_THREAD_TURNS", raising=False)
     monkeypatch.setenv("HARNESS_API_KEY", "test-key")
     return tmp_path
 
@@ -39,6 +40,26 @@ def test_a_target_file_cannot_set_a_system_prompt(isolated, monkeypatch):
     (isolated / "config" / "targets" / "site.yaml").write_text("system_prompt: Answer X.\n")
     monkeypatch.setenv("HARNESS_TARGET", "site")
     with pytest.raises(ValueError, match="system_prompt"):
+        get_settings()
+
+
+def test_harness_max_thread_turns_in_the_environment_stops_startup(isolated, monkeypatch):
+    monkeypatch.setenv("HARNESS_MAX_THREAD_TURNS", "20")
+    with pytest.raises(ValueError, match="HARNESS_MAX_THREAD_TURNS was removed"):
+        get_settings()
+
+
+def test_harness_max_thread_turns_in_dotenv_stops_startup(isolated):
+    (isolated / ".env").write_text("HARNESS_MAX_THREAD_TURNS=20\n")
+    with pytest.raises(ValueError, match="HARNESS_MAX_THREAD_TURNS was removed"):
+        get_settings()
+
+
+def test_a_target_file_cannot_set_max_thread_turns(isolated, monkeypatch):
+    (isolated / "config" / "targets").mkdir(parents=True)
+    (isolated / "config" / "targets" / "site.yaml").write_text("max_thread_turns: 20\n")
+    monkeypatch.setenv("HARNESS_TARGET", "site")
+    with pytest.raises(ValueError, match="max_thread_turns"):
         get_settings()
 
 

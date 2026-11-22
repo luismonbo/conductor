@@ -11,15 +11,14 @@ import asyncio
 import dataclasses
 import json
 import logging
-import os
 import uuid
-from contextlib import asynccontextmanager
+from collections.abc import Callable, Coroutine, Iterator
+from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timezone
 from typing import Any
 
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.middleware.base import RequestResponseEndpoint
 from starlette.responses import Response
@@ -33,18 +32,18 @@ from harness.api.schemas import ChatRequest, ResumeRequest
 from harness.config.settings import get_settings
 from harness.core.llm.errors import ContentFiltered
 from harness.core.types import AgentEvent, Message, Role
-from harness.observability.langfuse_tracing import langfuse_configured
 from harness.observability.logging_setup import configure_logging
 from harness.observability.run_store import RunStore
 from harness.observability.token_accumulator import TokenAccumulator
 from harness.orchestration.build import AgentRuntime, build_input_guard, build_runtime
 from harness.security import egress
 from harness.security.input_guard import GuardContext, InputGuard
+from harness.security.visitor_text import VisitorLanguage, configured_language
 
-# Settings() reads HARNESS_-prefixed vars straight from .env itself, but this
-# module's own os.environ.get() calls (Langfuse keys in _build_callbacks)
-# need the file loaded into the real process environment first — Docker's
-# env_file: only does this for the containerized api service, not `make api`.
+# Settings() reads HARNESS_-prefixed vars straight from .env itself, but
+# get_settings() reads HARNESS_TARGET through os.environ, which needs the file
+# loaded into the real process environment first — Docker's env_file: only does
+# this for the containerized api service, not `make api`.
 # override=False: a real shell export always wins over .env.
 load_dotenv(override=False)
 
@@ -81,20 +80,6 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Agent Harness", lifespan=lifespan)
 
-_cors_origins = [
-    o.strip()
-    for o in os.environ.get("CORS_ORIGINS", "http://localhost:5173").split(",")
-    if o.strip()
-]
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=_cors_origins,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    expose_headers=["Retry-After"],
-    allow_credentials=False,
-)
-
 
 @app.middleware("http")
 async def _visitor_session(
@@ -122,6 +107,7 @@ async def _visitor_session(
 app.state.limiter = limiter
 
 
+@app.exception_handler(RateLimitExceeded)
 async def _rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:
     """429 body reshaped to this API's {"detail": ...} convention (matching the
     404 on GET /threads/{id} and other existing error responses), rather than
@@ -149,10 +135,9 @@ async def _rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONR
     )
 
 
-app.add_exception_handler(RateLimitExceeded, _rate_limit_handler)
-
-# thread_id -> (session_id of the visitor who started it, task)
-_running: dict[str, tuple[str, asyncio.Task]] = {}
+# thread_id -> (session_id of the visitor whose run holds the thread, that run's
+# task, or None while the run is being set up). See _claim_thread.
+_running: dict[str, tuple[str, asyncio.Task | None]] = {}
 
 # Backends where a client-supplied ChatRequest.model is safe to honor:
 # openai_compatible routes per-model through a proxy by design; fake never
@@ -327,11 +312,6 @@ async def _guard_context(
         if req.thread_id and guard.classifier_enabled
         else None
     )
-    thread_turns = (
-        await run_store.count_thread_runs(req.thread_id)
-        if req.thread_id and limits.max_thread_turns
-        else 0
-    )
     tokens_today = (
         await run_store.tokens_since(_utc_midnight())
         if limits.daily_token_budget
@@ -341,7 +321,6 @@ async def _guard_context(
         message=req.message,
         system_prompt=runtime.definition.prompt,
         previous_reply=previous_reply,
-        thread_turns=thread_turns,
         tokens_today=tokens_today,
     )
 
@@ -400,36 +379,6 @@ async def thread_messages(request: Request, thread_id: str, _auth: None = Depend
 
 
 # ---------------------------------------------------------------------------
-# Observability
-# ---------------------------------------------------------------------------
-
-def _make_langfuse_handler() -> Any:
-    # Separate function so tests can stub construction failures.
-    from langfuse.langchain import CallbackHandler
-
-    return CallbackHandler()
-
-
-def _build_callbacks(thread_id: str, agent_name: str) -> tuple[list, dict]:
-    """Langfuse tracing config. Fire-and-forget: any failure returns empty.
-
-    The SDK reads LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY / LANGFUSE_HOST
-    from the environment itself; we only gate on their presence.
-    """
-    if not langfuse_configured():
-        return [], {}
-    try:
-        handler = _make_langfuse_handler()
-    except Exception:
-        logging.getLogger(__name__).exception("langfuse handler unavailable")
-        return [], {}
-    return [handler], {
-        "langfuse_session_id": thread_id,
-        "langfuse_tags": [agent_name],
-    }
-
-
-# ---------------------------------------------------------------------------
 # Shared SSE generator
 # ---------------------------------------------------------------------------
 
@@ -469,6 +418,8 @@ async def _run_graph(
     stopped_reason_holder: list[str],
     run_store: RunStore,
 ) -> None:
+    # The visitor's language, for an error sentence (VisitorLanguage says why it's wrapped).
+    language = configured_language(config.get("configurable") or {})
     try:
         result = await graph.ainvoke(invoke_arg, config)
         # Surface any interrupt payloads AFTER ainvoke returns so that resume
@@ -476,7 +427,11 @@ async def _run_graph(
         # the new SSE stream.
         for intr in (result or {}).get("__interrupt__", ()):
             stopped_reason_holder[0] = "interrupted"
-            await event_queue.put(AgentEvent(type="interrupt", args=intr.value))
+            # With the interrupt's id, which /resume must name: an answer then only
+            # ever reaches the interrupt it was given for.
+            await event_queue.put(AgentEvent(
+                type="interrupt", args={**intr.value, "interrupt_id": intr.id}
+            ))
     except asyncio.CancelledError:
         stopped_reason_holder[0] = "cancelled"
         await event_queue.put(AgentEvent(type="error", text="cancelled"))
@@ -489,15 +444,15 @@ async def _run_graph(
             thread_id, run_id, exc.stage, ",".join(exc.categories) or "-",
         )
         stopped_reason_holder[0] = "content_filter"
-        await event_queue.put(egress.error_event(exc))
+        await event_queue.put(egress.error_event(exc, language))
     except Exception as exc:
         logging.getLogger(__name__).exception(
             "agent run failed for thread_id=%s run_id=%s", thread_id, run_id
         )
         stopped_reason_holder[0] = "error"
-        await event_queue.put(egress.error_event(exc))
+        await event_queue.put(egress.error_event(exc, language))
     finally:
-        _running.pop(thread_id, None)
+        _running.pop(thread_id, None)  # the run's claim on the thread (_claim_thread)
         # Shield finish_run so it completes even if the task is being cancelled
         # (the SSE generator's finally block calls task.cancel() once it sees None).
         # finish_run must land before we send the sentinel so the task is already
@@ -509,6 +464,50 @@ async def _run_graph(
         except asyncio.CancelledError:
             pass
         await event_queue.put(None)
+
+
+# ---------------------------------------------------------------------------
+# One run per thread
+# ---------------------------------------------------------------------------
+
+# Starts a claimed thread's run: takes _run_graph's coroutine, returns its task.
+_StartRun = Callable[[Coroutine[Any, Any, None]], asyncio.Task]
+
+
+@contextmanager
+def _claim_thread(thread_id: str, sid: str) -> Iterator[_StartRun]:
+    """Hold thread_id for one run, or refuse with 409 while another run holds it.
+
+    Two runs of one thread would both continue from its last checkpoint: two answers
+    to one approval would each run its tools, two messages would each extend the same
+    history. Nothing is awaited between the check and the reservation, so the claim
+    is atomic on the event loop. The block gets `start`, which creates the run's task
+    and hands it the claim; _run_graph releases it when the run ends. A block that
+    leaves without starting a run (a 409, a blocked message, an error) releases it.
+
+    One process only: with several API replicas the claim would have to live in the
+    database.
+    """
+    holder = _running.get(thread_id)
+    # A done task can still be listed: one cancelled before its first step never
+    # reaches _run_graph's finally.
+    if holder is not None and (holder[1] is None or not holder[1].done()):
+        raise HTTPException(status_code=409, detail="a reply is still running in this thread")
+    _running[thread_id] = (sid, None)
+    started = False
+
+    def start(run: Coroutine[Any, Any, None]) -> asyncio.Task:
+        nonlocal started
+        task = asyncio.create_task(run)
+        _running[thread_id] = (sid, task)
+        started = True
+        return task
+
+    try:
+        yield start
+    finally:
+        if not started:
+            _running.pop(thread_id, None)
 
 
 # ---------------------------------------------------------------------------
@@ -527,6 +526,8 @@ async def chat_stream(request: Request, req: ChatRequest, _auth: None = Depends(
     A message the input guard blocks gets one ``final`` frame with the refusal
     (``stopped_reason: "blocked"``) and nothing else: no thread_id frame, no
     run, no checkpoint write.
+
+    409 while another run holds the thread (see _claim_thread).
     """
     if req.thread_id:
         # Thread ids are server-issued only: a caller may continue a thread
@@ -536,6 +537,15 @@ async def chat_stream(request: Request, req: ChatRequest, _auth: None = Depends(
         # state) and hands this session co-ownership going forward, since
         # start_run below would record it as an owner too.
         await _require_owned_thread(request, req.thread_id)
+    thread_id = req.thread_id or str(uuid.uuid4())
+    with _claim_thread(thread_id, request.state.sid) as start:
+        return await _start_chat(request, req, thread_id, start)
+
+
+async def _start_chat(
+    request: Request, req: ChatRequest, thread_id: str, start: _StartRun
+) -> StreamingResponse:
+    """chat_stream once the thread is claimed: screen the message, then start its run."""
     runtime = await _get_runtime()
     # Everything below runs, screens and records against the one entry agent
     # built at startup (HARNESS_AGENT), never a client-supplied name.
@@ -543,7 +553,6 @@ async def chat_stream(request: Request, req: ChatRequest, _auth: None = Depends(
     graph = runtime.graph
     agent_name = settings.agent
     run_store = await _get_run_store()
-    thread_id = req.thread_id or str(uuid.uuid4())
     run_id = str(uuid.uuid4())
 
     guard = _get_input_guard()
@@ -570,17 +579,15 @@ async def chat_stream(request: Request, req: ChatRequest, _auth: None = Depends(
     accumulator = TokenAccumulator()
     stopped_reason_holder: list[str] = ["unknown"]
     event_queue: asyncio.Queue[AgentEvent | None] = asyncio.Queue()
-    callbacks, lf_metadata = _build_callbacks(thread_id, agent_name)
     config = {
         "configurable": {
             "thread_id": thread_id,
             "event_queue": event_queue,
             "token_accumulator": accumulator,
             "stopped_reason_holder": stopped_reason_holder,
+            # Found by the guard; English when it did not answer. Never stored.
+            "visitor_language": VisitorLanguage(decision.language),
         },
-        "callbacks": callbacks,
-        "metadata": lf_metadata,
-        "run_name": "chat-response",
     }
     input_state = {
         "messages": [Message(role=Role.USER, content=req.message)],
@@ -593,11 +600,10 @@ async def chat_stream(request: Request, req: ChatRequest, _auth: None = Depends(
         run_id, thread_id, agent_name, settings.llm_backend, request.state.sid
     )
 
-    task = asyncio.create_task(_run_graph(
+    task = start(_run_graph(
         graph, input_state, config, thread_id, run_id,
         event_queue, accumulator, stopped_reason_holder, run_store,
     ))
-    _running[thread_id] = (request.state.sid, task)
 
     return StreamingResponse(
         _make_sse_generator(
@@ -615,11 +621,24 @@ async def chat_stream(request: Request, req: ChatRequest, _auth: None = Depends(
 @app.post("/resume/{thread_id}")
 @limiter.limit(strict_limit)
 async def resume_run(request: Request, thread_id: str, req: ResumeRequest, _auth: None = Depends(require_api_key)) -> StreamingResponse:
-    """Resume a paused graph run (after an interrupt).
+    """Answer the interrupt a paused run is waiting on, and stream the rest of the run.
+
+    The answer names its interrupt (``interrupt_id``, from the interrupt frame's
+    args): 409 unless that interrupt is pending, so an answer sent twice or from
+    another tab never lands on the card after it. 409 also while another run holds
+    the thread.
 
     Response: same SSE stream as /chat/stream (starts with thread_id frame).
     """
     await _require_owned_thread(request, thread_id)
+    with _claim_thread(thread_id, request.state.sid) as start:
+        return await _start_resume(request, thread_id, req, start)
+
+
+async def _start_resume(
+    request: Request, thread_id: str, req: ResumeRequest, start: _StartRun
+) -> StreamingResponse:
+    """resume_run once the thread is claimed: check the answer, then start the run."""
     runtime = await _get_runtime()
     settings = runtime.settings
     graph = runtime.graph
@@ -629,12 +648,14 @@ async def resume_run(request: Request, thread_id: str, req: ResumeRequest, _auth
     snapshot = await graph.aget_state({"configurable": {"thread_id": thread_id}})
     if not snapshot.interrupts:
         raise HTTPException(status_code=409, detail="nothing to resume")
+    if req.interrupt_id not in {pending.id for pending in snapshot.interrupts}:
+        # Answered already (a second tab, a retried request), or never issued.
+        raise HTTPException(status_code=409, detail="that interrupt is not pending")
     run_id = str(uuid.uuid4())
 
     accumulator = TokenAccumulator()
     stopped_reason_holder: list[str] = ["unknown"]
     event_queue: asyncio.Queue[AgentEvent | None] = asyncio.Queue()
-    callbacks, lf_metadata = _build_callbacks(thread_id, settings.agent)
     config = {
         "configurable": {
             "thread_id": thread_id,
@@ -642,9 +663,6 @@ async def resume_run(request: Request, thread_id: str, req: ResumeRequest, _auth
             "token_accumulator": accumulator,
             "stopped_reason_holder": stopped_reason_holder,
         },
-        "callbacks": callbacks,
-        "metadata": lf_metadata,
-        "run_name": "chat-resume",
     }
 
     run_store = await _get_run_store()
@@ -652,11 +670,11 @@ async def resume_run(request: Request, thread_id: str, req: ResumeRequest, _auth
         run_id, thread_id, settings.agent, settings.llm_backend, request.state.sid
     )
 
-    task = asyncio.create_task(_run_graph(
-        graph, Command(resume=req.decision), config, thread_id, run_id,
-        event_queue, accumulator, stopped_reason_holder, run_store,
+    # Keyed by the interrupt's id, the decision reaches that interrupt and no other.
+    task = start(_run_graph(
+        graph, Command(resume={req.interrupt_id: req.decision}), config,
+        thread_id, run_id, event_queue, accumulator, stopped_reason_holder, run_store,
     ))
-    _running[thread_id] = (request.state.sid, task)
 
     return StreamingResponse(
         _make_sse_generator(
@@ -678,7 +696,7 @@ async def cancel_run(request: Request, thread_id: str, _auth: None = Depends(req
     entry = _running.get(thread_id)
     if entry is not None:
         owner, task = entry
-        if owner == request.state.sid and not task.done():
+        if owner == request.state.sid and task is not None and not task.done():
             task.cancel()
             return {"status": "cancelled", "thread_id": thread_id}
     return {"status": "not_found", "thread_id": thread_id}
