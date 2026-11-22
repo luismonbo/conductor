@@ -130,7 +130,7 @@ async def test_rate_limit_disabled_via_setting(monkeypatch):
 
 
 # --- one bucket per visitor, behind the proxy that injects the key -----------------
-# The proxy (the Cloudflare Worker, or Caddy locally) is the only holder of the shared
+# The proxy (the Cloudflare Worker in production) is the only holder of the shared
 # key, and it names the visitor in X-Visitor-IP. See
 # docs/superpowers/specs/2026-10-18-production-proxy-design.md.
 

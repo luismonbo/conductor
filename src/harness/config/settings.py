@@ -176,7 +176,9 @@ class Settings(BaseSettings):
     guard_timeout_seconds: float = Field(default=3.0, gt=0)
     max_message_chars: int = Field(default=2000, ge=0)
     max_output_tokens: int = Field(default=1500, ge=0)  # per LLM call
-    daily_token_budget: int = Field(default=33000, ge=0)  # all visitors per UTC day: monthly quota / 30
+    # Tokens all visitors may use per UTC day: the provider's monthly quota / 30.
+    # This default assumes a 1M quota; the website's target sets 300000 (9M).
+    daily_token_budget: int = Field(default=33000, ge=0)
 
     @field_validator("log_level", mode="before")
     @classmethod
