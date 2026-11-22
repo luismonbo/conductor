@@ -59,7 +59,7 @@ guard_timeout_seconds: 3.0
 # and input_guard_enabled to false.
 max_message_chars: 2000
 max_output_tokens: 1500
-daily_token_budget: 33000        # provider monthly token quota / 30
+daily_token_budget: 33000        # provider monthly token quota / 30 (a 1M quota here)
 
 # Using the openai_compatible backend (e.g. pointing at a LiteLLM proxy)
 # instead of azure? Use llm_base_url / llm_model / default_model here
