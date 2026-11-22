@@ -13,8 +13,8 @@ that proxy". In production that proxy is a Cloudflare Worker, which sets the
 header to the real visitor's address; without it every visitor on Azure Container
 Apps would share one bucket, because the connection's address there is the
 platform's ingress proxy. A proxy that injects the key must own the header: set
-it, or strip it as Caddy and the dev-server proxies do (behind them the key is the
-address uvicorn sees). See docs/superpowers/specs/2026-08-27-rate-limiting-design.md
+it, or strip it as the dev-server proxies do (behind them the key is the address
+uvicorn sees). See docs/superpowers/specs/2026-08-27-rate-limiting-design.md
 and docs/superpowers/specs/2026-10-18-production-proxy-design.md.
 """
 from __future__ import annotations
