@@ -1,39 +1,5 @@
 services:
-  api:
-    # The image a deployment builds: the root Dockerfile with one target baked
-    # in. TARGET_NAME names a gitignored config/targets/<name>.yaml (example.yaml
-    # is a template, not a bootable target). It is empty by default, so that
-    # `make up`, `make infra` and `make ingest` still work without it; an api
-    # build without it fails, and `make proxy` says so first.
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        TARGET_NAME: "${TARGET_NAME:-}"
-    # As in a deployment, only secrets come from the environment; every other
-    # setting comes from the baked target. Loading the whole .env here would let
-    # personal values, like the guard switched off, override the target.
-    environment:
-      HARNESS_API_KEY: "${HARNESS_API_KEY:?HARNESS_API_KEY must be set}"
-      HARNESS_AZURE_API_KEY: "${HARNESS_AZURE_API_KEY:-}"
-      HARNESS_LLM_API_KEY: "${HARNESS_LLM_API_KEY:-}"
-      HARNESS_EMBEDDING_API_KEY: "${HARNESS_EMBEDDING_API_KEY:-}"
-      # postgres is a sibling container here, not localhost: the checkpointer and
-      # run store, and the pgvector RAG store.
-      HARNESS_CHECKPOINTER_URL: postgresql://harness:harness@postgres:5432/harness
-      HARNESS_PGVECTOR_URL: postgresql://harness:harness@postgres:5432/harness
-    volumes:
-      - "./data:/app/data"   # collection manifests, and Milvus Lite if a target uses it
-    command: ["uvicorn", "harness.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--app-dir", "src", "--proxy-headers", "--forwarded-allow-ips=172.28.0.0/24"]
-    depends_on:
-      postgres: { condition: service_healthy }
-  caddy:
-    build: { context: ., dockerfile: Dockerfile.caddy }
-    ports: ["8000:8000"]
-    environment:
-      HARNESS_API_KEY: "${HARNESS_API_KEY:?HARNESS_API_KEY must be set}"
-    depends_on: [api]
-  # Offline RAG ingestion — separate image from `api` (docling drags in
+  # Offline RAG ingestion — separate image from the API's (docling drags in
   # torch/transformers/opencv; the served API never needs any of that).
   # profiles: ["ingest"] keeps it out of `make up`/`docker compose up`;
   # invoke via `make ingest COLLECTION=papers` or the profile flag directly.
@@ -103,13 +69,3 @@ services:
 volumes:
   postgres_data:
   # ollama_data:
-
-# Fixed subnet so api's --forwarded-allow-ips can trust caddy's address
-# without depending on Compose's auto-assigned default subnet. Trusting the
-# whole subnet is safe specifically because api no longer publishes a host
-# port — only fellow containers on this network can reach it at all.
-networks:
-  default:
-    ipam:
-      config:
-        - subnet: 172.28.0.0/24
